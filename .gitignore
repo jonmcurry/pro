@@ -1,2 +1,4 @@
 /cpts.csv
 /icd10.csv
+logs/edi_processing_errors.log
+logs/edi_processing.log

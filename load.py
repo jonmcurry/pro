@@ -1,7 +1,5 @@
-### load.py
 """
-Data Loading and Ingestion Module
-Handles loading sample data and claim files into the EDI processing system
+Fixed DataLoader class with proper bulk insert methods for PostgreSQL
 """
 import logging
 import pandas as pd
@@ -13,6 +11,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import uuid
 import random
+import psycopg2.extras
 
 # Add current directory to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -23,7 +22,7 @@ from src.utils.logging_config import setup_logging
 
 
 class DataLoader:
-    """Handles loading and ingestion of claims data."""
+    """Handles loading and ingestion of claims data with efficient bulk operations."""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -51,6 +50,43 @@ class DataLoader:
         # Load codes from CSV files in same directory as script
         self.icd10_codes = self._load_icd10_codes()
         self.cpt_codes = self._load_cpt_codes()
+    
+    def execute_bulk_insert(self, query: str, params_list: List[tuple], batch_size: int = 1000):
+        """
+        Execute bulk insert using execute_batch for better performance.
+        Falls back to executemany if execute_batch is not available.
+        """
+        try:
+            # Get connection and cursor from the handler
+            if hasattr(self.db_handler, 'get_connection'):
+                conn = self.db_handler.get_connection()
+            else:
+                # If no get_connection method, create new connection
+                conn = psycopg2.connect(**self.config['database']['postgresql'])
+            
+            with conn.cursor() as cursor:
+                # Use execute_batch for better performance (psycopg2.extras)
+                psycopg2.extras.execute_batch(
+                    cursor, 
+                    query, 
+                    params_list, 
+                    page_size=batch_size
+                )
+                conn.commit()
+                
+        except Exception as e:
+            self.logger.error(f"Bulk insert failed, trying fallback method: {e}")
+            # Fallback to individual execute_query calls
+            self._fallback_bulk_insert(query, params_list)
+    
+    def _fallback_bulk_insert(self, query: str, params_list: List[tuple]):
+        """Fallback method using individual inserts if bulk operations fail."""
+        for params in params_list:
+            try:
+                self.db_handler.execute_query(query, params)
+            except Exception as e:
+                self.logger.error(f"Failed to insert row {params}: {e}")
+                continue
     
     def _load_icd10_codes(self) -> List[str]:
         """Load ICD-10 codes from icd10.csv in same directory as script."""
@@ -140,7 +176,7 @@ class DataLoader:
             # Generate sample claims with realistic data
             sample_claims = self._generate_realistic_sample_claims(num_claims)
             
-            # Load claims into database
+            # Load claims into database using bulk operations
             self._load_claims_to_db(sample_claims)
             
             # Generate sample diagnoses and procedures using loaded codes
@@ -297,7 +333,7 @@ class DataLoader:
         return pos_to_type.get(pos_code, 'SPECIALIST')
     
     def _load_claims_to_db(self, claims: List[Dict[str, Any]]):
-        """Load claims data to database."""
+        """Load claims data to database using bulk operations."""
         query = """
         INSERT INTO edi.claims (
             claim_id, patient_id, provider_id, claim_data, 
@@ -323,7 +359,8 @@ class DataLoader:
             )
             params_list.append(params)
         
-        self.db_handler.execute_many(query, params_list)
+        # Use the new bulk insert method
+        self.execute_bulk_insert(query, params_list)
     
     def _load_diagnoses_and_procedures_realistic(self, claims: List[Dict[str, Any]]):
         """Generate and load realistic diagnoses and procedures using loaded codes."""
@@ -376,26 +413,26 @@ class DataLoader:
                         json.dumps(pointers)  # Store as JSON array
                     ))
         
-        # Insert diagnoses with principal flag
+        # Insert diagnoses with principal flag using bulk operations
         diagnosis_query = """
         INSERT INTO edi.diagnoses (
             claim_id, diagnosis_code, diagnosis_type, description, 
             diagnosis_sequence, is_principal
         ) VALUES (%s, %s, %s, %s, %s, %s)
         """
-        self.db_handler.execute_many(diagnosis_query, diagnosis_params)
+        self.execute_bulk_insert(diagnosis_query, diagnosis_params)
         
-        # Insert procedures with enhanced data
+        # Insert procedures with enhanced data using bulk operations
         procedure_query = """
         INSERT INTO edi.procedures (
             claim_id, procedure_code, procedure_type, description, 
             service_date, procedure_sequence, charge_amount, diagnosis_pointers
         ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
-        self.db_handler.execute_many(procedure_query, procedure_params)
+        self.execute_bulk_insert(procedure_query, procedure_params)
     
     def _load_sample_filters(self):
-        """Load sample validation filters."""
+        """Load sample validation filters with proper conflict handling."""
         sample_filters = [
             {
                 'name': 'Age_Under_18_Preventive_Care',
@@ -432,14 +469,51 @@ class DataLoader:
                 filter_rule['rule_type']
             ))
         
-        query = """
+        # Option 1: Use a simple INSERT without ON CONFLICT (will fail if duplicates exist)
+        query_simple = """
+        INSERT INTO edi.filters (
+            filter_name, rule_definition, description, rule_type, active
+        ) VALUES (%s, %s, %s, %s, true)
+        """
+        
+        # Option 2: Check for existence first, then insert
+        query_with_check = """
+        INSERT INTO edi.filters (
+            filter_name, rule_definition, description, rule_type, active
+        ) 
+        SELECT %s, %s, %s, %s, true
+        WHERE NOT EXISTS (
+            SELECT 1 FROM edi.filters WHERE filter_name = %s
+        )
+        """
+        
+        # Option 3: If you add the unique constraint, use this:
+        query_with_conflict = """
         INSERT INTO edi.filters (
             filter_name, rule_definition, description, rule_type, active
         ) VALUES (%s, %s, %s, %s, true)
         ON CONFLICT (filter_name) DO NOTHING
         """
         
-        self.db_handler.execute_many(query, filter_params)
+        try:
+            # Try the conflict-aware query first (requires unique constraint)
+            self.execute_bulk_insert(query_with_conflict, filter_params)
+            self.logger.info("Loaded sample filters using ON CONFLICT")
+        except Exception as e:
+            self.logger.warning(f"ON CONFLICT failed ({e}), trying alternative method")
+            try:
+                # Fallback to existence check method
+                params_with_check = []
+                for params in filter_params:
+                    # Add the filter_name again for the WHERE NOT EXISTS clause
+                    params_with_check.append(params + (params[0],))
+                
+                self.execute_bulk_insert(query_with_check, params_with_check)
+                self.logger.info("Loaded sample filters using existence check")
+            except Exception as e2:
+                self.logger.warning(f"Existence check failed ({e2}), trying simple insert")
+                # Final fallback - simple insert (may fail on duplicates)
+                self.execute_bulk_insert(query_simple, filter_params)
     
     def clear_all_data(self) -> bool:
         """Clear all data from the database (use with caution)."""

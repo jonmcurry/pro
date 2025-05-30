@@ -137,3 +137,4 @@ ALTER TABLE edi.procedures ADD COLUMN description TEXT;
 ALTER TABLE edi.procedures ADD COLUMN service_date DATE;
 ALTER TABLE edi.procedures ADD COLUMN diagnosis_pointers JSONB;
 ALTER TABLE edi.procedures RENAME COLUMN sequence_number TO procedure_sequence;
+ALTER TABLE edi.filters ADD CONSTRAINT unique_filter_name UNIQUE (filter_name);
