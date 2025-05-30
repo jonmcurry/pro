@@ -1,0 +1,49 @@
+# monitoring/prometheus/prometheus.yml
+# Prometheus configuration for EDI Claims Processing System
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # - "first_rules.yml"
+  # - "second_rules.yml"
+
+scrape_configs:
+  # The job name is added as a label `job=<job_name>` to any timeseries scraped from this config.
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # EDI Processing System metrics
+  - job_name: 'edi-processing'
+    static_configs:
+      - targets: ['localhost:8000']
+    metrics_path: /metrics
+    scrape_interval: 10s
+    scrape_timeout: 5s
+
+  # System metrics (if node_exporter is running)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+    scrape_interval: 15s
+
+  # PostgreSQL metrics (if postgres_exporter is running)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['localhost:9187']
+    scrape_interval: 15s
+
+  # SQL Server metrics (if sql_exporter is running)
+  - job_name: 'sqlserver'
+    static_configs:
+      - targets: ['localhost:4000']
+    scrape_interval: 15s
+
+# Alertmanager configuration (optional)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # - alertmanager:9093

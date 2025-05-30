@@ -1,0 +1,75 @@
+# EDI Claims Processing System Configuration Example
+# Copy this file to config.yaml and modify with your settings
+
+# Database Configuration
+database:
+  postgresql:
+    host: localhost
+    port: 5432
+    database: claims_processing
+    user: postgres
+    password: admin    
+#password_encrypted: "gAAAAABoOhTcn7ojZql3MnLYJ1MUujyt4qrJfoJLlyUyOQRZ5Udf1z1DlSWsvC1sZmhmrB4YzO5lPdjVHDU7aPhGUW3IyseoZQ=="  # Use encryption utility
+    min_connections: 2
+    max_connections: 10
+    
+  sqlserver:
+    connection_string: "mssql+pyodbc://sa:ClearToFly1@server/database?driver=ODBC+Driver+17+for+SQL+Server"
+    pool_size: 10
+
+# Processing Configuration
+processing:
+  chunk_size: 500
+  max_workers: 4
+  memory_limit_percent: 70
+  cpu_limit_percent: 80
+  batch_size: 1000
+
+# ML Training Configuration
+ml_training:
+  training_chunk_size: 10000
+  memory_limit_percent: 70
+  model_output_path: "models/filter_predictor.pkl"
+
+# Validation Configuration
+validation:
+  ml_model_path: "models/filter_predictor.pkl"
+  prediction_threshold: 0.3
+  max_filters_per_claim: 10
+
+# Storage Configuration
+storage:
+  batch_size: 1000
+  max_retries: 3
+
+# Monitoring Configuration
+monitoring:
+  prometheus_port: 8000
+  log_level: INFO
+  enable_email_alerts: true
+  monitoring_interval: 30
+
+# Email Configuration
+email:
+  enabled: true
+  smtp_server: smtp.company.com
+  smtp_port: 587
+  username: edi-system@company.com
+  password_encrypted: "REPLACE_WITH_ENCRYPTED_SMTP_PASSWORD"
+  from_email: edi-system@company.com
+  recipients:
+    - admin@company.com
+    - ops@company.com
+  severity_levels:
+    - ERROR
+    - CRITICAL
+
+# Rule Generation Configuration
+rule_generation:
+  min_support: 0.01
+  min_confidence: 0.5
+  min_lift: 1.1
+
+# Encryption key for sensitive configuration values
+# Generate using: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+encryption_key: "9QTUh6q0TgKKY3ne0M__JVoXi-70PgtnItFUcNtHkEk="
