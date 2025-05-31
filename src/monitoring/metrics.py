@@ -64,6 +64,12 @@ class MetricsCollector:
                 registry=self._metrics_registry
             )
             
+            self._total_processing_duration_gauge = Gauge(
+                'edi_total_processing_duration_seconds',
+                'Total processing duration for the current session',
+                registry=self._metrics_registry
+            )
+            
             # Initialize histograms for timing
             self.claim_processing_duration = Histogram(
                 'edi_claim_processing_duration_seconds',
@@ -147,7 +153,8 @@ class MetricsCollector:
                 'edi_cpu_usage_percent',
                 'edi_processing_rate_per_hour',
                 'edi_batch_size',
-                'edi_batch_processing_duration_seconds'
+                'edi_batch_processing_duration_seconds',
+                'edi_total_processing_duration_seconds' # Added new metric here
             ]
             
             # Remove conflicting metrics from registry
@@ -170,7 +177,10 @@ class MetricsCollector:
     
     def _use_existing_metrics(self):
         """Use existing metrics if they're already registered."""
-        self.logger.warning("Using existing metrics due to registry conflicts")
+        self.logger.warning(
+            "Attempting to use existing metrics due to registry conflicts. "
+            "This is a fallback and may indicate issues with metric cleanup or multiple initializations."
+        )
         
         # Try to find existing metrics in the registry
         for collector in self._metrics_registry._collector_to_names.keys():
@@ -179,7 +189,16 @@ class MetricsCollector:
                     self.claims_processed_total = collector
                 elif 'validation_errors' in collector._name:
                     self.claims_validation_errors_total = collector
-                # Add more mappings as needed
+                elif 'storage_errors' in collector._name:
+                    self.claims_storage_errors_total = collector
+                # Note: This approach is fragile as `collector` is the raw collector object,
+                # not necessarily the Counter/Gauge/Histogram wrapper.
+                # This method might not correctly re-assign the high-level metric attributes
+                # (self.claims_processed_total, etc.) to functional Prometheus metric objects.
+                # Proper cleanup in _clear_existing_metrics and ensuring true singleton behavior
+                # is preferred.
+
+        self.logger.warning("_use_existing_metrics might not fully restore metric functionality.")
     
     # Metric update methods
     def increment_claims_processed(self, count: int = 1):
@@ -267,28 +286,26 @@ class MetricsCollector:
     def set_processing_duration(self, duration: float):
         """Legacy method for setting processing duration."""
         # This was used for total duration, now we'll use it as a gauge
+        # Assumes _total_processing_duration_gauge is initialized in _initialize_metrics
         try:
-            if not hasattr(self, '_total_processing_duration'):
-                self._total_processing_duration = Gauge(
-                    'edi_total_processing_duration_seconds',
-                    'Total processing duration for the current session',
-                    registry=self._metrics_registry
-                )
-            self._total_processing_duration.set(duration)
+            self._total_processing_duration_gauge.set(duration)
         except Exception as e:
             self.logger.error(f"Error setting processing duration: {str(e)}")
     
     def get_metrics_summary(self) -> Dict[str, Any]:
         """Get a summary of current metrics."""
         try:
+            # Accessing ._value is an internal detail of prometheus-client
+            # and might break in future versions. Use with caution.
             return {
-                'claims_processed': self.claims_processed_total._value._value,
-                'validation_errors': self.claims_validation_errors_total._value._value,
-                'storage_errors': self.claims_storage_errors_total._value._value,
-                'active_workers': self.active_workers._value._value,
-                'memory_usage_percent': self.memory_usage_percent._value._value,
-                'cpu_usage_percent': self.cpu_usage_percent._value._value,
-                'processing_rate': self.processing_rate._value._value
+                'claims_processed': self.claims_processed_total._value,
+                'validation_errors': self.claims_validation_errors_total._value,
+                'storage_errors': self.claims_storage_errors_total._value,
+                'active_workers': self.active_workers._value,
+                'memory_usage_percent': self.memory_usage_percent._value,
+                'cpu_usage_percent': self.cpu_usage_percent._value,
+                'processing_rate': self.processing_rate._value,
+                'total_processing_duration_seconds': self._total_processing_duration_gauge._value
             }
         except Exception as e:
             self.logger.error(f"Error getting metrics summary: {str(e)}")

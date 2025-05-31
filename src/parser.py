@@ -20,7 +20,7 @@ class ClaimParser:
         # Caching
         self._claim_count_cache = None
         self._cache_timestamp = None
-        self._cache_ttl = 300  # 5 minutes
+        self._cache_ttl = config.get('parser_cache_ttl_seconds', 300)  # Default 5 minutes
         
     def initialize_database(self, db_handler: PostgreSQLHandler):
         """Initialize database connection."""

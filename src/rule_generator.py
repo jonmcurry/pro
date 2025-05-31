@@ -25,6 +25,7 @@ class RuleGenerator:
         self.min_support = config.get('min_support', 0.01)
         self.min_confidence = config.get('min_confidence', 0.5)
         self.min_lift = config.get('min_lift', 1.1)
+        self.data_load_limit = config.get('rule_generation_data_limit', 10000) # Make limit configurable
         
     def initialize_database(self, db_handler: PostgreSQLHandler):
         """Initialize database connection."""
@@ -36,7 +37,11 @@ class RuleGenerator:
             self.logger.info("Starting association rule generation")
             
             # Load transaction data
-            transactions = self._load_transaction_data()
+            transactions = self._load_transaction_data(limit=self.data_load_limit)
+            
+            if self.data_load_limit < 50000: # Arbitrary threshold for warning
+                self.logger.warning(f"Rule generation is using a limited dataset of {self.data_load_limit} records. "
+                                    "Generated rules might not be representative of the entire dataset.")
             
             if not transactions:
                 self.logger.warning("No transaction data available for rule generation")
@@ -76,53 +81,55 @@ class RuleGenerator:
             self.logger.error(f"Rule generation error: {str(e)}", exc_info=True)
             return []
     
-    def _load_transaction_data(self) -> List[List[str]]:
+    def _load_transaction_data(self, limit: int) -> List[List[str]]:
         """Load transaction data from database."""
         try:
+            # Use edi.schema prefix for tables
             query = """
             SELECT 
                 c.claim_id,
-                array_agg(DISTINCT 'DIAG_' || d.diagnosis_code) as diagnoses,
-                array_agg(DISTINCT 'PROC_' || p.procedure_code) as procedures,
-                ARRAY['PROVIDER_' || c.provider_type] as provider_info,
-                ARRAY['POS_' || c.place_of_service] as service_location,
+                COALESCE(array_agg(DISTINCT 'DIAG_' || d.diagnosis_code) FILTER (WHERE d.diagnosis_code IS NOT NULL), ARRAY[]::text[]) as diagnoses,
+                COALESCE(array_agg(DISTINCT 'PROC_' || p.procedure_code) FILTER (WHERE p.procedure_code IS NOT NULL), ARRAY[]::text[]) as procedures,
+                COALESCE(ARRAY['PROVIDER_' || c.provider_type] FILTER (WHERE c.provider_type IS NOT NULL), ARRAY[]::text[]) as provider_info,
+                COALESCE(ARRAY['POS_' || c.place_of_service] FILTER (WHERE c.place_of_service IS NOT NULL), ARRAY[]::text[]) as service_location,
                 CASE 
                     WHEN c.patient_age < 18 THEN ARRAY['AGE_CHILD']
                     WHEN c.patient_age >= 65 THEN ARRAY['AGE_SENIOR']
                     ELSE ARRAY['AGE_ADULT']
                 END as age_group
-            FROM claims c
-            LEFT JOIN diagnoses d ON c.claim_id = d.claim_id
-            LEFT JOIN procedures p ON c.claim_id = p.claim_id
+            FROM edi.claims c
+            LEFT JOIN edi.diagnoses d ON c.claim_id = d.claim_id
+            LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
             WHERE c.processing_status = 'COMPLETED'
             GROUP BY c.claim_id, c.provider_type, c.place_of_service, c.patient_age
-            LIMIT 10000
+            LIMIT %s 
             """
             
-            results = self.db_handler.execute_query(query)
+            results = self.db_handler.execute_query(query, (limit,))
             
             transactions = []
             for row in results:
                 transaction = []
                 
                 # Add diagnoses
-                if row['diagnoses'] and row['diagnoses'][0]:
+                # COALESCE in SQL ensures row['diagnoses'] is an empty array, not [None] or None
+                if row.get('diagnoses'):
                     transaction.extend([d for d in row['diagnoses'] if d])
                 
                 # Add procedures
-                if row['procedures'] and row['procedures'][0]:
+                if row.get('procedures'):
                     transaction.extend([p for p in row['procedures'] if p])
                 
                 # Add provider info
-                if row['provider_info']:
+                if row.get('provider_info'):
                     transaction.extend(row['provider_info'])
                 
                 # Add service location
-                if row['service_location']:
+                if row.get('service_location'):
                     transaction.extend(row['service_location'])
                 
                 # Add age group
-                if row['age_group']:
+                if row.get('age_group'):
                     transaction.extend(row['age_group'])
                 
                 if transaction:
@@ -131,7 +138,7 @@ class RuleGenerator:
             return transactions
             
         except Exception as e:
-            self.logger.error(f"Error loading transaction data: {str(e)}")
+            self.logger.error(f"Error loading transaction data: {str(e)}", exc_info=True)
             return []
     
     def _create_binary_matrix(self, transactions: List[List[str]]) -> pd.DataFrame:
@@ -148,7 +155,7 @@ class RuleGenerator:
             return df
             
         except Exception as e:
-            self.logger.error(f"Error creating binary matrix: {str(e)}")
+            self.logger.error(f"Error creating binary matrix: {str(e)}", exc_info=True)
             return pd.DataFrame()
     
     def _convert_to_rule_definitions(self, rules: pd.DataFrame) -> List[Dict[str, Any]]:
@@ -178,7 +185,7 @@ class RuleGenerator:
             return rule_definitions
             
         except Exception as e:
-            self.logger.error(f"Error converting rules: {str(e)}")
+            self.logger.error(f"Error converting rules: {str(e)}", exc_info=True)
             return []
     
     def _generate_datalog_query(self, antecedents: List[str], consequents: List[str]) -> str:
@@ -216,7 +223,7 @@ class RuleGenerator:
                 return "rule_applies(X) <= True"
                 
         except Exception as e:
-            self.logger.error(f"Error generating datalog query: {str(e)}")
+            self.logger.error(f"Error generating datalog query: {str(e)}", exc_info=True)
             return "rule_applies(X) <= True"
     
     def save_rules_to_database(self, rules: List[Dict[str, Any]]) -> bool:
@@ -227,13 +234,13 @@ class RuleGenerator:
             
             # Clear existing generated rules
             self.db_handler.execute_query(
-                "DELETE FROM filters WHERE rule_type = 'ASSOCIATION'"
+                "DELETE FROM edi.filters WHERE rule_type = 'ASSOCIATION'" # Use schema prefix
             )
             
             # Insert new rules
             for rule in rules:
                 query = """
-                INSERT INTO filters (
+                INSERT INTO edi.filters (
                     filter_name, rule_definition, description, rule_type,
                     support, confidence, lift, active, created_date
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
@@ -256,5 +263,5 @@ class RuleGenerator:
             return True
             
         except Exception as e:
-            self.logger.error(f"Error saving rules to database: {str(e)}")
+            self.logger.error(f"Error saving rules to database: {str(e)}", exc_info=True)
             return False

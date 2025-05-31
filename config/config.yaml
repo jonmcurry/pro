@@ -4,9 +4,9 @@ database:
   postgresql:
     host: localhost
     port: 5432
-    database: claims_processing
-    user: postgres
-    password: admin
+    database: claims_processing # Production: Use environment variables or secrets management for credentials
+    user: postgres             # Production: Use environment variables or secrets management for credentials
+    password: admin            # Production: Use environment variables or secrets management for credentials
     min_connections: 2
     max_connections: 10
 
@@ -21,6 +21,7 @@ processing:
   memory_limit_percent: 70
   cpu_limit_percent: 80
   batch_size: 1000
+  parser_cache_ttl_seconds: 300 # TTL for claim count cache in parser (seconds)
 
 # ML Training Configuration
 ml_training:
@@ -66,5 +67,6 @@ rule_generation:
   min_support: 0.01
   min_confidence: 0.5
   min_lift: 1.1
+  data_load_limit: 10000 # Max records to load for rule generation
 
 # Removed encryption_key and password_encrypted to disable encryption

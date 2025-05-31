@@ -7,22 +7,35 @@ import logging.handlers
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple, Pattern, Set
+import re
 
 
 class PHISafeFormatter(logging.Formatter):
     """Custom formatter that sanitizes PHI from log messages."""
     
+    # Pre-compile regex patterns for efficiency
+    _PHI_PATTERNS: List[Tuple[Pattern[str], str]] = [
+        (re.compile(r'\b\d{3}-\d{2}-\d{4}\b'), 'XXX-XX-XXXX'),  # SSN pattern
+        (re.compile(r'\b\d{16}\b'), 'XXXX-XXXX-XXXX-XXXX'),  # Basic credit card pattern
+        (re.compile(r'\bDOB[:\s]*\d{1,2}/\d{1,2}/\d{4}\b', re.IGNORECASE), 'DOB: XX/XX/XXXX'),  # Date of birth
+        # Add more specific or broader patterns as needed
+    ]
+
+    # Standard LogRecord attributes that are handled explicitly or are not considered "extra"
+    _STANDARD_RECORD_ATTRS: Set[str] = {
+        'args', 'asctime', 'created', 'exc_info', 'exc_text', 'filename',
+        'funcName', 'levelname', 'levelno', 'lineno', 'message', 'module',
+        'msecs', 'msg', 'name', 'pathname', 'process', 'processName',
+        'relativeCreated', 'stack_info', 'thread', 'threadName',
+        # Attributes explicitly added to log_entry
+        'timestamp', 'level', 'logger' 
+        # 'message' is derived from getMessage(), 'module', 'function', 'line' are explicit
+    }
+
     def __init__(self):
         super().__init__()
-        
-        # Patterns to sanitize (basic examples)
-        self.phi_patterns = [
-            r'\b\d{3}-\d{2}-\d{4}\b',  # SSN pattern
-            r'\b\d{16}\b',  # Credit card pattern
-            r'\bDOB[:\s]*\d{1,2}/\d{1,2}/\d{4}\b',  # Date of birth
-        ]
-    
+
     def format(self, record):
         """Format log record with PHI sanitization."""
         # Create JSON log entry
@@ -42,31 +55,18 @@ class PHISafeFormatter(logging.Formatter):
         
         # Add extra fields if present
         for key, value in record.__dict__.items():
-            if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 
-                          'pathname', 'filename', 'module', 'exc_info',
-                          'exc_text', 'stack_info', 'lineno', 'funcName',
-                          'created', 'msecs', 'relativeCreated', 'thread',
-                          'threadName', 'processName', 'process', 'message']:
+            # Only add attributes not already handled or standard
+            if key not in self._STANDARD_RECORD_ATTRS and not hasattr(logging.LogRecord, key):
                 log_entry[key] = value
         
         return json.dumps(log_entry)
     
     def _sanitize_message(self, message: str) -> str:
         """Remove or mask PHI from log messages."""
-        import re
-        
-        sanitized = message
-        
-        # Replace SSN patterns
-        sanitized = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', 'XXX-XX-XXXX', sanitized)
-        
-        # Replace potential card numbers
-        sanitized = re.sub(r'\b\d{16}\b', 'XXXX-XXXX-XXXX-XXXX', sanitized)
-        
-        # Replace DOB patterns
-        sanitized = re.sub(r'\bDOB[:\s]*\d{1,2}/\d{1,2}/\d{4}\b', 'DOB: XX/XX/XXXX', sanitized)
-        
-        return sanitized
+        sanitized_message = message
+        for pattern, replacement in self._PHI_PATTERNS:
+            sanitized_message = pattern.sub(replacement, sanitized_message)
+        return sanitized_message
 
 
 def setup_logging(level: str = "INFO", log_file: str = None):
@@ -74,11 +74,15 @@ def setup_logging(level: str = "INFO", log_file: str = None):
     
     # Create logs directory if it doesn't exist
     log_dir = "logs"
-    os.makedirs(log_dir, exist_ok=True)
+    try:
+        os.makedirs(log_dir, exist_ok=True)
+    except OSError as e:
+        # Fallback or critical error handling if log directory cannot be created
+        logging.error(f"Could not create log directory {log_dir}: {e}", exc_info=True)
+        # Depending on requirements, you might raise e or use a default path
     
     # Default log file
-    if not log_file:
-        log_file = os.path.join(log_dir, "edi_processing.log")
+    log_file_path = log_file if log_file else os.path.join(log_dir, "edi_processing.log")
     
     # Configure root logger
     root_logger = logging.getLogger()
@@ -98,7 +102,7 @@ def setup_logging(level: str = "INFO", log_file: str = None):
     
     # File handler with rotation
     file_handler = logging.handlers.RotatingFileHandler(
-        log_file,
+        log_file_path,
         maxBytes=50 * 1024 * 1024,  # 50MB
         backupCount=5
     )
@@ -107,7 +111,8 @@ def setup_logging(level: str = "INFO", log_file: str = None):
     root_logger.addHandler(file_handler)
     
     # Error file handler for errors and above
-    error_file = log_file.replace('.log', '_errors.log')
+    base_log_name, log_ext = os.path.splitext(log_file_path)
+    error_file = f"{base_log_name}_errors{log_ext if log_ext else '.log'}"
     error_handler = logging.handlers.RotatingFileHandler(
         error_file,
         maxBytes=10 * 1024 * 1024,  # 10MB

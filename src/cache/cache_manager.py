@@ -53,8 +53,16 @@ class LRUCache:
             # Estimate size
             try:
                 size_bytes = len(pickle.dumps(value))
-            except:
+            except pickle.PicklingError as e:
+                self.logger.warning(
+                    f"Could not pickle value for key '{key}' to estimate size: {e}. Using default size 1024 bytes."
+                )
                 size_bytes = 1024  # Default estimate
+            except Exception as e: # Catch other unexpected errors during pickling
+                self.logger.error(
+                    f"Unexpected error pickling value for key '{key}': {e}. Using default size 1024 bytes.", exc_info=True
+                )
+                size_bytes = 1024
             
             # Check if value is too large
             if size_bytes > self.max_memory_bytes:
@@ -92,6 +100,15 @@ class LRUCache:
             # Remove least recently used item
             oldest_key, oldest_entry = self.cache.popitem(last=False)
             self.total_size_bytes -= oldest_entry.size_bytes
+
+    def delete(self, key: str) -> bool:
+        """Delete an item from the cache."""
+        with self._lock:
+            if key in self.cache:
+                entry = self.cache.pop(key)
+                self.total_size_bytes -= entry.size_bytes
+                return True
+            return False
     
     def clear(self):
         """Clear all cache entries."""
@@ -106,16 +123,8 @@ class LRUCache:
                 'size': len(self.cache),
                 'max_size': self.max_size,
                 'memory_usage_mb': self.total_size_bytes / (1024 * 1024),
-                'max_memory_mb': self.max_memory_bytes / (1024 * 1024),
-                'hit_rate': self._calculate_hit_rate()
+                'max_memory_mb': self.max_memory_bytes / (1024 * 1024)
             }
-    
-    def _calculate_hit_rate(self) -> float:
-        """Calculate cache hit rate."""
-        total_accesses = sum(entry.access_count for entry in self.cache.values())
-        if total_accesses == 0:
-            return 0.0
-        return len(self.cache) / total_accesses
 
 
 class DistributedCache:
@@ -249,8 +258,8 @@ class CacheManager:
         
         # Delete from L1
         cache = self.caches.get(category, self.l1_cache)
-        cache.cache.pop(cache_key, None)
-        
+        cache.delete(cache_key) # Use the new delete method
+
         # Delete from L2
         self.l2_cache.delete(cache_key)
         
@@ -308,8 +317,10 @@ class CacheManager:
                     
                     with cache._lock:
                         for _ in range(entries_to_remove):
-                            if cache.cache:
-                                cache.cache.popitem(last=False)
+                            if not cache.cache: # Check if cache is empty
+                                break
+                            _key, removed_entry = cache.cache.popitem(last=False)
+                            cache.total_size_bytes -= removed_entry.size_bytes
                 
                 # Check if memory pressure is relieved
                 if psutil.virtual_memory().percent < 80:

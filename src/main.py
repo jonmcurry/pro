@@ -44,9 +44,6 @@ class OptimizedProcessingOrchestrator:
         self.enable_batch_processing = config.get('enable_batch_processing', True)
         self.adaptive_chunk_sizing = config.get('adaptive_chunk_sizing', True)
         
-        # Threading and async support
-        self.processing_semaphore = threading.Semaphore(self.max_workers)
-        
     def process_claims(self):
         """OPTIMIZED: Process all claims with enhanced parallel and batch processing."""
         start_time = time.time()
@@ -73,18 +70,17 @@ class OptimizedProcessingOrchestrator:
                 
                 for chunk_id, chunk_data in self.parser.get_claim_chunks(self.chunk_size):
                     # Check resource usage before submitting new work
-                    if self._check_resource_limits():
-                        future = executor.submit(self._process_chunk_optimized, chunk_id, chunk_data)
-                        futures.append(future)
-                        chunk_futures_map[future] = chunk_id
-                    else:
-                        self.logger.warning("Resource limits reached, waiting for completion")
-                        # Wait for some tasks to complete before submitting new ones
-                        self._wait_for_partial_completion(futures, chunk_futures_map)
+                    while not self._check_resource_limits():
+                        self.logger.warning(
+                            "Resource limits reached (Memory: {:.1f}%, CPU: {:.1f}%). Pausing submission of new chunks...".format(
+                                psutil.virtual_memory().percent, psutil.cpu_percent(interval=None)
+                            )
+                        )
+                        time.sleep(5) # Wait for 5 seconds for resources to free up
                         
-                        future = executor.submit(self._process_chunk_optimized, chunk_id, chunk_data)
-                        futures.append(future)
-                        chunk_futures_map[future] = chunk_id
+                    future = executor.submit(self._process_chunk_optimized, chunk_id, chunk_data)
+                    futures.append(future)
+                    chunk_futures_map[future] = chunk_id
                 
                 # Process completed futures as they finish
                 for future in as_completed(futures):
@@ -153,62 +149,63 @@ class OptimizedProcessingOrchestrator:
         error_count = 0
         
         try:
-            with self.processing_semaphore:
-                self.logger.debug(f"Processing chunk {chunk_id} with {len(chunk_data)} claims")
-                
-                if self.enable_batch_processing and len(chunk_data) >= self.batch_validation_size:
-                    # Use batch validation for better performance
-                    validation_results = self._validate_claims_batch(chunk_data)
-                    processed_count = len(chunk_data)
-                else:
-                    # Fall back to individual validation
-                    validation_results = []
-                    for claim in chunk_data:
-                        try:
-                            result = self.validator.validate_claim(claim)
-                            validation_results.append(result)
-                            processed_count += 1
-                            
-                            # Record individual claim processing time
-                            if self.metrics and 'processing_time' in result:
-                                self.metrics.record_processing_duration(result['processing_time'])
-                            
-                        except Exception as e:
-                            claim_id = claim.get('claim_id', 'unknown')
-                            self.logger.error(f"Claim validation error for {claim_id}: {str(e)}")
-                            error_count += 1
-                            
-                            # Create error result
-                            error_result = {
-                                'claim_id': claim_id,
-                                'validation_status': 'ERROR',
-                                'error_message': str(e),
-                                'processing_time': 0
-                            }
-                            validation_results.append(error_result)
-                
-                # Store results efficiently
-                if validation_results:
-                    storage_success = self.storage.store_validation_results(validation_results)
-                    if not storage_success:
-                        self.logger.error(f"Failed to store results for chunk {chunk_id}")
-                        error_count += len(validation_results)
-                
-                # Update claim processing status in bulk
-                claim_ids = [claim.get('claim_id') for claim in chunk_data if claim.get('claim_id')]
-                if claim_ids:
-                    self.parser.mark_claims_processed_bulk(claim_ids)
-                
-                duration = time.time() - start_time
-                self.logger.debug(f"Chunk {chunk_id} completed in {duration:.2f} seconds")
-                
-                return {
-                    'chunk_id': chunk_id,
-                    'processed_count': processed_count,
-                    'error_count': error_count,
-                    'duration': duration,
-                    'claims_per_second': processed_count / duration if duration > 0 else 0
-                }
+            self.logger.debug(f"Processing chunk {chunk_id} with {len(chunk_data)} claims")
+            
+            if self.enable_batch_processing and len(chunk_data) >= self.batch_validation_size:
+                # Use batch validation for better performance
+                validation_results = self._validate_claims_batch(chunk_data)
+                processed_count = len(chunk_data) # Assume all are processed if batch validation is used
+            else:
+                # Fall back to individual validation
+                validation_results = []
+                for claim in chunk_data:
+                    try:
+                        result = self.validator.validate_claim(claim)
+                        validation_results.append(result)
+                        processed_count += 1
+                        
+                        # Record individual claim processing time
+                        if self.metrics and 'processing_time' in result:
+                            self.metrics.record_processing_duration(result['processing_time'])
+                        
+                    except Exception as e:
+                        claim_id = claim.get('claim_id', 'unknown')
+                        self.logger.error(f"Claim validation error for {claim_id}: {str(e)}")
+                        error_count += 1
+                        
+                        # Create error result
+                        error_result = {
+                            'claim_id': claim_id,
+                            'validation_status': 'ERROR',
+                            'error_message': str(e),
+                            'processing_time': 0
+                        }
+                        validation_results.append(error_result)
+            
+            # Store results efficiently
+            if validation_results:
+                storage_success = self.storage.store_validation_results(validation_results)
+                if not storage_success:
+                    self.logger.error(f"Failed to store results for chunk {chunk_id}")
+                    # Consider how to count errors here: this is a storage error, not necessarily a validation error for all claims.
+                    # For simplicity, we'll count the whole batch as having a storage issue if it fails.
+                    error_count += len(validation_results) 
+            
+            # Update claim processing status in bulk
+            claim_ids = [claim.get('claim_id') for claim in chunk_data if claim.get('claim_id')]
+            if claim_ids:
+                self.parser.mark_claims_processed_bulk(claim_ids)
+            
+            duration = time.time() - start_time
+            self.logger.debug(f"Chunk {chunk_id} completed in {duration:.2f} seconds")
+            
+            return {
+                'chunk_id': chunk_id,
+                'processed_count': processed_count, # Number of claims attempted for validation
+                'error_count': error_count,         # Number of claims that had a validation or storage error
+                'duration': duration,
+                'claims_per_second': processed_count / duration if duration > 0 else 0
+            }
                 
         except Exception as e:
             self.logger.error(f"Chunk {chunk_id} processing error: {str(e)}", exc_info=True)
@@ -265,24 +262,6 @@ class OptimizedProcessingOrchestrator:
         except Exception as e:
             self.logger.error(f"Error calculating adaptive chunk size: {str(e)}")
             return self.chunk_size
-    
-    def _wait_for_partial_completion(self, futures, chunk_futures_map):
-        """Wait for partial completion to free up resources."""
-        completed_count = 0
-        target_completion = len(futures) // 2
-        
-        for future in as_completed(futures):
-            if completed_count >= target_completion:
-                break
-            completed_count += 1
-            
-            # Process the completed future
-            try:
-                chunk_result = future.result()
-                chunk_id = chunk_futures_map[future]
-                self.logger.debug(f"Chunk {chunk_id} completed during resource wait")
-            except Exception as e:
-                self.logger.error(f"Error during partial completion wait: {str(e)}")
     
     def _check_resource_limits(self) -> bool:
         """Enhanced resource limit checking."""

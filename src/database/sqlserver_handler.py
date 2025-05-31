@@ -51,10 +51,12 @@ class SQLServerHandler:
                 if self._connections:
                     conn = self._connections.pop()
                 else:
-                    # Create new connection if pool is empty
+                    self.logger.info("SQL Server connection pool empty or exhausted, creating new ad-hoc connection.")
                     conn = pyodbc.connect(self.connection_string)
-                    conn.autocommit = False
+                    # conn.autocommit = False # pyodbc connections default to autocommit=False
             
+            # Ensure autocommit is False. pyodbc connections default to autocommit=False.
+            # This is a safeguard in case it was changed.
             yield conn
             
         except Exception as e:
@@ -74,6 +76,7 @@ class SQLServerHandler:
         try:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
+                cursor.fast_executemany = True # Enable for better performance
                 
                 # Prepare bulk insert data
                 insert_data = []
@@ -383,10 +386,19 @@ class SQLServerHandler:
     def close(self):
         """Close all connections."""
         with self._connection_lock:
+            closed_count = 0
+            errors_closing = 0
             for conn in self._connections:
                 try:
                     conn.close()
-                except:
-                    pass
+                    closed_count += 1
+                except pyodbc.Error as db_err:
+                    self.logger.warning(f"Error closing a SQL Server connection: {db_err}")
+                    errors_closing += 1
+                except Exception as e:
+                    self.logger.error(f"Unexpected error closing a SQL Server connection: {e}", exc_info=True)
+                    errors_closing += 1
+
             self._connections.clear()
-            self.logger.info("SQL Server connections closed")
+            self.logger.info(f"SQL Server connection pool closed. Connections processed: {closed_count + errors_closing}, "
+                               f"Successfully closed: {closed_count}, Errors on close: {errors_closing}")

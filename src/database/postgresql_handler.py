@@ -19,8 +19,6 @@ class PostgreSQLHandler:
         self.logger = logging.getLogger(__name__)
         self._connection_pool = None
         self._pool_lock = threading.Lock()
-        self._cache = {}
-        self._cache_lock = threading.Lock()
         
         # Initialize connection pool
         self._initialize_pool()
@@ -336,11 +334,6 @@ class PostgreSQLHandler:
             'available_connections': len(self._connection_pool._pool),
             'active_connections': self._connection_pool.maxconn - len(self._connection_pool._pool)
         }
-    
-    def clear_cache(self):
-        """Clear internal cache."""
-        with self._cache_lock:
-            self._cache.clear()
     
     def close(self):
         """Close all connections."""

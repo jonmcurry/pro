@@ -7,6 +7,7 @@ import psutil
 import threading
 import time
 from typing import Dict, Any, Optional, Callable
+from datetime import datetime, timezone
 import gc
 
 
@@ -29,6 +30,9 @@ class ResourceOptimizer:
         # Callbacks for resource events
         self.memory_warning_callback: Optional[Callable] = None
         self.cpu_warning_callback: Optional[Callable] = None
+
+        # For periodic logging
+        self._last_status_log_time: float = 0
         
     def start_monitoring(self):
         """Start resource monitoring in background thread."""
@@ -64,8 +68,10 @@ class ResourceOptimizer:
                     self._handle_cpu_pressure(cpu_percent)
                 
                 # Log resource usage periodically
-                if time.time() % 300 < self.monitoring_interval:  # Every 5 minutes
+                current_time = time.time()
+                if current_time - self._last_status_log_time >= 300:  # Log every 5 minutes (300 seconds)
                     self._log_resource_status(memory_percent, cpu_percent)
+                    self._last_status_log_time = current_time
                 
                 time.sleep(self.monitoring_interval)
                 
@@ -158,13 +164,15 @@ class ResourceOptimizer:
     def get_system_stats(self) -> Dict[str, Any]:
         """Get current system statistics."""
         try:
+            boot_timestamp = psutil.boot_time()
             return {
                 'memory_percent': psutil.virtual_memory().percent,
                 'memory_available_gb': psutil.virtual_memory().available / (1024**3),
                 'cpu_percent': psutil.cpu_percent(),
                 'cpu_count': psutil.cpu_count(),
                 'disk_usage_percent': psutil.disk_usage('/').percent,
-                'boot_time': psutil.boot_time(),
+                'boot_timestamp': boot_timestamp,
+                'boot_time_utc': datetime.fromtimestamp(boot_timestamp, tz=timezone.utc).isoformat(),
                 'process_count': len(psutil.pids())
             }
         except Exception as e:

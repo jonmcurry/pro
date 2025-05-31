@@ -49,6 +49,7 @@ class ModelCache:
             self.label_encoders = {}
             self.feature_columns = []
             self.model_path = None
+            self.ml_model_classes_ = None # To store the actual class labels (filter_ids)
             self.model_timestamp = None
             self._model_lock = threading.Lock()
             self._initialized = True
@@ -58,6 +59,7 @@ class ModelCache:
         import os
         
         if not os.path.exists(model_path):
+            logging.getLogger(__name__).error(f"ML model file not found: {model_path}")
             return False
             
         # Check if model needs reloading
@@ -77,39 +79,56 @@ class ModelCache:
                 self.ml_model = model_data['model']
                 self.label_encoders = model_data['encoders']
                 self.feature_columns = model_data.get('features', [])
+                # Load model's class labels, falling back to model.classes_ if available from the model object itself
+                # This assumes 'classes_' is saved during training (e.g., model.classes_)
+                self.ml_model_classes_ = model_data.get('classes_', getattr(self.ml_model, 'classes_', None))
                 self.model_path = model_path
                 self.model_timestamp = current_timestamp
-                
+                logging.getLogger(__name__).info(f"ML model loaded successfully from: {model_path}. Features: {self.feature_columns}, Classes: {self.ml_model_classes_ is not None}")
                 return True
                 
             except Exception as e:
-                logging.getLogger(__name__).error(f"Error loading ML model: {str(e)}")
+                logging.getLogger(__name__).error(f"Error loading ML model from {model_path}: {str(e)}", exc_info=True)
+                # Reset to ensure a partial load doesn't persist
+                self.ml_model = None 
                 return False
     
     def predict_batch(self, features: np.ndarray, threshold: float = 0.3, max_filters: int = 10) -> List[List[int]]:
         """OPTIMIZED: Batch prediction for multiple claims."""
-        if self.ml_model is None:
-            return [[] for _ in range(len(features))]
+        if self.ml_model is None or features.shape[0] == 0: # Handle empty features array
+            return [[] for _ in range(features.shape[0])]
         
         with self._model_lock:
             try:
                 # Batch prediction - much faster than individual predictions
-                probabilities = self.ml_model.predict_proba(features)
+                all_probabilities = self.ml_model.predict_proba(features)
+                
+                # Get the actual class labels (filter_ids) the model predicts
+                model_classes = self.ml_model_classes_
+                if model_classes is None:
+                    logging.getLogger(__name__).warning("ml_model_classes_ not available in ModelCache. Falling back to index-based filter IDs. This may be incorrect.")
+                    # Fallback: assume index is class_id if classes_ were not loaded (less robust)
+                    model_classes = list(range(all_probabilities.shape[1]))
                 
                 results = []
-                for probs in probabilities:
-                    applicable_filters = []
-                    for i, prob in enumerate(probs):
+                for probs_for_one_claim in all_probabilities:
+                    scored_filters = []
+                    for i, prob in enumerate(probs_for_one_claim):
                         if prob > threshold:
-                            applicable_filters.append(i)
+                            # Map model output index to actual filter_id
+                            filter_id = model_classes[i] 
+                            scored_filters.append({'id': filter_id, 'score': prob})
+                    
+                    # Sort by probability (score) in descending order
+                    scored_filters.sort(key=lambda x: x['score'], reverse=True)
                     
                     # Limit number of filters per claim
-                    results.append(applicable_filters[:max_filters])
+                    results.append([sf['id'] for sf in scored_filters[:max_filters]])
                 
                 return results
                 
             except Exception as e:
-                logging.getLogger(__name__).error(f"Batch prediction error: {str(e)}")
+                logging.getLogger(__name__).error(f"Batch prediction error: {str(e)}", exc_info=True)
                 return [[] for _ in range(len(features))]
 
 
@@ -119,7 +138,7 @@ class RuleCache:
     def __init__(self):
         self.compiled_rules = {}
         self.rule_definitions = {}
-        self._rules_lock = threading.Lock()
+        self._rules_lock = threading.Lock() # Ensures thread-safe access to pyDatalog global state
         self.logger = logging.getLogger(__name__)
         
         # Initialize pyDatalog once
@@ -133,11 +152,11 @@ class RuleCache:
             pyDatalog.create_terms('provider_type, place_of_service, rule_applies')
             pyDatalog.create_terms('X, Age, Code, Amount, Provider, POS')
         except Exception as e:
-            self.logger.error(f"Error setting up predicates: {str(e)}")
+            self.logger.error(f"Error setting up predicates: {str(e)}", exc_info=True)
     
     def load_rules(self, rules: List[Dict[str, Any]]):
         """Load and compile rules for faster execution."""
-        with self._rules_lock:
+        with self._rules_lock: # Protect access to shared rule structures
             self.rule_definitions.clear()
             self.compiled_rules.clear()
             
@@ -155,22 +174,27 @@ class RuleCache:
                         'description': rule.get('description', '')
                     }
                 except Exception as e:
-                    self.logger.error(f"Error compiling rule {filter_id}: {str(e)}")
+                    self.logger.error(f"Error compiling rule {filter_id}: {str(e)}", exc_info=True)
     
     def evaluate_rules_batch(self, claims: List[Dict[str, Any]], filter_ids_list: List[List[int]]) -> List[List[ValidationResult]]:
         """OPTIMIZED: Batch rule evaluation for multiple claims."""
         results = []
         
+        # The _rules_lock is crucial here because pyDatalog.clear() and fact assertion
+        # modify global state within pyDatalog. If multiple threads from
+        # OptimizedProcessingOrchestrator call this method on the same ClaimValidator instance,
+        # they would interfere with each other's pyDatalog state without this lock.
         with self._rules_lock:
             # Setup facts for all claims at once
-            self._setup_batch_facts(claims)
+            self._setup_batch_facts(claims) # This clears and re-asserts facts
             
             for i, (claim, filter_ids) in enumerate(zip(claims, filter_ids_list)):
                 claim_results = []
-                claim_id = claim.get('claim_id', f'claim_{i}')
+                claim_id = claim.get('claim_id', f'claim_{i}') # Use a unique ID for the claim in Datalog
                 
                 for filter_id in filter_ids:
                     if filter_id in self.compiled_rules:
+                        # Pass the unique claim_id for this specific claim to _evaluate_single_rule
                         result = self._evaluate_single_rule(claim_id, filter_id)
                         claim_results.append(result)
                 
@@ -183,56 +207,68 @@ class RuleCache:
         try:
             # Clear existing facts
             pyDatalog.clear()
-            self._setup_predicates()
+            self._setup_predicates() # Re-create terms after clearing
             
             # Add facts for all claims
-            for claim in claims:
-                claim_id = claim.get('claim_id', 'unknown')
+            for i, claim in enumerate(claims):
+                # Use a unique ID for each claim within this batch's Datalog context
+                # This is important if rules refer to a generic 'X' that needs to be specific per claim.
+                # The claim_id from the data is used here.
+                datalog_claim_id = claim.get('claim_id', f'claim_{i}') 
                 
                 # Diagnosis facts
                 for diagnosis in claim.get('diagnoses', []):
                     if diagnosis.get('code'):
-                        pyDatalog.assert_fact('has_diagnosis', claim_id, diagnosis['code'])
+                        pyDatalog.assert_fact('has_diagnosis', datalog_claim_id, diagnosis['code'])
                 
                 # Procedure facts
                 for procedure in claim.get('procedures', []):
                     if procedure.get('code'):
-                        pyDatalog.assert_fact('has_procedure', claim_id, procedure['code'])
+                        pyDatalog.assert_fact('has_procedure', datalog_claim_id, procedure['code'])
                 
                 # Patient facts
-                pyDatalog.assert_fact('patient_age', claim_id, claim.get('patient_age', 0))
-                pyDatalog.assert_fact('charge_amount', claim_id, claim.get('total_charge_amount', 0))
+                pyDatalog.assert_fact('patient_age', datalog_claim_id, claim.get('patient_age', 0))
+                pyDatalog.assert_fact('charge_amount', datalog_claim_id, claim.get('total_charge_amount', 0))
                 
                 # Provider facts
-                pyDatalog.assert_fact('provider_type', claim_id, claim.get('provider_type', ''))
-                pyDatalog.assert_fact('place_of_service', claim_id, claim.get('place_of_service', ''))
+                pyDatalog.assert_fact('provider_type', datalog_claim_id, claim.get('provider_type', ''))
+                pyDatalog.assert_fact('place_of_service', datalog_claim_id, claim.get('place_of_service', ''))
                 
         except Exception as e:
-            self.logger.error(f"Error setting up batch facts: {str(e)}")
+            self.logger.error(f"Error setting up batch facts: {str(e)}", exc_info=True)
     
-    def _evaluate_single_rule(self, claim_id: str, filter_id: int) -> ValidationResult:
-        """Evaluate a single rule against a claim."""
+    def _evaluate_single_rule(self, datalog_claim_id: str, filter_id: int) -> ValidationResult:
+        """Evaluate a single rule against a claim, using the specific datalog_claim_id."""
         try:
             rule_info = self.compiled_rules[filter_id]
             
-            # Create a specific query for this claim
-            rule_query = f"rule_applies('{claim_id}')"
+            # The rule definition (e.g., "rule_applies(X) <= has_diagnosis(X, 'A01')")
+            # needs to be asserted for the Datalog engine to use it.
+            # We assert it here, specific to the current evaluation context.
+            # This assumes rule_info['query'] is a complete Datalog rule string.
+            # pyDatalog.load allows loading rule strings.
+            pyDatalog.load(rule_info['query'])
+            
+            # Create a specific query for this claim using its datalog_claim_id
+            # This asks if the 'rule_applies' predicate is true for this specific claim.
+            query_for_claim = f"rule_applies('{datalog_claim_id}')"
             
             # Execute rule
-            results = pyDatalog.ask(rule_query)
+            results = pyDatalog.ask(query_for_claim)
             
             return ValidationResult(
                 filter_id=filter_id,
                 filter_name=rule_info['name'],
-                passed=bool(results),
+                passed=bool(results), # True if the query returns any results
                 rule_type='DATALOG',
                 details=rule_info['description']
             )
             
         except Exception as e:
+            self.logger.error(f"Error evaluating rule {filter_id} for claim {datalog_claim_id}: {str(e)}", exc_info=True)
             return ValidationResult(
                 filter_id=filter_id,
-                filter_name=f'Filter_{filter_id}',
+                filter_name=self.compiled_rules.get(filter_id, {}).get('name', f'Filter_{filter_id}'),
                 passed=False,
                 rule_type='DATALOG',
                 error=str(e)
@@ -258,9 +294,6 @@ class ClaimValidator:
         # Initialize components
         self._load_ml_model()
         self._load_rules()
-        
-        # Feature extraction optimization
-        self._feature_extractors = self._build_feature_extractors()
     
     def validate_claims_batch(self, claims: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -270,8 +303,13 @@ class ClaimValidator:
         
         try:
             # Step 1: Extract features for all claims in batch
-            features_matrix = self._extract_features_batch(claims)
+            features_matrix, extraction_success = self._extract_features_batch(claims)
             
+            if not extraction_success:
+                self.logger.error("Feature extraction failed for the batch. ML prediction will be skipped or use empty features.")
+                # Handle case where feature extraction itself fails for the whole batch
+                # For now, predict_batch will handle empty/zero features_matrix if it occurs.
+
             # Step 2: Batch ML prediction
             predicted_filters_list = self.model_cache.predict_batch(
                 features_matrix, 
@@ -292,7 +330,7 @@ class ClaimValidator:
             for i, claim in enumerate(claims):
                 result = {
                     'claim_id': claim.get('claim_id'),
-                    'predicted_filters': predicted_filters_list[i],
+                    'predicted_filters': predicted_filters_list[i] if i < len(predicted_filters_list) else [],
                     'validation_results': [
                         {
                             'filter_id': vr.filter_id,
@@ -302,7 +340,7 @@ class ClaimValidator:
                             'details': vr.details,
                             'error': vr.error
                         }
-                        for vr in validation_results_list[i]
+                        for vr in (validation_results_list[i] if i < len(validation_results_list) else [])
                     ],
                     'processing_time': avg_time_per_claim,
                     'validation_status': 'COMPLETED'
@@ -312,7 +350,7 @@ class ClaimValidator:
             return results
             
         except Exception as e:
-            self.logger.error(f"Batch validation error: {str(e)}")
+            self.logger.error(f"Batch validation error: {str(e)}", exc_info=True)
             # Return error results for all claims
             return [
                 {
@@ -334,40 +372,69 @@ class ClaimValidator:
             'processing_time': 0
         }
     
-    def _extract_features_batch(self, claims: List[Dict[str, Any]]) -> np.ndarray:
+    def _extract_features_batch(self, claims: List[Dict[str, Any]]) -> Tuple[np.ndarray, bool]:
         """
-        OPTIMIZED: Extract features for multiple claims using vectorized operations.
+        OPTIMIZED: Extract features for multiple claims using vectorized operations,
+        aligning with the features defined in the loaded ML model.
+        Returns a tuple: (features_matrix, success_flag).
         """
         try:
-            features_list = []
-            
+            expected_model_features = self.model_cache.feature_columns
+            if not expected_model_features:
+                self.logger.error("Model feature_columns not loaded. Cannot extract features for ML prediction.")
+                # Return an empty array of shape (num_claims, 0 features) and False for success
+                return np.array([[] for _ in claims], dtype=np.float32), False
+
+            all_claims_feature_vectors = []
             for claim in claims:
-                features = []
-                
-                # Numerical features
-                features.extend([
-                    float(claim.get('patient_age', 0)),
-                    float(claim.get('total_charge_amount', 0)),
-                    float(claim.get('diagnosis_count', len(claim.get('diagnoses', [])))),
-                    float(claim.get('procedure_count', len(claim.get('procedures', []))))
-                ])
-                
-                # Categorical features (pre-encoded)
-                categorical_fields = ['provider_type', 'place_of_service', 'primary_diagnosis']
-                for field in categorical_fields:
-                    value = claim.get(field, 'UNKNOWN')
-                    encoded_value = self._encode_categorical_value(field, value)
-                    features.append(float(encoded_value))
-                
-                features_list.append(features)
+                feature_vector = []
+                for feature_name in expected_model_features:
+                    value_to_append = 0.0  # Default for missing or unhandled features
+
+                    # Numerical features directly from claim or calculated
+                    if feature_name == 'patient_age':
+                        value_to_append = float(claim.get('patient_age', 0))
+                    elif feature_name == 'total_charge_amount':
+                        value_to_append = float(claim.get('total_charge_amount', 0))
+                    elif feature_name == 'diagnosis_count':
+                        # Use pre-calculated 'diagnosis_count' if available from parser, else calculate
+                        value_to_append = float(claim.get('diagnosis_count', len(claim.get('diagnoses', []))))
+                    elif feature_name == 'procedure_count':
+                        # Use pre-calculated 'procedure_count' if available from parser, else calculate
+                        value_to_append = float(claim.get('procedure_count', len(claim.get('procedures', []))))
+                    
+                    # Categorical features that need encoding
+                    # Assumes feature_name in expected_model_features is like 'provider_type_encoded'
+                    elif feature_name.endswith('_encoded'):
+                        raw_field_name = feature_name.replace('_encoded', '')
+                        # Check if an encoder exists for this raw field name
+                        if raw_field_name in self.model_cache.label_encoders:
+                            # 'primary_diagnosis' is prepared by ClaimParser.
+                            # If 'primary_diagnosis_encoded' is an expected feature, it will be handled here.
+                            claim_value = claim.get(raw_field_name, 'UNKNOWN')
+                            value_to_append = float(self._encode_categorical_value(raw_field_name, claim_value))
+                        else:
+                            self.logger.warning(
+                                f"Encoder not found for base field '{raw_field_name}' (derived from '{feature_name}') "
+                                f"for claim {claim.get('claim_id', 'N/A')}. Using 0.0."
+                            )
+                    else:
+                        # This case might occur if a raw feature name is in expected_model_features
+                        # but isn't one of the explicitly handled numerical ones or doesn't end with _encoded.
+                        # This could be an oversight or a feature that's numerical but not handled above.
+                        self.logger.warning(
+                            f"Unrecognized or unhandled feature '{feature_name}' in model's expected features "
+                            f"for claim {claim.get('claim_id', 'N/A')}. Using 0.0."
+                        )
+                    feature_vector.append(value_to_append)
+                all_claims_feature_vectors.append(feature_vector)
             
-            return np.array(features_list, dtype=np.float32)
+            return np.array(all_claims_feature_vectors, dtype=np.float32), True
             
         except Exception as e:
-            self.logger.error(f"Feature extraction error: {str(e)}")
-            # Return zero matrix as fallback
-            num_features = len(self._get_expected_features())
-            return np.zeros((len(claims), num_features), dtype=np.float32)
+            self.logger.error(f"Feature extraction error: {str(e)}", exc_info=True)
+            num_expected_features = len(self.model_cache.feature_columns) if self.model_cache.feature_columns else 0
+            return np.zeros((len(claims), num_expected_features), dtype=np.float32), False
     
     @functools.lru_cache(maxsize=1000)
     def _encode_categorical_value(self, field: str, value: str) -> int:
@@ -375,32 +442,12 @@ class ClaimValidator:
         if field in self.model_cache.label_encoders:
             try:
                 return self.model_cache.label_encoders[field].transform([value])[0]
-            except ValueError:
+            except ValueError: # Value not seen during fit
+                # Try to fit the new value if dynamic updates are allowed, or return unknown
+                # For simplicity, returning -1 for unknown, consistent with training.
                 return -1  # Unknown category
-        return 0
-    
-    def _get_expected_features(self) -> List[str]:
-        """Get expected feature names."""
-        return [
-            'patient_age', 'total_charge_amount', 'diagnosis_count', 'procedure_count',
-            'provider_type', 'place_of_service', 'primary_diagnosis'
-        ]
-    
-    def _build_feature_extractors(self) -> Dict[str, callable]:
-        """Build optimized feature extractors."""
-        return {
-            'numerical': lambda claim: [
-                float(claim.get('patient_age', 0)),
-                float(claim.get('total_charge_amount', 0)),
-                float(len(claim.get('diagnoses', []))),
-                float(len(claim.get('procedures', [])))
-            ],
-            'categorical': lambda claim: [
-                self._encode_categorical_value('provider_type', claim.get('provider_type', 'UNKNOWN')),
-                self._encode_categorical_value('place_of_service', claim.get('place_of_service', 'UNKNOWN')),
-                self._encode_categorical_value('primary_diagnosis', claim.get('primary_diagnosis', 'UNKNOWN'))
-            ]
-        }
+        self.logger.warning(f"No label encoder found for field '{field}'. Returning 0.")
+        return 0 # Should ideally not happen if model_cache.label_encoders is comprehensive
     
     def _load_ml_model(self):
         """Load ML model with error handling."""
@@ -414,21 +461,24 @@ class ClaimValidator:
                 self.logger.warning("ML model not available, running without ML predictions")
                 
         except Exception as e:
-            self.logger.error(f"Error loading ML model: {str(e)}")
+            self.logger.error(f"Error loading ML model: {str(e)}", exc_info=True)
     
     def _load_rules(self):
         """Load and compile pyDatalog rules."""
         try:
-            rules = self.db_handler.get_active_filters()
+            rules = self.db_handler.get_active_filters() # Fetches from edi.filters
             self.rule_cache.load_rules(rules)
             
             self.logger.info(f"Loaded {len(rules)} validation rules")
             
         except Exception as e:
-            self.logger.error(f"Error loading rules: {str(e)}")
+            self.logger.error(f"Error loading rules: {str(e)}", exc_info=True)
     
     def reload_components(self):
         """Reload ML model and rules (for hot reloading)."""
-        self._load_ml_model()
+        self.logger.info("Reloading validator components...")
+        self._load_ml_model() # This will use ModelCache.load_model which checks timestamp
         self._load_rules()
-        self._encode_categorical_value.cache_clear()  # Clear encoding cache
+        self._encode_categorical_value.cache_clear()  # Clear encoding cache as encoders might change
+        self.logger.info("Validator components reloaded.")
+

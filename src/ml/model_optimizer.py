@@ -109,6 +109,19 @@ class OptimizedModelManager:
             self.logger.error(f"Prediction error for model {model_name}: {str(e)}")
             return None
     
+    def get_model_details(self, model_name: str = 'default') -> Optional[Dict]:
+        """Get all relevant details for a model: model object, features, encoders, classes."""
+        if model_name in self.models:
+            model_data = self.models[model_name]
+            return {
+                'model': model_data.get('model'),
+                'feature_columns': model_data.get('features', []), # Expected by VectorizedFeatureExtractor
+                'label_encoders': model_data.get('encoders', {}),  # Expected by VectorizedFeatureExtractor
+                'model_classes': model_data.get('classes_', None) # For interpreting model output
+            }
+        self.logger.warning(f"Model '{model_name}' not found in OptimizedModelManager.")
+        return None
+
     def get_feature_extractors(self, model_name: str = 'default') -> Optional[Dict]:
         """Get feature extractors for the model."""
         if model_name in self.models:
@@ -231,77 +244,82 @@ class VectorizedFeatureExtractor:
     
     def extract_features_batch(self, claims: List[Dict[str, Any]], 
                              model_name: str = 'default') -> np.ndarray:
-        """Extract features for multiple claims using vectorized operations."""
+        """
+        Extract features for multiple claims, aligning with the features 
+        defined in the loaded ML model for the given model_name.
+        """
         try:
-            # Get encoders from model
-            encoders = self.model_manager.get_label_encoders(model_name)
+            model_details = self.model_manager.get_model_details(model_name)
+            if not model_details or not model_details.get('feature_columns'):
+                self.logger.error(
+                    f"Could not get feature columns for model '{model_name}'. Cannot extract features."
+                )
+                # Return an empty array with 0 features, but correct number of claims
+                return np.array([[] for _ in claims], dtype=np.float32)
+
+            expected_feature_names = model_details['feature_columns']
+            label_encoders = model_details['label_encoders']
             
-            # Pre-allocate feature matrix
             n_claims = len(claims)
-            n_features = self._get_feature_count()
-            features = np.zeros((n_claims, n_features), dtype=np.float32)
+            n_expected_features = len(expected_feature_names)
             
-            # Vectorized extraction
-            self._extract_numerical_features(claims, features)
-            self._extract_categorical_features(claims, features, encoders)
-            self._extract_derived_features(claims, features)
+            if n_expected_features == 0:
+                self.logger.warning(f"Model '{model_name}' has no feature columns defined. Returning empty features.")
+                return np.array([[] for _ in claims], dtype=np.float32)
+
+            features_matrix = np.zeros((n_claims, n_expected_features), dtype=np.float32)
+
+            for i, claim in enumerate(claims):
+                for j, feature_name in enumerate(expected_feature_names):
+                    value_to_append = 0.0  # Default for missing or unhandled features
+
+                    if feature_name == 'patient_age':
+                        value_to_append = float(claim.get('patient_age', 0))
+                    elif feature_name == 'total_charge_amount':
+                        value_to_append = float(claim.get('total_charge_amount', 0))
+                    elif feature_name == 'diagnosis_count':
+                        value_to_append = float(len(claim.get('diagnoses', [])))
+                    elif feature_name == 'procedure_count':
+                        value_to_append = float(len(claim.get('procedures', [])))
+                    elif feature_name.endswith('_encoded'): # e.g., 'provider_type_encoded'
+                        raw_field_name = feature_name.replace('_encoded', '')
+                        if raw_field_name in label_encoders:
+                            encoder = label_encoders[raw_field_name]
+                            claim_value_str = claim.get(raw_field_name, 'UNKNOWN')
+                            try:
+                                value_to_append = float(encoder.transform([claim_value_str])[0])
+                            except ValueError: # Value not seen by encoder
+                                value_to_append = -1.0 # Convention for unknown
+                        else:
+                            self.logger.warning(
+                                f"Encoder not found for base field '{raw_field_name}' (from '{feature_name}') "
+                                f"for model '{model_name}', claim {claim.get('claim_id', 'N/A')}. Using 0.0."
+                            )
+                    # Add elif blocks here if your models expect other specific derived features
+                    # by name, e.g., 'primary_diagnosis_hash_encoded' or 'charge_per_procedure'.
+                    # These would need to be explicitly part of `expected_feature_names`.
+                    else:
+                        self.logger.warning(
+                            f"Unrecognized or unhandled feature '{feature_name}' in model '{model_name}'s "
+                            f"expected features for claim {claim.get('claim_id', 'N/A')}. Using 0.0."
+                        )
+                    features_matrix[i, j] = value_to_append
             
-            return features
+            return features_matrix
             
         except Exception as e:
             self.logger.error(f"Feature extraction error: {str(e)}")
             # Return zero matrix as fallback
-            return np.zeros((len(claims), self._get_feature_count()), dtype=np.float32)
-    
-    def _extract_numerical_features(self, claims: List[Dict], features: np.ndarray):
-        """Extract numerical features using vectorized operations."""
-        for i, claim in enumerate(claims):
-            features[i, 0] = float(claim.get('patient_age', 0))
-            features[i, 1] = float(claim.get('total_charge_amount', 0))
-            features[i, 2] = float(len(claim.get('diagnoses', [])))
-            features[i, 3] = float(len(claim.get('procedures', [])))
-    
-    def _extract_categorical_features(self, claims: List[Dict], 
-                                    features: np.ndarray, encoders: Dict):
-        """Extract categorical features with efficient encoding."""
-        categorical_fields = ['provider_type', 'place_of_service']
-        
-        for field_idx, field in enumerate(categorical_fields):
-            feature_col = 4 + field_idx  # After numerical features
-            
-            if field in encoders:
-                encoder = encoders[field]
-                
-                # Extract all values for this field
-                values = [claim.get(field, 'UNKNOWN') for claim in claims]
-                
-                # Batch encode
-                try:
-                    encoded_values = encoder.transform(values)
-                    features[:, feature_col] = encoded_values.astype(np.float32)
-                except ValueError:
-                    # Handle unknown categories
-                    for i, value in enumerate(values):
-                        try:
-                            features[i, feature_col] = encoder.transform([value])[0]
-                        except ValueError:
-                            features[i, feature_col] = -1  # Unknown category
-    
-    def _extract_derived_features(self, claims: List[Dict], features: np.ndarray):
-        """Extract derived features."""
-        for i, claim in enumerate(claims):
-            # Primary diagnosis encoding
-            diagnoses = claim.get('diagnoses', [])
-            primary_diag = self._get_primary_diagnosis(diagnoses)
-            features[i, 6] = hash(primary_diag) % 10000 if primary_diag else 0
-            
-            # Charge per procedure
-            procedure_count = len(claim.get('procedures', []))
-            total_charge = float(claim.get('total_charge_amount', 0))
-            features[i, 7] = total_charge / max(procedure_count, 1)
+            n_features_fallback = 0
+            if hasattr(self, 'model_manager'):
+                details = self.model_manager.get_model_details(model_name)
+                if details and details.get('feature_columns'):
+                    n_features_fallback = len(details['feature_columns'])
+            return np.zeros((len(claims), n_features_fallback), dtype=np.float32)
     
     def _get_primary_diagnosis(self, diagnoses: List[Dict]) -> str:
         """Get primary diagnosis code."""
+        # This is a helper, only used if a feature explicitly requires its output.
         try:
             # Look for principal diagnosis
             for diag in diagnoses:
@@ -314,9 +332,6 @@ class VectorizedFeatureExtractor:
                 return sorted_diags[0].get('code', '')
             
             return ''
-        except:
+        except Exception as e: # Catch specific exceptions if known
+            self.logger.warning(f"Error getting primary diagnosis: {e}")
             return ''
-    
-    def _get_feature_count(self) -> int:
-        """Get total number of features."""
-        return 8  # 4 numerical + 2 categorical + 2 derived

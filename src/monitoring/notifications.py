@@ -8,6 +8,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Dict, List, Any, Optional
 import threading
+import html # For escaping HTML content
 from datetime import datetime
 
 
@@ -85,7 +86,7 @@ class EmailNotifier:
     
     def _send_email(self, subject: str, body: str, recipients: List[str]):
         """Send email using SMTP."""
-        if not recipients or not self.smtp_server:
+        if not recipients or not self.smtp_server or not self.from_email:
             return
             
         try:
@@ -119,14 +120,14 @@ class EmailNotifier:
         html_template = f"""
         <html>
         <body>
-            <h2 style="color: red;">EDI Processing Error</h2>
-            <p><strong>Severity:</strong> {severity}</p>
-            <p><strong>Timestamp:</strong> {timestamp}</p>
+            <h2 style="color: red;">EDI Processing Error Notification</h2>
+            <p><strong>Severity:</strong> {html.escape(severity)}</p>
+            <p><strong>Timestamp:</strong> {html.escape(timestamp)}</p>
             <p><strong>Error Details:</strong></p>
             <pre style="background-color: #f5f5f5; padding: 10px; border: 1px solid #ddd;">
-{message}
+{html.escape(message)}
             </pre>
-            <p>Please check the system logs for more details.</p>
+            <p>Please check the system logs for further details.</p>
         </body>
         </html>
         """
@@ -139,14 +140,14 @@ class EmailNotifier:
         
         status_items = []
         for key, value in status_data.items():
-            status_items.append(f"<li><strong>{key}:</strong> {value}</li>")
+            status_items.append(f"<li><strong>{html.escape(str(key))}:</strong> {html.escape(str(value))}</li>")
         
         html_template = f"""
         <html>
         <body>
             <h2 style="color: blue;">EDI Processing Status Update</h2>
-            <p><strong>Timestamp:</strong> {timestamp}</p>
-            <h3>Status Information:</h3>
+            <p><strong>Timestamp:</strong> {html.escape(timestamp)}</p>
+            <h3>Current Status:</h3>
             <ul>
                 {''.join(status_items)}
             </ul>
@@ -159,21 +160,44 @@ class EmailNotifier:
     def _format_completion_message(self, stats: Dict[str, Any]) -> str:
         """Format completion message for email."""
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        # Safely access nested statistics
+        total_claims_processed = stats.get('total_claims_processed', 'N/A')
+        processing_duration_seconds = stats.get('processing_duration', 0)
+        # The report provides rate in claims/sec from storage_performance.
+        # If claims/hour is desired, it should be calculated and added to 'stats' before calling this.
+        processing_rate_cps = stats.get('processing_rate', 0) # claims per second
+
+        storage_perf = stats.get('storage_performance', {})
+        successful_inserts = storage_perf.get('successful_inserts', 'N/A')
+        
+        validation_summary = stats.get('validation_summary', {})
+        failed_validations = validation_summary.get('failed_validations', 'N/A')
+
+        metrics_summary = stats.get('metrics_summary', {})
+        validation_errors = metrics_summary.get('validation_errors', 0)
+        storage_errors = metrics_summary.get('storage_errors', 0)
+        total_errors = validation_errors + storage_errors
         
         html_template = f"""
         <html>
         <body>
             <h2 style="color: green;">EDI Claims Processing Completed Successfully</h2>
-            <p><strong>Completion Time:</strong> {timestamp}</p>
+            <p><strong>Completion Time:</strong> {html.escape(timestamp)}</p>
             
             <h3>Processing Statistics:</h3>
             <table border="1" style="border-collapse: collapse;">
-                <tr><td><strong>Total Claims Processed</strong></td><td>{stats.get('total_claims', 'N/A')}</td></tr>
-                <tr><td><strong>Processing Duration</strong></td><td>{stats.get('duration', 'N/A')} seconds</td></tr>
-                <tr><td><strong>Average Rate</strong></td><td>{stats.get('rate', 'N/A')} claims/hour</td></tr>
-                <tr><td><strong>Successful Validations</strong></td><td>{stats.get('successful', 'N/A')}</td></tr>
-                <tr><td><strong>Failed Validations</strong></td><td>{stats.get('failed', 'N/A')}</td></tr>
-                <tr><td><strong>Error Count</strong></td><td>{stats.get('errors', 'N/A')}</td></tr>
+                <tr><td><strong>Total Claims Processed</strong></td><td>{total_claims_processed}</td></tr>
+                <tr><td><strong>Processing Duration</strong></td><td>{processing_duration_seconds:.2f} seconds</td></tr>
+                <tr><td><strong>Average Rate</strong></td><td>{processing_rate_cps:.2f} claims/second</td></tr>
+                <tr><td><strong>Successfully Stored Results</strong></td><td>{successful_inserts}</td></tr>
+                <tr><td><strong>Failed Validations (from SQL Server)</strong></td><td>{failed_validations}</td></tr>
+                <tr>
+                    <td><strong>Total Errors (from Metrics)</strong></td>
+                    <td>
+                        {total_errors} (Validation: {validation_errors}, Storage: {storage_errors})
+                    </td>
+                </tr>
             </table>
             
             <p>Detailed logs are available on the processing server.</p>

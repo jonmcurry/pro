@@ -6,14 +6,10 @@ import asyncio
 import logging
 import time
 from typing import Dict, List, Any, Optional, Callable
-import aiohttp
 import asyncpg
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import queue
 import signal
-import weakref
 
 
 @dataclass
@@ -71,6 +67,17 @@ class AsyncDatabasePool:
                 self.logger.error(f"Async query error: {str(e)}")
                 raise
     
+    async def execute_dml(self, query: str, *args) -> Optional[str]:
+        """Execute async DML query (INSERT, UPDATE, DELETE) and return status."""
+        async with self.pool.acquire() as conn:
+            try:
+                status = await conn.execute(query, *args)
+                return status  # e.g., "INSERT 0 1"
+            except Exception as e:
+                self.logger.error(f"Async DML error: {str(e)}")
+                raise
+
+
     async def execute_batch(self, query: str, args_list: List[tuple]) -> bool:
         """Execute batch queries."""
         async with self.pool.acquire() as conn:
@@ -325,13 +332,13 @@ class AsyncClaimProcessor:
         VALUES ($1, $2, $3, $4, $5)
         """
         
-        await self.db_pool.execute_query(
+        await self.db_pool.execute_dml( # Use execute_dml for INSERT
             query,
             result['claim_id'],
             result['validation_status'],
             str(result['predicted_filters']),
             str(result['validation_results']),
-            result['processing_time']
+            float(result['processing_time']) # Ensure it's a float
         )
     
     async def _monitor_progress(self):
@@ -366,9 +373,12 @@ class AsyncClaimProcessor:
         try:
             signal.signal(signal.SIGTERM, signal_handler)
             signal.signal(signal.SIGINT, signal_handler)
-        except Exception:
-            pass  # Signal handling might not work in all environments
-    
+        except (ValueError, RuntimeError, AttributeError) as e:
+            self.logger.warning(f"Could not set up signal handlers: {e}. "
+                                "Graceful shutdown via signals might not be available on this platform/environment.")
+        except Exception as e: # Catch any other unexpected ones
+            self.logger.error(f"Unexpected error setting up signal handlers: {e}", exc_info=True)
+
     def get_stats(self) -> Dict[str, Any]:
         """Get comprehensive processing statistics."""
         uptime = time.time() - self.stats['start_time'] if self.stats['start_time'] else 0

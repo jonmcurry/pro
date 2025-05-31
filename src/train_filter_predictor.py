@@ -6,6 +6,7 @@ import logging
 import time
 import pickle
 import json
+import sys
 from typing import Dict, List, Any, Tuple, Optional
 import numpy as np
 import pandas as pd
@@ -438,6 +439,7 @@ class FilterPredictorTrainer:
                 'model': self.model,
                 'encoders': self.feature_extractor.label_encoders,
                 'features': feature_names,
+                'classes_': self.model.classes_.tolist() if hasattr(self.model, 'classes_') else None, # Save model's class labels
                 'feature_extractor': self.feature_extractor,
                 'training_date': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'config': self.config,
@@ -498,7 +500,6 @@ class FilterPredictorTrainer:
 
 def main():
     """Enhanced main function with better error handling."""
-    import sys
     import argparse
     from pathlib import Path
     
