@@ -1,6 +1,4 @@
-# EDI Claims Processing System Configuration Example
-# Copy this file to config.yaml and modify with your settings
-
+# EDI Claims Processing System Configuration
 # Database Configuration
 database:
   postgresql:
@@ -8,11 +6,10 @@ database:
     port: 5432
     database: claims_processing
     user: postgres
-    password: admin    
-#password_encrypted: "gAAAAABoOhTcn7ojZql3MnLYJ1MUujyt4qrJfoJLlyUyOQRZ5Udf1z1DlSWsvC1sZmhmrB4YzO5lPdjVHDU7aPhGUW3IyseoZQ=="  # Use encryption utility
+    password: admin
     min_connections: 2
     max_connections: 10
-    
+
   sqlserver:
     connection_string: "mssql+pyodbc://sa:ClearToFly1@server/database?driver=ODBC+Driver+17+for+SQL+Server"
     pool_size: 10
@@ -46,16 +43,16 @@ storage:
 monitoring:
   prometheus_port: 8000
   log_level: INFO
-  enable_email_alerts: true
+  enable_email_alerts: false  # Disabled since no email config
   monitoring_interval: 30
 
-# Email Configuration
+# Email Configuration - disabled for now
 email:
-  enabled: true
+  enabled: false
   smtp_server: smtp.company.com
   smtp_port: 587
   username: edi-system@company.com
-  password_encrypted: "REPLACE_WITH_ENCRYPTED_SMTP_PASSWORD"
+  password: "your_plain_smtp_password"  # Use plain text or disable email
   from_email: edi-system@company.com
   recipients:
     - admin@company.com
@@ -70,6 +67,4 @@ rule_generation:
   min_confidence: 0.5
   min_lift: 1.1
 
-# Encryption key for sensitive configuration values
-# Generate using: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-encryption_key: "9QTUh6q0TgKKY3ne0M__JVoXi-70PgtnItFUcNtHkEk="
+# Removed encryption_key and password_encrypted to disable encryption
