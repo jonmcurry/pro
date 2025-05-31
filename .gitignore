@@ -3,4 +3,4 @@
 logs/edi_processing_errors.log
 logs/edi_processing.log
 logs/edi_processing_errors.log
-src/config/__pycache__/config_manager.cpython-313.pyc
+**/__pycache__/
