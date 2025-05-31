@@ -11,7 +11,7 @@ database:
     max_connections: 10
 
   sqlserver:
-    connection_string: "mssql+pyodbc://sa:ClearToFly1@server/database?driver=ODBC+Driver+17+for+SQL+Server"
+    connection_string: "DRIVER={ODBC Driver 17 for SQL Server};SERVER=localhost;DATABASE=validation_results;UID=sa;PWD=ClearToFly1"
     pool_size: 10
 
 # Processing Configuration

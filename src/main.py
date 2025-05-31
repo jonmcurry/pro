@@ -95,10 +95,15 @@ class OptimizedProcessingOrchestrator:
                         total_processed += chunk_result['processed_count']
                         total_errors += chunk_result.get('error_count', 0)
                         
-                        # Update metrics
-                        self.metrics.increment_claims_processed(chunk_result['processed_count'])
-                        if chunk_result.get('error_count', 0) > 0:
-                            self.metrics.increment_error_count()
+                        # Update metrics safely
+                        if self.metrics:
+                            self.metrics.increment_claims_processed(chunk_result['processed_count'])
+                            if chunk_result.get('error_count', 0) > 0:
+                                self.metrics.increment_error_count()
+                            
+                            # Record batch metrics
+                            self.metrics.record_batch_size(len(chunk_data))
+                            self.metrics.record_batch_duration(chunk_result['duration'])
                         
                         # Mark chunk as processed with statistics
                         self.parser.mark_chunk_processed(
@@ -117,7 +122,8 @@ class OptimizedProcessingOrchestrator:
                     except Exception as e:
                         chunk_id = chunk_futures_map.get(future, 'unknown')
                         self.logger.error(f"Chunk {chunk_id} processing error: {str(e)}", exc_info=True)
-                        self.metrics.increment_error_count()
+                        if self.metrics:
+                            self.metrics.increment_error_count()
                         total_errors += 1
             
             # Final statistics and cleanup
@@ -128,9 +134,10 @@ class OptimizedProcessingOrchestrator:
             self.logger.info(f"Processing rate: {rate:.0f} claims/hour")
             self.logger.info(f"Total errors: {total_errors}")
             
-            # Update final metrics
-            self.metrics.set_processing_duration(duration)
-            self.metrics.set_processing_rate(rate)
+            # Update final metrics safely
+            if self.metrics:
+                self.metrics.set_processing_duration(duration)
+                self.metrics.set_processing_rate(rate)
             
             # Flush any remaining buffered data
             self.storage.shutdown()
@@ -161,6 +168,10 @@ class OptimizedProcessingOrchestrator:
                             result = self.validator.validate_claim(claim)
                             validation_results.append(result)
                             processed_count += 1
+                            
+                            # Record individual claim processing time
+                            if self.metrics and 'processing_time' in result:
+                                self.metrics.record_processing_duration(result['processing_time'])
                             
                         except Exception as e:
                             claim_id = claim.get('claim_id', 'unknown')
@@ -298,38 +309,106 @@ class EDIProcessingSystem:
         self.config = config
         self.logger = logging.getLogger(__name__)
         
-        # Initialize components with enhanced configuration
-        self.metrics = MetricsCollector()
-        self.email_notifier = EmailNotifier(config.get('email', {}))
-        self.resource_optimizer = ResourceOptimizer(config.get('processing', {}))
+        # Initialize components with enhanced configuration and error handling
+        try:
+            # Initialize metrics collector with singleton pattern
+            self.metrics = self._initialize_metrics_safely()
+            
+            # Initialize notification components
+            self.email_notifier = EmailNotifier(config.get('email', {}))
+            self.resource_optimizer = ResourceOptimizer(config.get('processing', {}))
+            
+            # Initialize databases with connection pooling
+            self.postgres_handler = PostgreSQLHandler(config['database']['postgresql'])
+            self.sqlserver_handler = SQLServerHandler(config['database']['sqlserver'])
+            
+            # Initialize processing components with optimizations
+            self.parser = ClaimParser(config.get('parsing', {}))
+            self.parser.initialize_database(self.postgres_handler)
+            
+            self.validator = ClaimValidator(
+                self.postgres_handler,
+                config.get('validation', {})
+            )
+            
+            # Use enhanced storage manager
+            self.storage = ResultStorageManager(
+                self.sqlserver_handler,
+                config.get('storage', {})
+            )
+            
+            # Enhanced processing orchestrator
+            self.orchestrator = OptimizedProcessingOrchestrator(
+                self.parser,
+                self.validator,
+                self.storage,
+                self.metrics,
+                config.get('processing', {})
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Error during EDI system initialization: {str(e)}")
+            raise
+    
+    def _initialize_metrics_safely(self):
+        """Safely initialize MetricsCollector with retry logic."""
+        max_retries = 3
         
-        # Initialize databases with connection pooling
-        self.postgres_handler = PostgreSQLHandler(config['database']['postgresql'])
-        self.sqlserver_handler = SQLServerHandler(config['database']['sqlserver'])
+        for attempt in range(max_retries):
+            try:
+                self.logger.info(f"Initializing metrics collector (attempt {attempt + 1}/{max_retries})")
+                
+                # Reset singleton if this is a retry
+                if attempt > 0:
+                    MetricsCollector.reset_instance()
+                    time.sleep(0.5)  # Brief pause between attempts
+                
+                # Initialize metrics
+                metrics = MetricsCollector()
+                
+                self.logger.info("Metrics collector initialized successfully")
+                return metrics
+                
+            except ValueError as e:
+                if "Duplicated timeseries" in str(e):
+                    self.logger.warning(f"Metrics collision detected on attempt {attempt + 1}: {str(e)}")
+                    if attempt < max_retries - 1:
+                        # Try to clear Prometheus registry
+                        try:
+                            from prometheus_client import REGISTRY
+                            # Clear all collectors to start fresh
+                            collectors = list(REGISTRY._collector_to_names.keys())
+                            for collector in collectors:
+                                try:
+                                    REGISTRY.unregister(collector)
+                                except KeyError:
+                                    pass
+                            self.logger.info("Cleared Prometheus registry for retry")
+                        except Exception as clear_error:
+                            self.logger.warning(f"Could not clear registry: {clear_error}")
+                        
+                        time.sleep(1.0)  # Wait before retry
+                        continue
+                    else:
+                        self.logger.error("Failed to initialize metrics after all retries")
+                        # Return None to allow system to continue without metrics
+                        self.logger.warning("Continuing without metrics collection")
+                        return None
+                else:
+                    raise
+            except Exception as e:
+                self.logger.error(f"Unexpected error initializing metrics: {str(e)}")
+                if attempt < max_retries - 1:
+                    time.sleep(1.0)
+                    continue
+                else:
+                    # Return None to allow system to continue without metrics
+                    self.logger.warning("Continuing without metrics collection")
+                    return None
         
-        # Initialize processing components with optimizations
-        self.parser = ClaimParser(config.get('parsing', {}))
-        self.parser.initialize_database(self.postgres_handler)
-        
-        self.validator = ClaimValidator(
-            self.postgres_handler,
-            config.get('validation', {})
-        )
-        
-        # Use enhanced storage manager
-        self.storage = ResultStorageManager(
-            self.sqlserver_handler,
-            config.get('storage', {})
-        )
-        
-        # Enhanced processing orchestrator
-        self.orchestrator = OptimizedProcessingOrchestrator(
-            self.parser,
-            self.validator,
-            self.storage,
-            self.metrics,
-            config.get('processing', {})
-        )
+        # If we get here, all retries failed
+        self.logger.warning("Failed to initialize MetricsCollector after all retry attempts, continuing without metrics")
+        return None
         
     def run(self):
         """OPTIMIZED: Main processing loop with enhanced monitoring and error handling."""
@@ -342,14 +421,8 @@ class EDIProcessingSystem:
             if not self._initialize_system():
                 raise Exception("System initialization failed")
             
-            # Start enhanced monitoring services
-            monitoring_service = EnhancedMonitoringService(
-                self.config.get('monitoring', {}),
-                self.metrics,
-                self.email_notifier,
-                self.resource_optimizer
-            )
-            monitoring_service.start()
+            # Start enhanced monitoring services with safe initialization
+            monitoring_service = self._initialize_monitoring_safely()
             
             try:
                 # Pre-processing optimizations
@@ -371,8 +444,9 @@ class EDIProcessingSystem:
                 self.email_notifier.send_completion_notification(performance_report)
                 
             finally:
-                # Stop monitoring
-                monitoring_service.stop()
+                # Stop monitoring safely
+                if monitoring_service:
+                    monitoring_service.stop()
                 
         except Exception as e:
             total_duration = time.time() - start_time
@@ -385,6 +459,22 @@ class EDIProcessingSystem:
         finally:
             # Ensure cleanup
             self._cleanup_resources()
+    
+    def _initialize_monitoring_safely(self):
+        """Safely initialize monitoring service."""
+        try:
+            monitoring_service = EnhancedMonitoringService(
+                self.config.get('monitoring', {}),
+                self.metrics,
+                self.email_notifier,
+                self.resource_optimizer
+            )
+            monitoring_service.start()
+            return monitoring_service
+        except Exception as e:
+            self.logger.error(f"Failed to start monitoring service: {str(e)}")
+            # Continue without monitoring rather than failing completely
+            return None
     
     def _initialize_system(self) -> bool:
         """Enhanced system initialization with comprehensive testing."""
@@ -525,6 +615,14 @@ class EDIProcessingSystem:
             # Get system stats
             system_stats = self.resource_optimizer.get_system_stats()
             
+            # Get metrics summary if available
+            metrics_summary = {}
+            if self.metrics:
+                try:
+                    metrics_summary = self.metrics.get_metrics_summary()
+                except Exception as e:
+                    self.logger.warning(f"Failed to get metrics summary: {e}")
+            
             return {
                 'processing_duration': processing_duration,
                 'total_claims_processed': storage_stats.get('storage_performance', {}).get('successful_inserts', 0),
@@ -535,7 +633,8 @@ class EDIProcessingSystem:
                     'postgresql': postgres_stats,
                     'sqlserver': sqlserver_stats
                 },
-                'system_performance': system_stats
+                'system_performance': system_stats,
+                'metrics_summary': metrics_summary
             }
             
         except Exception as e:
@@ -558,6 +657,13 @@ class EDIProcessingSystem:
             if hasattr(self.sqlserver_handler, 'close'):
                 self.sqlserver_handler.close()
             
+            # Reset metrics instance if needed
+            if self.metrics:
+                try:
+                    MetricsCollector.reset_instance()
+                except Exception as e:
+                    self.logger.warning(f"Error resetting metrics instance: {e}")
+            
             self.logger.info("Resource cleanup completed")
             
         except Exception as e:
@@ -567,10 +673,10 @@ class EDIProcessingSystem:
 class EnhancedMonitoringService:
     """Enhanced monitoring service with comprehensive metrics collection."""
     
-    def __init__(self, config: Dict[str, Any], metrics: MetricsCollector, 
+    def __init__(self, config: Dict[str, Any], metrics: Optional[MetricsCollector], 
                  email_notifier: EmailNotifier, resource_optimizer: ResourceOptimizer):
         self.config = config
-        self.metrics = metrics
+        self.metrics = metrics  # Can be None if initialization failed
         self.email_notifier = email_notifier
         self.resource_optimizer = resource_optimizer
         self.logger = logging.getLogger(__name__)
@@ -581,11 +687,13 @@ class EnhancedMonitoringService:
         self.monitoring_interval = config.get('monitoring_interval', 30)
         
     def start(self):
-        """Start enhanced monitoring services."""
+        """Start enhanced monitoring services with safe Prometheus initialization."""
         try:
-            # Start Prometheus metrics server
-            start_http_server(self.prometheus_port)
-            self.logger.info(f"Prometheus metrics server started on port {self.prometheus_port}")
+            # Start Prometheus metrics server with error handling
+            if self.metrics:
+                self._start_prometheus_server()
+            else:
+                self.logger.warning("Metrics not available, skipping Prometheus server")
             
             # Start enhanced resource monitoring
             self.running = True
@@ -594,11 +702,35 @@ class EnhancedMonitoringService:
             self.monitor_thread.start()
             
             # Set up resource event callbacks
-            self.resource_optimizer.set_memory_warning_callback(self._handle_memory_warning)
-            self.resource_optimizer.set_cpu_warning_callback(self._handle_cpu_warning)
+            if hasattr(self.resource_optimizer, 'set_memory_warning_callback'):
+                self.resource_optimizer.set_memory_warning_callback(self._handle_memory_warning)
+            if hasattr(self.resource_optimizer, 'set_cpu_warning_callback'):
+                self.resource_optimizer.set_cpu_warning_callback(self._handle_cpu_warning)
             
         except Exception as e:
             self.logger.error(f"Failed to start enhanced monitoring: {str(e)}")
+            # Don't raise - allow system to continue without monitoring
+    
+    def _start_prometheus_server(self):
+        """Start Prometheus server with error handling."""
+        try:
+            import socket
+            
+            # Check if port is already in use
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            result = sock.connect_ex(('localhost', self.prometheus_port))
+            sock.close()
+            
+            if result == 0:
+                self.logger.warning(f"Port {self.prometheus_port} already in use, trying next port")
+                self.prometheus_port += 1
+            
+            start_http_server(self.prometheus_port)
+            self.logger.info(f"Prometheus metrics server started on port {self.prometheus_port}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to start Prometheus server: {str(e)}")
+            # Continue without Prometheus server
             
     def stop(self):
         """Stop monitoring services."""
@@ -615,9 +747,13 @@ class EnhancedMonitoringService:
                 cpu_percent = psutil.cpu_percent(interval=1)
                 disk_percent = psutil.disk_usage('/').percent
                 
-                # Update Prometheus metrics
-                self.metrics.set_memory_usage(memory_percent)
-                self.metrics.set_cpu_usage(cpu_percent)
+                # Update Prometheus metrics if available
+                if self.metrics:
+                    try:
+                        self.metrics.set_memory_usage(memory_percent)
+                        self.metrics.set_cpu_usage(cpu_percent)
+                    except Exception as e:
+                        self.logger.warning(f"Error updating metrics: {e}")
                 
                 # Check for alerts
                 if memory_percent > 90:
