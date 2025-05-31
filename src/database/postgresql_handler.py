@@ -161,25 +161,33 @@ class PostgreSQLHandler:
             c.patient_id,
             c.provider_id,
             COALESCE(
-                array_agg(d.diagnosis_code) FILTER (WHERE d.diagnosis_code IS NOT NULL),
+                array_agg(DISTINCT d.diagnosis_code) FILTER (WHERE d.diagnosis_code IS NOT NULL),
                 ARRAY[]::text[]
             ) as diagnoses,
             COALESCE(
-                array_agg(p.procedure_code) FILTER (WHERE p.procedure_code IS NOT NULL),
+                array_agg(DISTINCT p.procedure_code) FILTER (WHERE p.procedure_code IS NOT NULL),
                 ARRAY[]::text[]
             ) as procedures,
-            -- Get applied filters
+            -- Get applied filters from predicted_filters JSONB column
             COALESCE(
-                array_agg(vr.filter_id) FILTER (WHERE vr.filter_id IS NOT NULL),
+                CASE 
+                    WHEN vr.predicted_filters IS NOT NULL AND jsonb_array_length(vr.predicted_filters) > 0
+                    THEN ARRAY(
+                        SELECT (jsonb_array_elements_text(vr.predicted_filters))::int
+                    )
+                    ELSE ARRAY[]::int[]
+                END,
                 ARRAY[]::int[]
             ) as applied_filters
         FROM edi.claims c
         LEFT JOIN edi.diagnoses d ON c.claim_id = d.claim_id
         LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
-        LEFT JOIN edi.validation_results vr ON c.claim_id = vr.claim_id AND vr.passed = true
+        LEFT JOIN edi.validation_results vr ON c.claim_id = vr.claim_id 
+            AND vr.validation_status = 'COMPLETED'
         WHERE c.processing_status = 'COMPLETED'
         GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service, 
-                 c.total_charge_amount, c.patient_id, c.provider_id
+                c.total_charge_amount, c.patient_id, c.provider_id, vr.predicted_filters
+        ORDER BY c.claim_id
         LIMIT %s OFFSET %s
         """
         return self.execute_query(query, (limit, offset))

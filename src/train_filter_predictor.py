@@ -1,6 +1,6 @@
-### src/train_filter_predictor.py
+### src/train_filter_predictor_fixed.py
 """
-OPTIMIZED ML Model Training - Enhanced with batch processing and memory optimization
+FIXED ML Model Training - Addresses SMOTE and XGBoost issues
 """
 import logging
 import time
@@ -97,7 +97,7 @@ class OptimizedFeatureExtractor:
 
 
 class FilterPredictorTrainer:
-    """OPTIMIZED: Advanced ML model trainer with enhanced performance."""
+    """FIXED: Advanced ML model trainer with bug fixes."""
     
     def __init__(self, config: Dict[str, Any]):
         self.config = config
@@ -123,9 +123,9 @@ class FilterPredictorTrainer:
         self.db_handler = db_handler
         
     def train_model(self) -> bool:
-        """OPTIMIZED: Train the filter prediction model with enhanced performance."""
+        """FIXED: Train the filter prediction model with bug fixes."""
         try:
-            self.logger.info("Starting optimized ML model training")
+            self.logger.info("Starting fixed ML model training")
             
             # Load and prepare training data
             X, y, feature_names = self._load_training_data_optimized()
@@ -136,16 +136,33 @@ class FilterPredictorTrainer:
             
             self.logger.info(f"Training data loaded: {X.shape[0]} samples, {X.shape[1]} features")
             
+            # FIXED: Check if we have valid labels and multiple classes
+            unique_labels = np.unique(y)
+            self.logger.info(f"Unique labels in training data: {unique_labels}")
+            
+            if len(unique_labels) < 2:
+                self.logger.error(f"Insufficient label diversity. Found labels: {unique_labels}")
+                self.logger.error("Need at least 2 different classes for classification")
+                return False
+            
             # Split data with stratification
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=0.2, random_state=42, stratify=y
             )
             
-            # Handle class imbalance
-            X_train_balanced, y_train_balanced = self._balance_classes_optimized(X_train, y_train)
+            # Handle class imbalance (FIXED)
+            X_train_balanced, y_train_balanced = self._balance_classes_fixed(X_train, y_train)
             
-            # Train model with hyperparameter optimization
-            self.model = self._train_xgboost_optimized(X_train_balanced, y_train_balanced, X_test, y_test)
+            # FIXED: Re-check classes after balancing
+            balanced_unique = np.unique(y_train_balanced)
+            self.logger.info(f"Classes after balancing: {balanced_unique}")
+            
+            if len(balanced_unique) < 2:
+                self.logger.error("Still insufficient classes after balancing")
+                return False
+            
+            # Train model with hyperparameter optimization (FIXED)
+            self.model = self._train_xgboost_fixed(X_train_balanced, y_train_balanced, X_test, y_test)
             
             # Comprehensive evaluation
             self._evaluate_model_comprehensive(self.model, X_test, y_test, feature_names)
@@ -153,7 +170,7 @@ class FilterPredictorTrainer:
             # Save model and components
             self._save_model_components_optimized(feature_names)
             
-            self.logger.info("Optimized model training completed successfully")
+            self.logger.info("Fixed model training completed successfully")
             return True
             
         except Exception as e:
@@ -161,7 +178,7 @@ class FilterPredictorTrainer:
             return False
     
     def _load_training_data_optimized(self) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[str]]:
-        """OPTIMIZED: Load training data with memory optimization and parallel processing."""
+        """FIXED: Load training data with better data validation."""
         try:
             self.logger.info("Loading training data with optimizations...")
             
@@ -193,7 +210,7 @@ class FilterPredictorTrainer:
                     if len(chunk_data) > 1000:
                         chunk_records, chunk_labels = self._process_chunk_parallel(chunk_data)
                     else:
-                        chunk_records, chunk_labels = self._process_training_chunk(chunk_data)
+                        chunk_records, chunk_labels = self._process_training_chunk_fixed(chunk_data)
                     
                     if chunk_records:
                         all_records.extend(chunk_records)
@@ -207,7 +224,29 @@ class FilterPredictorTrainer:
                         gc.collect()
             
             if not all_records:
+                self.logger.error("No training records found")
                 return None, None, []
+            
+            # FIXED: Validate labels before feature extraction
+            self.logger.info(f"Total records loaded: {len(all_records)}")
+            self.logger.info(f"Total labels loaded: {len(all_labels)}")
+            
+            # Check label distribution
+            label_counts = {}
+            for label in all_labels:
+                label_counts[label] = label_counts.get(label, 0) + 1
+            
+            self.logger.info(f"Label distribution: {label_counts}")
+            
+            # Filter out invalid labels (if any)
+            valid_indices = [i for i, label in enumerate(all_labels) if label is not None and label >= 0]
+            
+            if len(valid_indices) == 0:
+                self.logger.error("No valid labels found")
+                return None, None, []
+            
+            all_records = [all_records[i] for i in valid_indices]
+            all_labels = [all_labels[i] for i in valid_indices]
             
             # Extract features using optimized extractor
             self.logger.info("Extracting features...")
@@ -215,6 +254,8 @@ class FilterPredictorTrainer:
             y = np.array(all_labels)
             
             self.logger.info(f"Feature extraction completed: {X.shape}")
+            self.logger.info(f"Final label distribution: {np.unique(y, return_counts=True)}")
+            
             return X, y, feature_names
             
         except Exception as e:
@@ -235,7 +276,7 @@ class FilterPredictorTrainer:
             all_labels = []
             
             with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = [executor.submit(self._process_training_chunk, sub_chunk) for sub_chunk in sub_chunks]
+                futures = [executor.submit(self._process_training_chunk_fixed, sub_chunk) for sub_chunk in sub_chunks]
                 
                 for future in futures:
                     records, labels = future.result()
@@ -247,10 +288,10 @@ class FilterPredictorTrainer:
             
         except Exception as e:
             self.logger.error(f"Error in parallel chunk processing: {str(e)}")
-            return self._process_training_chunk(chunk_data)
+            return self._process_training_chunk_fixed(chunk_data)
     
-    def _process_training_chunk(self, chunk_data: List[Dict]) -> Tuple[List[Dict], List[int]]:
-        """OPTIMIZED: Process training chunk with better data structures."""
+    def _process_training_chunk_fixed(self, chunk_data: List[Dict]) -> Tuple[List[Dict], List[int]]:
+        """FIXED: Process training chunk with better label handling."""
         try:
             records = []
             labels = []
@@ -266,16 +307,23 @@ class FilterPredictorTrainer:
                     'procedures': record.get('procedures', []) or []
                 }
                 
-                # Extract labels (applied filters)
+                # FIXED: Better handling of applied filters
                 applied_filters = record.get('applied_filters', [])
-                if applied_filters and applied_filters[0] is not None:
+                
+                # Handle different formats of applied_filters
+                if applied_filters:
+                    # If we have filters, create one training example per filter
                     for filter_id in applied_filters:
-                        records.append(training_record)
-                        labels.append(filter_id)
-                else:
-                    # Negative example
-                    records.append(training_record)
-                    labels.append(0)  # No filter applied
+                        if filter_id is not None and filter_id > 0:  # Valid filter ID
+                            records.append(training_record.copy())
+                            labels.append(filter_id)
+                
+                # FIXED: Always add a negative example (no filter applied)
+                # This ensures we have both positive and negative examples
+                records.append(training_record.copy())
+                labels.append(0)  # Class 0 = no filter applied
+            
+            self.logger.debug(f"Processed chunk: {len(records)} records, {len(labels)} labels")
             
             return records, labels
             
@@ -283,10 +331,10 @@ class FilterPredictorTrainer:
             self.logger.error(f"Error processing training chunk: {str(e)}")
             return [], []
     
-    def _balance_classes_optimized(self, X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """OPTIMIZED: Handle class imbalance with memory efficiency."""
+    def _balance_classes_fixed(self, X: np.ndarray, y: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+        """FIXED: Handle class imbalance without unsupported parameters."""
         try:
-            self.logger.info("Balancing classes with optimized SMOTE")
+            self.logger.info("Balancing classes with fixed SMOTE")
             
             # Check class distribution
             unique_classes, class_counts = np.unique(y, return_counts=True)
@@ -294,15 +342,19 @@ class FilterPredictorTrainer:
             
             self.logger.info(f"Class distribution: {dict(zip(unique_classes, class_counts))}")
             
+            if len(unique_classes) < 2:
+                self.logger.warning("Only one class found, cannot apply SMOTE")
+                return X, y
+            
             if min_samples < 6:
                 self.logger.warning("Not enough samples for SMOTE, using original data")
                 return X, y
             
-            # Use optimized SMOTE parameters
+            # FIXED: Use SMOTE without n_jobs parameter
             smote = SMOTE(
                 random_state=42, 
-                k_neighbors=min(5, min_samples-1),
-                n_jobs=self.n_jobs
+                k_neighbors=min(5, min_samples-1)
+                # Removed n_jobs parameter as it's not supported in older versions
             )
             
             X_balanced, y_balanced = smote.fit_resample(X, y)
@@ -317,26 +369,41 @@ class FilterPredictorTrainer:
             self.logger.error(f"Error balancing classes: {str(e)}")
             return X, y
     
-    def _train_xgboost_optimized(self, X_train: np.ndarray, y_train: np.ndarray, 
-                                X_test: np.ndarray, y_test: np.ndarray) -> xgb.XGBClassifier:
-        """OPTIMIZED: Train XGBoost with hyperparameter optimization."""
+    def _train_xgboost_fixed(self, X_train: np.ndarray, y_train: np.ndarray, 
+                            X_test: np.ndarray, y_test: np.ndarray) -> xgb.XGBClassifier:
+        """FIXED: Train XGBoost with proper class handling."""
         try:
-            self.logger.info("Training optimized XGBoost model")
+            self.logger.info("Training fixed XGBoost model")
+            
+            # FIXED: Ensure we have valid classes
+            unique_classes = np.unique(y_train)
+            num_classes = len(unique_classes)
+            
+            self.logger.info(f"Training with {num_classes} classes: {unique_classes}")
+            
+            if num_classes < 2:
+                raise ValueError(f"Need at least 2 classes for classification, found {num_classes}")
+            
+            # FIXED: Use appropriate objective based on number of classes
+            if num_classes == 2:
+                objective = 'binary:logistic'
+                eval_metric = ['logloss', 'error']
+            else:
+                objective = 'multi:softprob'
+                eval_metric = ['mlogloss', 'merror']
             
             # Optimized parameters for performance
             params = {
-                'objective': 'multi:softprob',
-                'eval_metric': ['mlogloss', 'merror'],
+                'objective': objective,
+                'eval_metric': eval_metric,
                 'tree_method': 'hist',  # Fastest for large datasets
-                'max_depth': 8,
+                'max_depth': 6,  # Reduced for stability
                 'learning_rate': 0.1,
-                'n_estimators': 500,
+                'n_estimators': 300,  # Reduced for faster training
                 'subsample': 0.8,
                 'colsample_bytree': 0.8,
                 'random_state': 42,
                 'n_jobs': self.n_jobs,
-                'enable_categorical': False,
-                'early_stopping_rounds': self.early_stopping_rounds,
                 'verbosity': 1
             }
             
@@ -345,14 +412,21 @@ class FilterPredictorTrainer:
                 params['tree_method'] = 'gpu_hist'
                 params['gpu_id'] = 0
             
+            # FIXED: Explicitly set num_class for multi-class problems
+            if num_classes > 2:
+                params['num_class'] = num_classes
+            
             model = xgb.XGBClassifier(**params)
             
             # Train with validation set for early stopping
-            X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
-                X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
-            )
-            
-            eval_set = [(X_val_split, y_val_split), (X_test, y_test)]
+            if len(X_train) > 1000:  # Only split if we have enough data
+                X_train_split, X_val_split, y_train_split, y_val_split = train_test_split(
+                    X_train, y_train, test_size=0.2, random_state=42, stratify=y_train
+                )
+                eval_set = [(X_val_split, y_val_split), (X_test, y_test)]
+            else:
+                X_train_split, y_train_split = X_train, y_train
+                eval_set = [(X_test, y_test)]
             
             model.fit(
                 X_train_split, y_train_split,
@@ -360,7 +434,7 @@ class FilterPredictorTrainer:
                 verbose=False
             )
             
-            self.logger.info("XGBoost model training completed")
+            self.logger.info("XGBoost model training completed successfully")
             return model
             
         except Exception as e:
@@ -381,7 +455,10 @@ class FilterPredictorTrainer:
             
             # Multi-class AUC
             try:
-                auc_score = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='weighted')
+                if len(np.unique(y_test)) == 2:
+                    auc_score = roc_auc_score(y_test, y_pred_proba[:, 1])
+                else:
+                    auc_score = roc_auc_score(y_test, y_pred_proba, multi_class='ovr', average='weighted')
             except ValueError:
                 auc_score = None
             
@@ -398,11 +475,11 @@ class FilterPredictorTrainer:
             self.logger.info(f"  Weighted F1 Score: {f1_weighted:.4f}")
             self.logger.info(f"  Macro F1 Score: {f1_macro:.4f}")
             if auc_score:
-                self.logger.info(f"  Weighted AUC: {auc_score:.4f}")
+                self.logger.info(f"  AUC Score: {auc_score:.4f}")
             self.logger.info(f"  Accuracy: {report['accuracy']:.4f}")
             
-            self.logger.info("Top 10 Feature Importances:")
-            for feature, importance in sorted_features[:10]:
+            self.logger.info("Top Feature Importances:")
+            for feature, importance in sorted_features:
                 self.logger.info(f"  {feature}: {importance:.4f}")
             
             # Save detailed report
@@ -439,11 +516,11 @@ class FilterPredictorTrainer:
                 'model': self.model,
                 'encoders': self.feature_extractor.label_encoders,
                 'features': feature_names,
-                'classes_': self.model.classes_.tolist() if hasattr(self.model, 'classes_') else None, # Save model's class labels
+                'classes_': self.model.classes_.tolist() if hasattr(self.model, 'classes_') else None,
                 'feature_extractor': self.feature_extractor,
                 'training_date': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'config': self.config,
-                'model_version': '2.0',
+                'model_version': '2.1',  # Updated version
                 'optimization_level': 'high'
             }
             
@@ -510,7 +587,7 @@ def main():
     from utils.logging_config import setup_logging
     from database.postgresql_handler import PostgreSQLHandler
     
-    parser = argparse.ArgumentParser(description="Train Optimized Filter Predictor Model")
+    parser = argparse.ArgumentParser(description="Train Fixed Filter Predictor Model")
     parser.add_argument("--config", type=str, default="config/config.yaml")
     parser.add_argument("--use-gpu", action="store_true", help="Use GPU acceleration")
     parser.add_argument("--chunk-size", type=int, help="Override chunk size")
@@ -522,7 +599,7 @@ def main():
         setup_logging()
         logger = logging.getLogger(__name__)
         
-        logger.info("Starting optimized filter predictor training")
+        logger.info("Starting FIXED filter predictor training")
         
         # Load configuration
         config_manager = ConfigurationManager(args.config)
@@ -546,10 +623,10 @@ def main():
         success = trainer.train_model()
         
         if success:
-            logger.info("Optimized model training completed successfully")
+            logger.info("FIXED model training completed successfully")
             return 0
         else:
-            logger.error("Optimized model training failed")
+            logger.error("FIXED model training failed")
             return 1
             
     except Exception as e:

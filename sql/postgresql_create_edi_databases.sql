@@ -52,6 +52,30 @@ CREATE TABLE edi.filters (
     created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Validation results table (NEW - based on SQL Server schema and logs)
+CREATE TABLE edi.validation_results (
+    result_id BIGSERIAL PRIMARY KEY,  -- Use BIGSERIAL for auto-incrementing 64-bit integer
+    claim_id VARCHAR(50) NOT NULL,    -- Consider FK to edi.claims(claim_id)
+    validation_status VARCHAR(20) NOT NULL,
+    predicted_filters JSONB,          -- Storing as JSONB is more flexible in PostgreSQL
+    validation_details TEXT,
+    processing_time DECIMAL(10,6),
+    error_message TEXT,
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for edi.validation_results
+CREATE INDEX IF NOT EXISTS idx_validation_results_claim_id ON edi.validation_results(claim_id);
+CREATE INDEX IF NOT EXISTS idx_validation_results_status_date ON edi.validation_results(validation_status, created_date);
+CREATE INDEX IF NOT EXISTS idx_validation_results_date ON edi.validation_results(created_date);
+
+-- Note: You might want to add a foreign key constraint from edi.validation_results.claim_id to edi.claims.claim_id
+-- after ensuring data consistency or as part of your data loading strategy.
+-- Example:
+-- ALTER TABLE edi.validation_results
+-- ADD CONSTRAINT fk_validation_results_claim_id
+-- FOREIGN KEY (claim_id) REFERENCES edi.claims(claim_id);
+
 -- Processing chunks tracking
 CREATE TABLE edi.processed_chunks (
     chunk_id INTEGER PRIMARY KEY,
