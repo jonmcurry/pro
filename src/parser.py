@@ -109,14 +109,20 @@ class ClaimParser:
                 # Parse JSON claim data if present
                 if claim.get('claim_data'):
                     try:
-                        parsed_data = json.loads(claim['claim_data'])
-                        claim.update(parsed_data)
-                    except json.JSONDecodeError:
-                        self.logger.warning(f"Invalid JSON in claim {claim['claim_id']}")
+                        # Check if claim_data is already a dict or if it's a JSON string
+                        if isinstance(claim['claim_data'], str):
+                            parsed_data = json.loads(claim['claim_data'])
+                            claim.update(parsed_data)
+                        elif isinstance(claim['claim_data'], dict):
+                            # Already parsed, just update
+                            claim.update(claim['claim_data'])
+                    except (json.JSONDecodeError, TypeError) as e:
+                        self.logger.warning(f"Invalid JSON in claim {claim.get('claim_id', 'unknown')}: {str(e)}")
                 
                 # Convert JSON arrays back to lists for easier processing
-                claim['diagnoses'] = claim.get('diagnoses', [])
-                claim['procedures'] = claim.get('procedures', [])
+                # Ensure these are lists even if they come as other types
+                claim['diagnoses'] = claim.get('diagnoses', []) if isinstance(claim.get('diagnoses'), list) else []
+                claim['procedures'] = claim.get('procedures', []) if isinstance(claim.get('procedures'), list) else []
                 
                 # Add derived fields for ML processing
                 claim['diagnosis_count'] = len(claim['diagnoses'])

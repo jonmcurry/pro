@@ -88,13 +88,17 @@ class PostgreSQLHandler:
             c.total_charge_amount,
             c.service_date,
             c.claim_data,
+            c.patient_id,
+            c.provider_id,
             -- Aggregate diagnoses
             COALESCE(
                 array_agg(
                     DISTINCT jsonb_build_object(
                         'code', d.diagnosis_code,
-                        'sequence', d.sequence_number,
-                        'is_principal', d.is_principal
+                        'sequence', d.diagnosis_sequence,
+                        'is_principal', d.is_principal,
+                        'type', d.diagnosis_type,
+                        'description', d.description
                     )
                 ) FILTER (WHERE d.diagnosis_code IS NOT NULL),
                 ARRAY[]::jsonb[]
@@ -104,8 +108,12 @@ class PostgreSQLHandler:
                 array_agg(
                     DISTINCT jsonb_build_object(
                         'code', p.procedure_code,
-                        'sequence', p.sequence_number,
-                        'charge_amount', p.charge_amount
+                        'sequence', p.procedure_sequence,
+                        'charge_amount', p.charge_amount,
+                        'type', p.procedure_type,
+                        'description', p.description,
+                        'service_date', p.service_date,
+                        'diagnosis_pointers', p.diagnosis_pointers
                     )
                 ) FILTER (WHERE p.procedure_code IS NOT NULL),
                 ARRAY[]::jsonb[]
@@ -115,7 +123,7 @@ class PostgreSQLHandler:
         LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
         WHERE c.processing_status != 'COMPLETED'
         GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service,
-                 c.total_charge_amount, c.service_date, c.claim_data
+                 c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, c.provider_id
         ORDER BY c.service_date DESC
         LIMIT %s OFFSET %s
         """
@@ -140,6 +148,8 @@ class PostgreSQLHandler:
             c.provider_type,
             c.place_of_service,
             c.total_charge_amount,
+            c.patient_id,
+            c.provider_id,
             COALESCE(
                 array_agg(d.diagnosis_code) FILTER (WHERE d.diagnosis_code IS NOT NULL),
                 ARRAY[]::text[]
@@ -158,7 +168,8 @@ class PostgreSQLHandler:
         LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
         LEFT JOIN edi.validation_results vr ON c.claim_id = vr.claim_id AND vr.passed = true
         WHERE c.processing_status = 'COMPLETED'
-        GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service, c.total_charge_amount
+        GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service, 
+                 c.total_charge_amount, c.patient_id, c.provider_id
         LIMIT %s OFFSET %s
         """
         return self.execute_query(query, (limit, offset))
