@@ -90,6 +90,7 @@ class PostgreSQLHandler:
             c.claim_data,
             c.patient_id,
             c.provider_id,
+            c.processing_status,
             -- Aggregate diagnoses
             COALESCE(
                 array_agg(
@@ -121,13 +122,24 @@ class PostgreSQLHandler:
         FROM edi.claims c
         LEFT JOIN edi.diagnoses d ON c.claim_id = d.claim_id
         LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
-        WHERE c.processing_status != 'COMPLETED'
+        WHERE c.processing_status IN ('PENDING', 'SENT', 'RETRY')
         GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service,
-                 c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, c.provider_id
+                 c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, 
+                 c.provider_id, c.processing_status
         ORDER BY c.service_date DESC
         LIMIT %s OFFSET %s
         """
         return self.execute_query(query, (limit, offset))
+    
+    def get_total_unprocessed_claims(self) -> int:
+        """Get count of unprocessed claims."""
+        query = """
+        SELECT COUNT(*) as total
+        FROM edi.claims 
+        WHERE processing_status IN ('PENDING', 'SENT', 'RETRY')
+        """
+        result = self.execute_query(query)
+        return result[0]['total'] if result else 0
     
     def get_active_filters(self) -> List[Dict[str, Any]]:
         """Get active validation filters."""
@@ -175,16 +187,135 @@ class PostgreSQLHandler:
         return self.execute_query(query, (limit, offset))
     
     def mark_claims_processed(self, claim_ids: List[str]):
-        """Mark claims as processed in bulk."""
+        """Mark claims as processed in bulk using efficient UPDATE."""
         if not claim_ids:
-            return
+            self.logger.warning("No claim IDs provided for processing update")
+            return 0
             
+        conn = None
+        try:
+            conn = self.get_connection()
+            with conn.cursor() as cursor:
+                # Use efficient bulk update with ANY() operator
+                query = """
+                UPDATE edi.claims 
+                SET processing_status = 'COMPLETED', 
+                    processed_date = CURRENT_TIMESTAMP
+                WHERE claim_id = ANY(%s)
+                  AND processing_status != 'COMPLETED'
+                """
+                
+                cursor.execute(query, (claim_ids,))
+                updated_count = cursor.rowcount
+                conn.commit()
+                
+                self.logger.info(f"Successfully updated {updated_count} claims to COMPLETED status")
+                return updated_count
+                
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            self.logger.error(f"Bulk claims update error: {str(e)}")
+            raise
+        finally:
+            if conn:
+                self.return_connection(conn)
+    
+    def mark_claims_processed_bulk(self, claim_ids: List[str]):
+        """Alias for mark_claims_processed for backward compatibility."""
+        return self.mark_claims_processed(claim_ids)
+    
+    def update_claim_status_batch(self, claim_status_updates: List[Dict[str, str]]):
+        """Update multiple claims with different statuses in one operation."""
+        if not claim_status_updates:
+            return 0
+            
+        conn = None
+        try:
+            conn = self.get_connection()
+            with conn.cursor() as cursor:
+                # Create temporary table approach for complex batch updates
+                cursor.execute("""
+                CREATE TEMP TABLE temp_claim_updates (
+                    claim_id VARCHAR(50),
+                    new_status VARCHAR(20),
+                    error_message TEXT
+                ) ON COMMIT DROP
+                """)
+                
+                # Insert update data
+                update_data = [
+                    (update['claim_id'], update['status'], update.get('error_message', ''))
+                    for update in claim_status_updates
+                ]
+                
+                cursor.executemany(
+                    "INSERT INTO temp_claim_updates VALUES (%s, %s, %s)",
+                    update_data
+                )
+                
+                # Perform bulk update using JOIN
+                cursor.execute("""
+                UPDATE edi.claims 
+                SET processing_status = temp_claim_updates.new_status,
+                    processed_date = CURRENT_TIMESTAMP
+                FROM temp_claim_updates
+                WHERE edi.claims.claim_id = temp_claim_updates.claim_id
+                """)
+                
+                updated_count = cursor.rowcount
+                conn.commit()
+                
+                self.logger.info(f"Batch updated {updated_count} claims with various statuses")
+                return updated_count
+                
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            self.logger.error(f"Batch status update error: {str(e)}")
+            raise
+        finally:
+            if conn:
+                self.return_connection(conn)
+    
+    def get_processing_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive processing statistics."""
         query = """
-        UPDATE edi.claims 
-        SET processing_status = 'COMPLETED', processed_date = CURRENT_TIMESTAMP
-        WHERE claim_id = ANY(%s)
+        SELECT 
+            processing_status,
+            COUNT(*) as count,
+            MIN(service_date) as earliest_service,
+            MAX(service_date) as latest_service,
+            AVG(total_charge_amount) as avg_charge
+        FROM edi.claims
+        GROUP BY processing_status
+        ORDER BY processing_status
         """
-        self.execute_query(query, (claim_ids,))
+        
+        results = self.execute_query(query)
+        
+        # Convert to dictionary format
+        stats = {}
+        total_claims = 0
+        
+        for row in results:
+            status = row['processing_status']
+            count = row['count']
+            stats[status] = {
+                'count': count,
+                'earliest_service': row['earliest_service'],
+                'latest_service': row['latest_service'],
+                'avg_charge': float(row['avg_charge']) if row['avg_charge'] else 0
+            }
+            total_claims += count
+        
+        stats['total_claims'] = total_claims
+        stats['unprocessed_count'] = sum(
+            stats.get(status, {}).get('count', 0) 
+            for status in ['PENDING', 'SENT', 'RETRY']
+        )
+        
+        return stats
     
     def test_connection(self) -> bool:
         """Test database connection."""
