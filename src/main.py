@@ -39,13 +39,14 @@ class OptimizedProcessingOrchestrator:
         self.max_workers = config.get('max_workers', 4)
         self.memory_limit = config.get('memory_limit_percent', 70)
         self.batch_validation_size = config.get('batch_validation_size', 100)
+        self.cpu_limit = config.get('cpu_limit_percent', 80)
         
         # Performance optimization
         self.enable_batch_processing = config.get('enable_batch_processing', True)
         self.adaptive_chunk_sizing = config.get('adaptive_chunk_sizing', True)
         
     def process_claims(self):
-        """OPTIMIZED: Process all claims with enhanced parallel and batch processing."""
+        """FIXED: Process all claims with enhanced progress tracking and error handling."""
         start_time = time.time()
         total_processed = 0
         total_errors = 0
@@ -63,30 +64,46 @@ class OptimizedProcessingOrchestrator:
             if self.adaptive_chunk_sizing:
                 self.chunk_size = self._calculate_adaptive_chunk_size()
             
+            # FIXED: Better tracking of chunk processing
+            chunks_processed = 0
+            chunks_with_data = 0
+            
             # Process in optimized chunks
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 futures = []
                 chunk_futures_map = {}
                 
-                for chunk_id, chunk_data in self.parser.get_claim_chunks(self.chunk_size):
-                    # Check resource usage before submitting new work
-                    while not self._check_resource_limits():
-                        self.logger.warning(
-                            "Resource limits reached (Memory: {:.1f}%, CPU: {:.1f}%). Pausing submission of new chunks...".format(
-                                psutil.virtual_memory().percent, psutil.cpu_percent(interval=None)
-                            )
-                        )
-                        time.sleep(5) # Wait for 5 seconds for resources to free up
+                # FIXED: Wrap chunk generation in try-catch to handle generator issues
+                try:
+                    for chunk_id, chunk_data in self.parser.get_claim_chunks(self.chunk_size):
+                        chunks_with_data += 1
+                        self.logger.info(f"Processing chunk {chunk_id} with {len(chunk_data)} claims")
                         
-                    future = executor.submit(self._process_chunk_optimized, chunk_id, chunk_data)
-                    futures.append(future)
-                    chunk_futures_map[future] = chunk_id
+                        # Check resource usage before submitting new work
+                        while not self._check_resource_limits():
+                            self.logger.warning(
+                                "Resource limits reached (Memory: {:.1f}%, CPU: {:.1f}%). Pausing submission of new chunks...".format(
+                                    psutil.virtual_memory().percent, psutil.cpu_percent(interval=None)
+                                )
+                            )
+                            time.sleep(5)
+                        
+                        future = executor.submit(self._process_chunk_optimized, chunk_id, chunk_data)
+                        futures.append(future)
+                        chunk_futures_map[future] = chunk_id
+                        
+                except Exception as e:
+                    self.logger.error(f"Error in chunk generation: {str(e)}", exc_info=True)
+                    # Don't stop processing, continue with chunks already submitted
+                
+                self.logger.info(f"Submitted {len(futures)} chunks for processing")
                 
                 # Process completed futures as they finish
                 for future in as_completed(futures):
                     try:
                         chunk_result = future.result()
                         chunk_id = chunk_futures_map[future]
+                        chunks_processed += 1
                         
                         total_processed += chunk_result['processed_count']
                         total_errors += chunk_result.get('error_count', 0)
@@ -98,7 +115,7 @@ class OptimizedProcessingOrchestrator:
                                 self.metrics.increment_error_count()
                             
                             # Record batch metrics
-                            self.metrics.record_batch_size(len(chunk_data))
+                            self.metrics.record_batch_size(chunk_result.get('chunk_size', 0))
                             self.metrics.record_batch_duration(chunk_result['duration'])
                         
                         # Mark chunk as processed with statistics
@@ -108,10 +125,11 @@ class OptimizedProcessingOrchestrator:
                             chunk_result['duration']
                         )
                         
-                        # Log progress
+                        # Enhanced progress logging
                         progress = (total_processed / total_claims) * 100 if total_claims > 0 else 0
                         self.logger.info(
                             f"Progress: {progress:.1f}% ({total_processed}/{total_claims}) "
+                            f"Chunks: {chunks_processed}/{chunks_with_data} "
                             f"Errors: {total_errors}"
                         )
                         
@@ -122,13 +140,24 @@ class OptimizedProcessingOrchestrator:
                             self.metrics.increment_error_count()
                         total_errors += 1
             
-            # Final statistics and cleanup
+            # Final statistics
             duration = time.time() - start_time
             rate = total_processed / (duration / 3600) if duration > 0 else 0
             
             self.logger.info(f"Processing completed: {total_processed} claims in {duration:.2f} seconds")
             self.logger.info(f"Processing rate: {rate:.0f} claims/hour")
             self.logger.info(f"Total errors: {total_errors}")
+            self.logger.info(f"Chunks processed: {chunks_processed}/{chunks_with_data}")
+            
+            # Check if all claims were processed
+            if total_processed < total_claims:
+                remaining = total_claims - total_processed
+                self.logger.warning(f"Processing incomplete: {remaining} claims remaining")
+                
+                # Check for claims in retry queue
+                retry_chunks = self.parser.get_retry_chunks()
+                if retry_chunks:
+                    self.logger.info(f"Found {len(retry_chunks)} chunks in retry queue")
             
             # Update final metrics safely
             if self.metrics:
@@ -143,7 +172,7 @@ class OptimizedProcessingOrchestrator:
             raise
     
     def _process_chunk_optimized(self, chunk_id: int, chunk_data: List[Dict]) -> Dict[str, Any]:
-        """OPTIMIZED: Process a single chunk with batch validation and enhanced error handling."""
+        """FIXED: Process a single chunk with enhanced error tracking."""
         start_time = time.time()
         processed_count = 0
         error_count = 0
@@ -154,7 +183,7 @@ class OptimizedProcessingOrchestrator:
             if self.enable_batch_processing and len(chunk_data) >= self.batch_validation_size:
                 # Use batch validation for better performance
                 validation_results = self._validate_claims_batch(chunk_data)
-                processed_count = len(chunk_data) # Assume all are processed if batch validation is used
+                processed_count = len(chunk_data)
             else:
                 # Fall back to individual validation
                 validation_results = []
@@ -164,7 +193,6 @@ class OptimizedProcessingOrchestrator:
                         validation_results.append(result)
                         processed_count += 1
                         
-                        # Record individual claim processing time
                         if self.metrics and 'processing_time' in result:
                             self.metrics.record_processing_duration(result['processing_time'])
                         
@@ -187,9 +215,7 @@ class OptimizedProcessingOrchestrator:
                 storage_success = self.storage.store_validation_results(validation_results)
                 if not storage_success:
                     self.logger.error(f"Failed to store results for chunk {chunk_id}")
-                    # Consider how to count errors here: this is a storage error, not necessarily a validation error for all claims.
-                    # For simplicity, we'll count the whole batch as having a storage issue if it fails.
-                    error_count += len(validation_results) 
+                    error_count += len(validation_results)
             
             # Update claim processing status in bulk
             claim_ids = [claim.get('claim_id') for claim in chunk_data if claim.get('claim_id')]
@@ -201,9 +227,10 @@ class OptimizedProcessingOrchestrator:
             
             return {
                 'chunk_id': chunk_id,
-                'processed_count': processed_count, # Number of claims attempted for validation
-                'error_count': error_count,         # Number of claims that had a validation or storage error
+                'processed_count': processed_count,
+                'error_count': error_count,
                 'duration': duration,
+                'chunk_size': len(chunk_data),
                 'claims_per_second': processed_count / duration if duration > 0 else 0
             }
                 
@@ -264,14 +291,20 @@ class OptimizedProcessingOrchestrator:
             return self.chunk_size
     
     def _check_resource_limits(self) -> bool:
-        """Enhanced resource limit checking."""
+        """Enhanced resource limit checking with more detailed logging."""
         memory_percent = psutil.virtual_memory().percent
         cpu_percent = psutil.cpu_percent(interval=0.1)
         
         if memory_percent > self.memory_limit:
-            self.logger.warning(f"Memory usage high: {memory_percent}%")
+            self.logger.warning(f"Memory usage high: {memory_percent}% (limit: {self.memory_limit}%)")
             gc.collect()  # Force garbage collection
-            return False
+            
+            # Check again after cleanup
+            new_memory_percent = psutil.virtual_memory().percent
+            self.logger.info(f"Memory after cleanup: {new_memory_percent}%")
+            
+            if new_memory_percent > self.memory_limit:
+                return False
         
         if cpu_percent > 90:  # High CPU usage
             self.logger.warning(f"CPU usage high: {cpu_percent}%")

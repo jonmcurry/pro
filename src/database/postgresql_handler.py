@@ -76,7 +76,7 @@ class PostgreSQLHandler:
                 self.return_connection(conn)
     
     def get_enriched_claims(self, limit: int, offset: int) -> List[Dict[str, Any]]:
-        """Get enriched claims with all related data in single query."""
+        """FIXED: Get enriched claims with better error handling and logging."""
         query = """
         SELECT 
             c.claim_id,
@@ -122,12 +122,19 @@ class PostgreSQLHandler:
         LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
         WHERE c.processing_status IN ('PENDING', 'SENT', 'RETRY')
         GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service,
-                 c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, 
-                 c.provider_id, c.processing_status
-        ORDER BY c.service_date DESC
+                c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, 
+                c.provider_id, c.processing_status
+        ORDER BY c.service_date DESC, c.claim_id  -- Added claim_id for consistent ordering
         LIMIT %s OFFSET %s
         """
-        return self.execute_query(query, (limit, offset))
+        
+        try:
+            result = self.execute_query(query, (limit, offset))
+            self.logger.debug(f"Retrieved {len(result)} claims with limit={limit}, offset={offset}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error fetching enriched claims (limit={limit}, offset={offset}): {str(e)}")
+            raise
     
     def get_total_unprocessed_claims(self) -> int:
         """Get count of unprocessed claims."""
@@ -226,6 +233,68 @@ class PostgreSQLHandler:
         finally:
             if conn:
                 self.return_connection(conn)
+
+
+    def get_pending_claims(self, limit: int, offset: int) -> List[Dict[str, Any]]:
+        """FIXED: Get PENDING claims only with proper ordering."""
+        query = """
+        SELECT 
+            c.claim_id,
+            c.patient_age,
+            c.provider_type,
+            c.place_of_service,
+            c.total_charge_amount,
+            c.service_date,
+            c.claim_data,
+            c.patient_id,
+            c.provider_id,
+            c.processing_status,
+            -- Aggregate diagnoses
+            COALESCE(
+                array_agg(
+                    DISTINCT jsonb_build_object(
+                        'code', d.diagnosis_code,
+                        'sequence', d.diagnosis_sequence,
+                        'is_principal', d.is_principal,
+                        'type', d.diagnosis_type,
+                        'description', d.description
+                    )
+                ) FILTER (WHERE d.diagnosis_code IS NOT NULL),
+                ARRAY[]::jsonb[]
+            ) as diagnoses,
+            -- Aggregate procedures
+            COALESCE(
+                array_agg(
+                    DISTINCT jsonb_build_object(
+                        'code', p.procedure_code,
+                        'sequence', p.procedure_sequence,
+                        'charge_amount', p.charge_amount,
+                        'type', p.procedure_type,
+                        'description', p.description,
+                        'service_date', p.service_date,
+                        'diagnosis_pointers', p.diagnosis_pointers
+                    )
+                ) FILTER (WHERE p.procedure_code IS NOT NULL),
+                ARRAY[]::jsonb[]
+            ) as procedures
+        FROM edi.claims c
+        LEFT JOIN edi.diagnoses d ON c.claim_id = d.claim_id
+        LEFT JOIN edi.procedures p ON c.claim_id = p.claim_id
+        WHERE c.processing_status = 'PENDING'
+        GROUP BY c.claim_id, c.patient_age, c.provider_type, c.place_of_service,
+                c.total_charge_amount, c.service_date, c.claim_data, c.patient_id, 
+                c.provider_id, c.processing_status
+        ORDER BY c.claim_id  -- Consistent ordering is crucial for offset/limit
+        LIMIT %s OFFSET %s
+        """
+        
+        try:
+            result = self.execute_query(query, (limit, offset))
+            self.logger.info(f"Retrieved {len(result)} PENDING claims with limit={limit}, offset={offset}")
+            return result
+        except Exception as e:
+            self.logger.error(f"Error fetching PENDING claims (limit={limit}, offset={offset}): {str(e)}")
+            raise
     
     def mark_claims_processed_bulk(self, claim_ids: List[str]):
         """Alias for mark_claims_processed for backward compatibility."""
