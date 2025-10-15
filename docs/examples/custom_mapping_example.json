@@ -1,0 +1,184 @@
+{
+  "mapping_id": null,
+  "mapping_name": "Custom Clinic Format",
+  "source_system": "CUSTOM",
+  "field_mappings": [
+    {
+      "csv_header": "Account Number",
+      "alternate_headers": ["Acct", "Account #", "AcctNum"],
+      "target_field": "patient_control_number",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        { "MaxLength": 38 },
+        "NotEmpty"
+      ]
+    },
+    {
+      "csv_header": "Service Date",
+      "alternate_headers": ["DOS", "Date", "Svc Date"],
+      "target_field": "date_of_service_from",
+      "target_table": "encounter",
+      "data_type": "Date",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": []
+    },
+    {
+      "csv_header": "Procedure",
+      "alternate_headers": ["CPT", "CPT Code", "Proc Code"],
+      "target_field": "procedure_code",
+      "target_table": "service_line",
+      "data_type": "String",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        "CptHcpcs"
+      ]
+    },
+    {
+      "csv_header": "Amount",
+      "alternate_headers": ["Charge", "Billed", "Charge Amount"],
+      "target_field": "line_item_charge_amount",
+      "target_table": "service_line",
+      "data_type": "Decimal",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        { "Range": { "min": 0.0, "max": 999999.99 } }
+      ]
+    },
+    {
+      "csv_header": "Provider NPI",
+      "alternate_headers": ["NPI", "Rendering NPI", "Prov NPI"],
+      "target_field": "rendering_provider_npi",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": false,
+      "default_value": null,
+      "validation_rules": [
+        "Npi"
+      ]
+    },
+    {
+      "csv_header": "Diagnosis 1",
+      "alternate_headers": ["DX1", "Primary Dx", "Diagnosis"],
+      "target_field": "diagnosis_code",
+      "target_table": "encounter_diagnosis",
+      "data_type": "String",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        "Icd10"
+      ]
+    },
+    {
+      "csv_header": "Patient Last Name",
+      "alternate_headers": ["Last Name", "Surname", "LName"],
+      "target_field": "subscriber_last_name",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        "NotEmpty",
+        { "MaxLength": 60 }
+      ]
+    },
+    {
+      "csv_header": "Patient First Name",
+      "alternate_headers": ["First Name", "FName", "Given Name"],
+      "target_field": "subscriber_first_name",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": [
+        "NotEmpty",
+        { "MaxLength": 35 }
+      ]
+    },
+    {
+      "csv_header": "DOB",
+      "alternate_headers": ["Date of Birth", "Birth Date", "Birthdate"],
+      "target_field": "subscriber_birth_date",
+      "target_table": "encounter",
+      "data_type": "Date",
+      "is_required": true,
+      "default_value": null,
+      "validation_rules": []
+    },
+    {
+      "csv_header": "Gender",
+      "alternate_headers": ["Sex", "Patient Sex"],
+      "target_field": "subscriber_gender",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": false,
+      "default_value": "U",
+      "validation_rules": [
+        { "OneOf": ["M", "F", "U"] }
+      ]
+    },
+    {
+      "csv_header": "Units",
+      "alternate_headers": ["Unit Count", "Qty", "Quantity"],
+      "target_field": "service_unit_count",
+      "target_table": "service_line",
+      "data_type": "Decimal",
+      "is_required": false,
+      "default_value": "1",
+      "validation_rules": [
+        { "Range": { "min": 0.0, "max": 9999.9 } }
+      ]
+    },
+    {
+      "csv_header": "Modifier 1",
+      "alternate_headers": ["Mod1", "Modifier"],
+      "target_field": "procedure_modifier_1",
+      "target_table": "service_line",
+      "data_type": "String",
+      "is_required": false,
+      "default_value": null,
+      "validation_rules": [
+        { "MaxLength": 2 }
+      ]
+    },
+    {
+      "csv_header": "POS",
+      "alternate_headers": ["Place of Service", "Place"],
+      "target_field": "place_of_service_code",
+      "target_table": "encounter",
+      "data_type": "String",
+      "is_required": false,
+      "default_value": null,
+      "validation_rules": [
+        { "MaxLength": 2 }
+      ]
+    }
+  ],
+  "transformations": [
+    {
+      "target_field": "patient_control_number",
+      "transformation_type": "Trim"
+    },
+    {
+      "target_field": "procedure_code",
+      "transformation_type": "Uppercase"
+    },
+    {
+      "target_field": "rendering_provider_npi",
+      "transformation_type": { "Custom": { "function_name": "normalize_npi" } }
+    },
+    {
+      "target_field": "diagnosis_code",
+      "transformation_type": { "Custom": { "function_name": "clean_icd10" } }
+    },
+    {
+      "target_field": "subscriber_gender",
+      "transformation_type": { "Custom": { "function_name": "standardize_gender" } }
+    }
+  ]
+}

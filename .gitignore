@@ -1,0 +1,186 @@
+# Professional SMART - Git Ignore Rules
+
+# ============================================================================
+# Rust
+# ============================================================================
+# Compiled files
+/target/
+**/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock file (uncomment if this is a library crate)
+# Cargo.lock
+
+# ============================================================================
+# Environment & Configuration
+# ============================================================================
+# Environment variables (NEVER commit secrets!)
+.env
+.env.local
+.env.*.local
+
+# Local configuration overrides
+config.local.toml
+config.local.yaml
+
+# ============================================================================
+# IDE & Editor Files
+# ============================================================================
+# Visual Studio Code
+.vscode/
+*.code-workspace
+
+# JetBrains IDEs (IntelliJ IDEA, CLion, RustRover)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# Operating System Files
+# ============================================================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+.Trash-*
+
+# ============================================================================
+# Application Data & Logs
+# ============================================================================
+# Log files
+*.log
+logs/
+*.log.*
+
+# Data directories
+/data/import/*
+/data/archive/*
+/data/errors/*
+/data/temp/*
+
+# Keep directory structure
+!.gitkeep
+
+# ============================================================================
+# Testing & Coverage
+# ============================================================================
+# Test output
+/test-results/
+/coverage/
+*.profraw
+*.profdata
+
+# Benchmark results
+/benchmarks/results/
+
+# ============================================================================
+# Build Artifacts
+# ============================================================================
+# Release builds
+/release/
+/dist/
+
+# Documentation builds
+/book/
+/target/doc/
+
+# ============================================================================
+# Database & Migrations
+# ============================================================================
+# Local database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Database dumps (be careful not to commit sensitive data!)
+*.sql.gz
+*.dump
+
+# ============================================================================
+# Temporary Files
+# ============================================================================
+# Temporary processing files
+*.tmp
+*.temp
+*.cache
+
+# Lock files
+*.lock
+!Cargo.lock
+
+# ============================================================================
+# Security & Credentials
+# ============================================================================
+# SSL/TLS certificates and keys
+*.pem
+*.key
+*.crt
+*.pfx
+*.p12
+
+# SSH keys
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# Credentials files
+credentials.json
+secrets.json
+.secrets
+
+# ============================================================================
+# Performance & Profiling
+# ============================================================================
+# Flamegraph outputs
+flamegraph.svg
+perf.data
+perf.data.old
+
+# Criterion benchmark data
+/target/criterion/
+
+# ============================================================================
+# Package Manager
+# ============================================================================
+# Node.js (if frontend exists)
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# ============================================================================
+# Docker (if used for development despite Rule 6)
+# ============================================================================
+# Docker override files (local development only)
+docker-compose.override.yml
+.dockerignore.local

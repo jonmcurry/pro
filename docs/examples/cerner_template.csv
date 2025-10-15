@@ -1,0 +1,4 @@
+Encounter_ID,Service_Date,CPT_Code,Charge_Amount,Provider_Name,Department
+C98765,2024-01-15,99213,150.00,Smith John MD,Internal Medicine
+C98766,2024-01-15,99214,200.00,Jones Mary DO,Family Practice
+C98767,2024-01-15,99215,250.00,Williams Robert MD,Cardiology

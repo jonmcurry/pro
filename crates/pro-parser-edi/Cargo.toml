@@ -1,0 +1,33 @@
+[package]
+name = "pro-parser-edi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Internal dependencies
+pro-common = { path = "../pro-common" }
+
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures-core = { workspace = true }
+async-stream = { workspace = true }
+
+# Decimal type
+rust_decimal = "1.36"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,51 @@
+[package]
+name = "pro-service"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pro-worker = { path = "../pro-worker" }
+pro-common = { path = "../pro-common" }
+pro-db = { path = "../pro-db" }
+
+# Async runtime
+tokio = { workspace = true }
+futures = { workspace = true }
+
+# Web framework (for WebSocket API)
+axum = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# UUIDs
+uuid = { workspace = true }
+
+# Windows service
+windows-service = "0.7"
+
+# Configuration
+dotenvy = { workspace = true }
+config = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Date/Time
+chrono = { workspace = true }
+
+# CLI
+clap = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winsvc", "winbase", "winerror", "winnt"] }

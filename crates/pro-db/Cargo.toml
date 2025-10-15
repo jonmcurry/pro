@@ -1,0 +1,37 @@
+[package]
+name = "pro-db"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Internal dependencies
+pro-common = { path = "../pro-common" }
+
+# Database
+sqlx = { workspace = true }
+
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+
+# Decimal type for financial calculations
+rust_decimal = "1.36"
+rust_decimal_macros = "1.36"
+
+# Hashing for deduplication
+sha2 = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

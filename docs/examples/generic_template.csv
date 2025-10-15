@@ -1,0 +1,4 @@
+Patient ID,Date of Service,CPT Code,Charges,Provider,Patient Last Name,Patient First Name,DOB,Gender
+ABC123,2024-01-15,99213,150.00,Dr. Smith,Smith,John,1980-05-12,M
+ABC124,2024-01-15,99214,200.00,Dr. Jones,Jones,Mary,1975-08-23,F
+ABC125,2024-01-15,99215,250.00,Dr. Williams,Williams,Robert,1992-03-15,M

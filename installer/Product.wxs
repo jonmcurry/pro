@@ -1,0 +1,387 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <!-- Product Information -->
+  <Product Id="*"
+           Name="Professional SMART"
+           Language="1033"
+           Version="1.0.0.0"
+           Manufacturer="Professional SMART Team"
+           UpgradeCode="8F8D8F8D-8F8D-8F8D-8F8D-8F8D8F8D8F8D">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Description="Professional SMART Claims Processing System"
+             Comments="Automated claims processing, validation, and flagging system for healthcare providers"
+             Manufacturer="Professional SMART Team" />
+
+    <!-- Upgrade Logic -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Professional SMART is already installed. Please uninstall it first." />
+
+    <!-- Media -->
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Icons -->
+    <!-- <Icon Id="ProductIcon" SourceFile="icon.ico" /> -->
+    <!-- <Property Id="ARPPRODUCTICON" Value="ProductIcon" /> -->
+
+    <!-- Properties -->
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/professional-smart" />
+    <Property Id="ARPCONTACT" Value="support@professional-smart.com" />
+    <Property Id="ARPCOMMENTS" Value="Healthcare claims processing system with comprehensive rules engine and RVU-based payment calculations" />
+
+    <!-- Database Configuration Properties -->
+    <Property Id="DB_HOST" Value="localhost" />
+    <Property Id="DB_PORT" Value="5432" />
+    <Property Id="DB_NAME" Value="professional_smart" />
+    <Property Id="DB_USER" Value="postgres" />
+    <Property Id="DB_PASSWORD" Secure="yes" />
+
+    <!-- Installation Directory -->
+    <Directory Id="TARGETDIR" Name="SourceDir">
+
+      <!-- Program Files -->
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Professional SMART">
+
+          <!-- Binaries -->
+          <Directory Id="BinFolder" Name="bin">
+            <Component Id="MainExecutable" Guid="1A1A1A1A-1B1B-1C1C-1D1D-1E1E1E1E1E1E" Win64="yes">
+              <File Id="ProServiceExe"
+                    Source="$(var.SolutionDir)target\release\pro-service.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+
+              <!-- Service Installation -->
+              <ServiceInstall Id="ServiceInstaller"
+                              Type="ownProcess"
+                              Name="ProfessionalSMART"
+                              DisplayName="Professional SMART Claims Processing Service"
+                              Description="Automated claims processing, validation, and flagging system for healthcare providers"
+                              Start="auto"
+                              Account="LocalSystem"
+                              ErrorControl="normal"
+                              Arguments="service" />
+
+              <ServiceControl Id="ServiceControl"
+                              Start="install"
+                              Stop="both"
+                              Remove="both"
+                              Name="ProfessionalSMART"
+                              Wait="no" />
+            </Component>
+
+            <Component Id="SetupExecutable" Guid="2B2B2B2B-2C2C-2D2D-2E2E-2F2F2F2F2F2F" Win64="yes">
+              <File Id="ProSetupExe"
+                    Source="$(var.SolutionDir)target\release\pro-setup.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
+          </Directory>
+
+          <!-- Documentation -->
+          <Directory Id="DocsFolder" Name="docs">
+            <Component Id="Documentation" Guid="3C3C3C3C-3D3D-3E3E-3F3F-4A4A4A4A4A4A" Win64="yes">
+              <File Id="InstallationDoc"
+                    Source="$(var.SolutionDir)docs\INSTALLATION.md"
+                    KeyPath="yes" />
+              <File Id="ConfigurationDoc"
+                    Source="$(var.SolutionDir)docs\CONFIGURATION.md" />
+              <File Id="DatabaseSetupDoc"
+                    Source="$(var.SolutionDir)docs\DATABASE_SETUP.md" />
+              <File Id="PerformanceTuningDoc"
+                    Source="$(var.SolutionDir)docs\PERFORMANCE_TUNING.md" />
+              <File Id="LicenseFile"
+                    Source="$(var.SolutionDir)LICENSE" />
+            </Component>
+          </Directory>
+
+          <!-- Config Templates -->
+          <Directory Id="ConfigFolder" Name="config">
+            <Component Id="ConfigTemplates" Guid="4B4B4B4B-4C4C-4D4D-4E4E-4F4F4F4F4F4F" Win64="yes">
+              <File Id="EnvTemplate"
+                    Source="$(var.SolutionDir).env.example"
+                    Name=".env.template"
+                    KeyPath="yes" />
+            </Component>
+          </Directory>
+
+          <!-- Data Directories (empty, just create structure) -->
+          <Directory Id="DataFolder" Name="data">
+            <Directory Id="InputFolder" Name="input">
+              <Component Id="InputDir" Guid="5C5C5C5C-5D5D-5E5E-5F5F-6A6A6A6A6A6A" Win64="yes">
+                <CreateFolder />
+              </Component>
+            </Directory>
+            <Directory Id="ProcessedFolder" Name="processed">
+              <Component Id="ProcessedDir" Guid="6B6B6B6B-6C6C-6D6D-6E6E-6F6F6F6F6F6F" Win64="yes">
+                <CreateFolder />
+              </Component>
+            </Directory>
+            <Directory Id="ErrorFolder" Name="error">
+              <Component Id="ErrorDir" Guid="7C7C7C7C-7D7D-7E7E-7F7F-8A8A8A8A8A8A" Win64="yes">
+                <CreateFolder />
+              </Component>
+            </Directory>
+          </Directory>
+
+          <!-- Logs Directory -->
+          <Directory Id="LogsFolder" Name="logs">
+            <Component Id="LogsDir" Guid="8B8B8B8B-8C8C-8D8D-8E8E-8F8F8F8F8F8F" Win64="yes">
+              <CreateFolder />
+            </Component>
+          </Directory>
+
+          <!-- Migrations Directory -->
+          <Directory Id="MigrationsFolder" Name="migrations">
+            <Component Id="MigrationFiles" Guid="DDDDDDDD-EEEE-FFFF-0000-111111111111" Win64="yes">
+              <File Id="Migration001" Source="$(var.SolutionDir)migrations\001_create_schemas.sql" KeyPath="yes" />
+              <File Id="Migration002" Source="$(var.SolutionDir)migrations\002_create_organization_tables.sql" />
+              <File Id="Migration003" Source="$(var.SolutionDir)migrations\003_create_provider_tables.sql" />
+              <File Id="Migration004" Source="$(var.SolutionDir)migrations\004_create_encounter_tables.sql" />
+              <File Id="Migration005" Source="$(var.SolutionDir)migrations\005_create_diagnosis_procedure_tables.sql" />
+              <File Id="Migration006" Source="$(var.SolutionDir)migrations\006_create_flag_tables.sql" />
+              <File Id="Migration007" Source="$(var.SolutionDir)migrations\007_create_staging_tables.sql" />
+              <File Id="Migration008" Source="$(var.SolutionDir)migrations\008_create_audit_tables.sql" />
+              <File Id="Migration009" Source="$(var.SolutionDir)migrations\009_create_rvu_tables.sql" />
+              <File Id="Migration010" Source="$(var.SolutionDir)migrations\010_create_denial_tables.sql" />
+              <File Id="Migration011" Source="$(var.SolutionDir)migrations\011_create_schedule_tables.sql" />
+              <File Id="Migration012" Source="$(var.SolutionDir)migrations\012_create_ml_tables.sql" />
+              <File Id="Migration013" Source="$(var.SolutionDir)migrations\013_create_dashboard_views.sql" />
+              <File Id="Migration014" Source="$(var.SolutionDir)migrations\014_create_utility_functions.sql" />
+              <File Id="Migration015" Source="$(var.SolutionDir)migrations\015_create_fifo_queue.sql" />
+              <File Id="Migration016" Source="$(var.SolutionDir)migrations\016_phase5_performance_indexes.sql" />
+              <File Id="Migration017" Source="$(var.SolutionDir)migrations\017_streaming_progress_tracking.sql" />
+              <File Id="Migration018" Source="$(var.SolutionDir)migrations\018_phase6_strategic_indexes.sql" />
+              <File Id="Migration019" Source="$(var.SolutionDir)migrations\019_phase6_materialized_views.sql" />
+            </Component>
+          </Directory>
+
+        </Directory>
+      </Directory>
+
+      <!-- ProgramData for configuration -->
+      <Directory Id="CommonAppDataFolder">
+        <Directory Id="ProgramDataFolder" Name="Professional SMART">
+          <Component Id="ProgramDataRoot" Guid="CFCFCFCF-D0D0-D1D1-D2D2-D3D3D3D3D3D3">
+            <CreateFolder>
+              <Permission User="Users" GenericAll="yes" />
+            </CreateFolder>
+            <RemoveFolder Id="RemoveProgramDataRoot" On="uninstall" Directory="ProgramDataFolder" />
+            <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART" Name="ProgramDataRoot" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
+          <Directory Id="ProgramDataConfigFolder" Name="config">
+            <Component Id="ProgramDataConfig" Guid="9C9C9C9C-9D9D-9E9E-9F9F-AAAAAAAAAAAA">
+              <CreateFolder>
+                <Permission User="Users" GenericAll="yes" />
+              </CreateFolder>
+              <RemoveFolder Id="RemoveProgramDataConfig" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART" Name="ConfigFolder" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
+          </Directory>
+          <Directory Id="ProgramDataLogsFolder" Name="logs">
+            <Component Id="ProgramDataLogs" Guid="ABABABAB-ACAC-ADAD-AEAE-AFAFAFAFAFAF">
+              <CreateFolder>
+                <Permission User="Users" GenericAll="yes" />
+              </CreateFolder>
+              <RemoveFolder Id="RemoveProgramDataLogs" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART" Name="LogsFolder" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+
+      <!-- Start Menu -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Professional SMART">
+          <Component Id="ApplicationShortcuts" Guid="BCBCBCBC-BDBD-BEBE-BFBF-CCCCCCCCCCCC">
+
+            <Shortcut Id="ConfigWizardShortcut"
+                      Name="Configuration Wizard"
+                      Description="Configure Professional SMART settings"
+                      Target="[BinFolder]pro-setup.exe"
+                      WorkingDirectory="INSTALLFOLDER" />
+
+            <Shortcut Id="DocumentationShortcut"
+                      Name="Documentation"
+                      Description="Professional SMART documentation"
+                      Target="[DocsFolder]" />
+
+            <Shortcut Id="UninstallShortcut"
+                      Name="Uninstall Professional SMART"
+                      Description="Uninstall Professional SMART"
+                      Target="[SystemFolder]msiexec.exe"
+                      Arguments="/x [ProductCode]" />
+
+            <RemoveFolder Id="ApplicationProgramsFolder" On="uninstall" />
+
+            <RegistryValue Root="HKCU"
+                           Key="Software\ProfessionalSMART"
+                           Name="installed"
+                           Type="integer"
+                           Value="1"
+                           KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+
+    </Directory>
+
+    <!-- Features -->
+    <Feature Id="Complete" Level="1"
+             Title="Professional SMART"
+             Description="Complete installation of Professional SMART claims processing system"
+             Display="expand"
+             ConfigurableDirectory="INSTALLFOLDER">
+
+      <Feature Id="MainApplication" Level="1"
+               Title="Core Application"
+               Description="Main application binaries and service"
+               Absent="disallow">
+        <ComponentRef Id="MainExecutable" />
+        <ComponentRef Id="SetupExecutable" />
+        <ComponentRef Id="InputDir" />
+        <ComponentRef Id="ProcessedDir" />
+        <ComponentRef Id="ErrorDir" />
+        <ComponentRef Id="LogsDir" />
+        <ComponentRef Id="MigrationFiles" />
+        <ComponentRef Id="ProgramDataRoot" />
+        <ComponentRef Id="ProgramDataConfig" />
+        <ComponentRef Id="ProgramDataLogs" />
+      </Feature>
+
+      <Feature Id="Documentation" Level="1"
+               Title="Documentation"
+               Description="Installation guides, configuration reference, and troubleshooting">
+        <ComponentRef Id="Documentation" />
+      </Feature>
+
+      <Feature Id="ConfigTemplates" Level="1"
+               Title="Configuration Templates"
+               Description="Example configuration files">
+        <ComponentRef Id="ConfigTemplates" />
+      </Feature>
+
+      <Feature Id="StartMenuShortcuts" Level="1"
+               Title="Start Menu Shortcuts"
+               Description="Shortcuts in the Start Menu">
+        <ComponentRef Id="ApplicationShortcuts" />
+      </Feature>
+
+    </Feature>
+
+    <!-- Prerequisite Check Properties -->
+    <Property Id="PREREQ_PSQL_STATUS" Value="CHECKING" />
+    <Property Id="PREREQ_PGSERVICE_STATUS" Value="CHECKING" />
+    <Property Id="PREREQ_DISK_STATUS" Value="CHECKING" />
+    <Property Id="PREREQ_MESSAGE" Value="Checking prerequisites..." />
+
+    <!-- UI Sequence with Custom Dialogs -->
+    <UIRef Id="WixUI_FeatureTree" />
+    <UIRef Id="WixUI_ErrorProgressText" />
+
+    <UI>
+      <!-- Insert Prerequisite and Database Configuration dialogs -->
+      <DialogRef Id="PrerequisiteDlg" />
+      <DialogRef Id="DatabaseConfigDlg" />
+
+      <!-- Run prerequisite check BEFORE showing PrerequisiteDlg -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">1</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="PrerequisiteDlg" Order="2">1</Publish>
+
+      <!-- Change LicenseDlg Next to go to PrerequisiteDlg (if license dialog is used) -->
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="PrerequisiteDlg" Order="2">LicenseAccepted = "1"</Publish>
+
+      <!-- Run prerequisite check again when coming back from CustomizeDlg -->
+      <Publish Dialog="CustomizeDlg" Control="Back" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">1</Publish>
+      <Publish Dialog="CustomizeDlg" Control="Back" Event="NewDialog" Value="PrerequisiteDlg" Order="2">1</Publish>
+
+      <!-- PrerequisiteDlg Next goes to CustomizeDlg -->
+      <Publish Dialog="PrerequisiteDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg" Order="1">1</Publish>
+
+      <!-- Change CustomizeDlg Next to go to DatabaseConfigDlg instead of VerifyReadyDlg -->
+      <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="DatabaseConfigDlg" Order="2">1</Publish>
+
+      <!-- Override VerifyReadyDlg back button to go to DatabaseConfigDlg -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DatabaseConfigDlg" Order="2">1</Publish>
+    </UI>
+
+    <!-- License -->
+    <!-- <WixVariable Id="WixUILicenseRtf" Value="License.rtf" /> -->
+
+    <!-- Custom Actions -->
+    <!-- VBScript to check prerequisites -->
+    <Binary Id="CheckPrerequisitesScript" SourceFile="CheckPrerequisites.vbs" />
+
+    <CustomAction Id="CheckPrerequisitesAction"
+                  BinaryKey="CheckPrerequisitesScript"
+                  VBScriptCall="CheckPrerequisites"
+                  Execute="immediate"
+                  Return="check" />
+
+    <!-- VBScript to write .env configuration file -->
+    <Binary Id="WriteConfigScript" SourceFile="WriteConfig.vbs" />
+
+    <!-- Set custom action data for deferred action -->
+    <CustomAction Id="SetWriteConfigData"
+                  Property="WriteConfigAction"
+                  Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]|[CommonAppDataFolder]"
+                  Execute="immediate" />
+
+    <CustomAction Id="WriteConfigAction"
+                  BinaryKey="WriteConfigScript"
+                  VBScriptCall="WriteConfig"
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+
+    <!-- VBScript to create database -->
+    <Binary Id="CreateDatabaseScript" SourceFile="CreateDatabase.vbs" />
+
+    <CustomAction Id="SetCreateDatabaseData"
+                  Property="CreateDatabaseAction"
+                  Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]"
+                  Execute="immediate" />
+
+    <CustomAction Id="CreateDatabaseAction"
+                  BinaryKey="CreateDatabaseScript"
+                  VBScriptCall="CreateDatabase"
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+
+    <!-- Force stop service on uninstall -->
+    <CustomAction Id="ForceStopService"
+                  Directory="TARGETDIR"
+                  ExeCommand="cmd.exe /c &quot;taskkill /F /IM pro-service.exe 2&gt;nul &amp; sc stop ProfessionalSMART 2&gt;nul &amp; timeout /t 2 /nobreak &gt;nul &amp; sc delete ProfessionalSMART 2&gt;nul &amp; exit 0&quot;"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <!-- Remove ProgramData folder on uninstall -->
+    <CustomAction Id="RemoveProgramData"
+                  Directory="CommonAppDataFolder"
+                  ExeCommand="cmd.exe /c &quot;rmdir /S /Q &quot;[CommonAppDataFolder]Professional SMART&quot; 2&gt;nul&quot;"
+                  Execute="deferred"
+                  Return="ignore"
+                  Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <!-- Set data for deferred action -->
+      <Custom Action="SetWriteConfigData" After="InstallFiles">NOT Installed</Custom>
+      <!-- Write configuration file after folders are created -->
+      <Custom Action="WriteConfigAction" After="SetWriteConfigData">NOT Installed</Custom>
+      <!-- Create database after config is written -->
+      <Custom Action="SetCreateDatabaseData" After="WriteConfigAction">NOT Installed</Custom>
+      <Custom Action="CreateDatabaseAction" After="SetCreateDatabaseData">NOT Installed</Custom>
+      <!-- Force stop service at the VERY START of InstallExecuteSequence during uninstall -->
+      <Custom Action="ForceStopService" After="InstallInitialize">Installed AND REMOVE="ALL"</Custom>
+      <!-- Remove ProgramData folder after removing files -->
+      <Custom Action="RemoveProgramData" After="RemoveFiles">Installed AND REMOVE="ALL"</Custom>
+    </InstallExecuteSequence>
+
+  </Product>
+</Wix>

@@ -1,0 +1,118 @@
+[workspace]
+members = [
+    "crates/pro-common",
+    "crates/pro-db",
+    "crates/pro-parser-edi",
+    "crates/pro-parser-csv",
+    "crates/pro-rules",
+    "crates/pro-rvu",
+    "crates/pro-worker",
+    "crates/pro-service",
+    "crates/pro-setup", "crates/pro-ml",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Professional SMART Team"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.40", features = ["full"] }
+tokio-util = "0.7"
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "multipart", "ws"] }
+axum-extra = { version = "0.9", features = ["typed-header"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace", "compression-full"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "rust_decimal"] }
+deadpool-postgres = "0.14"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Date/Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUIDs
+uuid = { version = "1.11", features = ["serde", "v4"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Configuration
+config = "0.14"
+dotenvy = "0.15"
+
+# Validation
+validator = { version = "0.18", features = ["derive"] }
+
+# CSV parsing
+csv = "1.3"
+
+# Regular expressions
+regex = "1.11"
+lazy_static = "1.5"
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+
+# Async utilities
+futures = "0.3"
+futures-core = "0.3"
+async-stream = "0.3"
+async-trait = "0.1"
+tokio-stream = "0.1"
+
+# Concurrency
+rayon = "1.10"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "env"] }
+
+# Hashing
+sha2 = "0.10"
+blake3 = "1.5"
+
+# String interning for memory optimization
+string-interner = "0.17"
+
+# Metrics and monitoring
+prometheus = "0.13"
+
+# Job scheduling
+tokio-cron-scheduler = "0.13"
+
+# Testing
+mockall = "0.13"
+wiremock = "0.6"
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+debug = false
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false

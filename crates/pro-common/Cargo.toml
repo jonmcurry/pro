@@ -1,0 +1,36 @@
+[package]
+name = "pro-common"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# Core dependencies
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+validator = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Decimal type for financial calculations
+rust_decimal = "1.36"
+rust_decimal_macros = "1.36"
+
+# Async
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# String interning
+string-interner = { workspace = true }
+parking_lot = "0.12"
+
+[dev-dependencies]

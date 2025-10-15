@@ -1,0 +1,13 @@
+[package]
+name = "pro-rvu"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pro-common = { path = "../pro-common" }
+serde = { workspace = true, features = ["derive"] }
+rust_decimal = "1.36"
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+[dev-dependencies]

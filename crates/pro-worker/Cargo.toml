@@ -1,0 +1,62 @@
+[package]
+name = "pro-worker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pro-common = { path = "../pro-common" }
+pro-db = { path = "../pro-db" }
+pro-parser-edi = { path = "../pro-parser-edi" }
+pro-parser-csv = { path = "../pro-parser-csv" }
+pro-rules = { path = "../pro-rules" }
+pro-rvu = { path = "../pro-rvu" }
+
+# Async runtime
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+tokio-stream = { workspace = true }
+async-stream = { workspace = true }
+
+# Database
+sqlx = { workspace = true }
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Date/Time
+chrono = { workspace = true }
+
+# UUIDs
+uuid = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Concurrency
+rayon = { workspace = true }
+
+# Hashing
+sha2 = { workspace = true }
+
+# Decimal
+rust_decimal = "1.36"
+
+[dev-dependencies]
+md5 = "0.7"
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+tempfile = "3.8"
+
+[[bench]]
+name = "parser_benchmarks"
+harness = false
+
+[[bench]]
+name = "pipeline_benchmarks"
+harness = false

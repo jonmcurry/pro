@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(cargo test:*)",
+      "Bash(find:*)",
+      "Read(//tmp/**)",
+      "Bash(cargo bench:*)",
+      "Bash(cargo check:*)",
+      "Bash(sudo apt install:*)",
+      "Bash(ls:*)",
+      "Bash(cargo new:*)",
+      "Bash(cmd.exe /c \"powershell.exe -ExecutionPolicy Bypass -File build-release.ps1\")",
+      "Bash(cmd.exe:*)",
+      "Read(//mnt/c/Temp/**)",
+      "Bash(iconv:*)",
+      "Read(//mnt/c/ProgramData/Professional SMART/**)",
+      "Bash(cat:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(PGPASSWORD='CleartoFly1' psql:*)",
+      "Bash(test:*)",
+      "Bash(cargo fix --bin pro-service --allow-dirty)",
+      "Bash(cargo fix --bin pro-service --allow-dirty --allow-no-vcs)",
+      "Bash(python3 scripts/generate_test_data.py test_data)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
