@@ -353,18 +353,27 @@
                   Return="check"
                   Impersonate="no" />
 
-    <!-- Force stop service on uninstall -->
+    <!-- VBScript to stop service on uninstall -->
+    <Binary Id="StopServiceScript" SourceFile="StopService.vbs" />
+
     <CustomAction Id="ForceStopService"
-                  Directory="TARGETDIR"
-                  ExeCommand="cmd.exe /c &quot;taskkill /F /IM pro-service.exe 2&gt;nul &amp; sc stop ProfessionalSMART 2&gt;nul &amp; timeout /t 2 /nobreak &gt;nul &amp; sc delete ProfessionalSMART 2&gt;nul &amp; exit 0&quot;"
+                  BinaryKey="StopServiceScript"
+                  VBScriptCall="StopService"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
 
-    <!-- Remove ProgramData folder on uninstall -->
-    <CustomAction Id="RemoveProgramData"
-                  Directory="CommonAppDataFolder"
-                  ExeCommand="cmd.exe /c &quot;rmdir /S /Q &quot;[CommonAppDataFolder]Professional SMART&quot; 2&gt;nul&quot;"
+    <!-- VBScript to remove ProgramData folder on uninstall -->
+    <Binary Id="RemoveProgramDataScript" SourceFile="RemoveProgramData.vbs" />
+
+    <CustomAction Id="SetRemoveProgramDataData"
+                  Property="RemoveProgramDataAction"
+                  Value="[CommonAppDataFolder]"
+                  Execute="immediate" />
+
+    <CustomAction Id="RemoveProgramDataAction"
+                  BinaryKey="RemoveProgramDataScript"
+                  VBScriptCall="RemoveProgramData"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
@@ -380,7 +389,8 @@
       <!-- Force stop service at the VERY START of InstallExecuteSequence during uninstall -->
       <Custom Action="ForceStopService" After="InstallInitialize">Installed AND REMOVE="ALL"</Custom>
       <!-- Remove ProgramData folder after removing files -->
-      <Custom Action="RemoveProgramData" After="RemoveFiles">Installed AND REMOVE="ALL"</Custom>
+      <Custom Action="SetRemoveProgramDataData" After="RemoveFiles">Installed AND REMOVE="ALL"</Custom>
+      <Custom Action="RemoveProgramDataAction" After="SetRemoveProgramDataData">Installed AND REMOVE="ALL"</Custom>
     </InstallExecuteSequence>
 
   </Product>
