@@ -20,7 +20,7 @@ Function FindPostgreSQLBinPath(shell, fso)
     testResult = shell.Run("cmd.exe /c psql --version >nul 2>&1", 0, True)
     If testResult = 0 Then
         LogMessage "FindPostgreSQLBinPath: psql found in PATH - using system PATH"
-        FindPostgreSQLBinPath = ""  ' Return empty to use PATH
+        FindPostgreSQLBinPath = "PATH"  ' Return special marker to use PATH
         Exit Function
     End If
     LogMessage "FindPostgreSQLBinPath: psql not found in PATH"
@@ -232,10 +232,11 @@ Function CreateDatabase()
     LogMessage "CreateDatabase: DB_PASSWORD = " & String(Len(dbPassword), "*")
     LogMessage "CreateDatabase: INSTALLFOLDER = " & installFolder
 
-    ' Create shell object to run commands
-    Dim shell
+    ' Create shell and FileSystemObject - needed for PostgreSQL path detection
+    Dim shell, fso
     Set shell = CreateObject("WScript.Shell")
-    LogMessage "CreateDatabase: Shell object created"
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    LogMessage "CreateDatabase: Shell and FileSystemObject created"
 
     ' Set environment variable for password
     Dim env
@@ -251,20 +252,20 @@ Function CreateDatabase()
     Dim psqlPath, psqlExe
     psqlPath = FindPostgreSQLBinPath(shell, fso)
 
+    ' Build psql command based on the result
     If psqlPath = "" Then
+        ' PostgreSQL not found anywhere
         LogMessage "CreateDatabase: ERROR - PostgreSQL installation not found!"
         LogMessage "CreateDatabase: Checked PATH environment variable and common installation locations"
         LogMessage "CreateDatabase: Please ensure PostgreSQL is installed and accessible"
         LogMessage "CreateDatabase: Skipping database creation. Database must be created manually."
         CreateDatabase = 1  ' Return success to not block install
         Exit Function
-    End If
-
-    ' Build psql command based on whether we found a path or using system PATH
-    If psqlPath = "" Then
+    ElseIf psqlPath = "PATH" Then
         ' psql is in system PATH, use it directly
         psqlExe = "psql"
         LogMessage "CreateDatabase: Using psql from system PATH"
+        LogMessage "CreateDatabase: psql.exe will be invoked via PATH"
     Else
         ' Use full path to psql
         psqlExe = psqlPath & "psql.exe"
@@ -341,8 +342,7 @@ Function CreateDatabase()
     LogMessage "CreateDatabase: Starting database schema migrations..."
 
     ' Get migrations directory path (should be in INSTALLFOLDER\migrations)
-    Dim migrationsDir, fso
-    Set fso = CreateObject("Scripting.FileSystemObject")
+    Dim migrationsDir
 
     ' Ensure installFolder ends with a backslash
     If Right(installFolder, 1) <> "\" Then
