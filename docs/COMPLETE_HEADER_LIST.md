@@ -6,6 +6,18 @@ This document lists ALL possible database fields that can be mapped from CSV imp
 
 ---
 
+## 🎯 Critical: Facility Anchor for Claims Import
+
+**For claims import (CSV or EDI 837P), only the facility needs to be specified:**
+
+- ✅ **facility_code** or **facility_npi** - REQUIRED in claims data
+- ✅ **organization_id** - Auto-derived from facility.organization_id
+- ✅ **region_id** - Auto-derived from facility.region_id (can be NULL)
+
+**Claims CSVs do NOT need organization_code or region_code columns.** The system performs a single facility lookup and retrieves all three IDs (facility, organization, region) automatically.
+
+---
+
 ## Table of Contents
 
 1. [Encounter (Claim-Level) Fields](#encounter-claim-level-fields)
@@ -263,7 +275,12 @@ For multiple diagnoses, CSVs typically use numbered columns:
 
 **Table**: `master.facility`
 
-**Description**: Facility-level information. Sometimes included in claim CSVs for facility identification.
+**Description**: Facility-level information. For claims import, **facility is the single required master data element** - organization and region are automatically derived from the facility record.
+
+**Claims Import Requirement:**
+- Claims CSVs must include either `Facility Code` or `Facility NPI`
+- Organization and region do NOT need to be in claims data
+- One facility lookup provides: facility_id, organization_id, and region_id
 
 | Database Field | Data Type | Required | Max Length | Description | Common CSV Headers |
 |----------------|-----------|----------|------------|-------------|--------------------|
@@ -375,6 +392,7 @@ These are the minimum required fields for a basic claim import:
 
 | Purpose | Field | Common Headers |
 |---------|-------|---------------|
+| **Facility** | **facility_code or facility_npi** | **Facility Code, Facility NPI** |
 | Claim ID | patient_control_number | Patient ID, Account, Claim |
 | Patient Name | subscriber_last_name | Last Name, Patient Last Name |
 | Patient Name | subscriber_first_name | First Name, Patient First Name |
@@ -383,6 +401,8 @@ These are the minimum required fields for a basic claim import:
 | Procedure | procedure_code | CPT, CPT Code, Procedure Code |
 | Charge | line_item_charge_amount | Charges, Charge Amount, Billed |
 | Diagnosis | diagnosis_code | Diagnosis 1, DX1, Diagnosis |
+
+**Note:** Facility is the anchor - organization_id and region_id are automatically derived from the facility lookup.
 
 ### Provider Identifiers
 

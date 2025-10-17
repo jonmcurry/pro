@@ -11,6 +11,15 @@ This guide covers loading the generated test data in the correct order:
 1. **Master Data** - Organizations, Regions, Facilities (via SQL/script)
 2. **Claims Data** - 80,000 claims in CSV format (via file processing)
 
+### Important: Facility is the Anchor for Claims
+
+For claims import, **only the facility must exist** in the database. The organization and region are automatically derived from the facility lookup:
+
+- Claims specify: `facility_code` or `facility_npi`
+- System derives: `organization_id` (from facility) and `region_id` (from facility, can be NULL)
+
+This means claims CSVs **do not need** organization_code or region_code columns.
+
 ---
 
 ## Prerequisites
@@ -352,11 +361,18 @@ DATABASE_URL=postgres://username:password@localhost:5432/database_name
 
 ### Error: "Facility not found" during claims import
 
-This means master data wasn't loaded first. Run:
+This means master data wasn't loaded first, or the facility_code/facility_npi in the claims data doesn't match any existing facility.
 
+**Solution:**
 ```bash
+# Load master data first
 python3 scripts/load_master_data.py test_data
+
+# Verify facilities exist
+psql -U pro_user -d professional_smart -c "SELECT facility_code, facility_name FROM claims.facility;"
 ```
+
+**Remember:** Claims only need the facility to exist. Organization and region are auto-derived from the facility record.
 
 ### Error: "Duplicate key violation"
 

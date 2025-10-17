@@ -25,7 +25,8 @@
       "Bash(./build-release.sh:*)",
       "WebSearch",
       "Bash(./target/release/pro-data-loader-gui.exe:*)",
-      "Bash(cargo run:*)"
+      "Bash(cargo run:*)",
+      "Bash(python3:*)"
     ],
     "deny": [],
     "ask": []
