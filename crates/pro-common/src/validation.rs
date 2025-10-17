@@ -6,8 +6,9 @@ lazy_static! {
     // NPI: exactly 10 digits
     static ref NPI_REGEX: Regex = Regex::new(r"^\d{10}$").unwrap();
 
-    // ICD-10-CM: Letter + 2 digits, optionally followed by decimal and 1-4 more characters
-    static ref ICD10_REGEX: Regex = Regex::new(r"^[A-TV-Z]\d{2}(\.\d{1,4})?$").unwrap();
+    // ICD-10-CM: Letter + 2 digits, optionally followed by decimal and up to 4 alphanumeric characters
+    // Supports 7th character extensions (A, D, S, etc.) for initial/subsequent/sequela encounters
+    static ref ICD10_REGEX: Regex = Regex::new(r"^[A-TV-Z]\d{2}(\.[A-Z0-9]{1,4})?$").unwrap();
 
     // CPT: exactly 5 digits
     static ref CPT_REGEX: Regex = Regex::new(r"^\d{5}$").unwrap();
@@ -166,6 +167,9 @@ mod tests {
         assert!(validate_icd10("J20.9").is_ok());
         assert!(validate_icd10("Z12.31").is_ok());
         assert!(validate_icd10("S06.0X0A").is_ok());
+        assert!(validate_icd10("S93.401A").is_ok()); // 7th character extension
+        assert!(validate_icd10("T14.90XA").is_ok()); // 7th character extension
+        assert!(validate_icd10("S83.201A").is_ok()); // 7th character extension
         assert!(validate_icd10("20").is_err()); // Missing letter
         assert!(validate_icd10("J2").is_err()); // Too short
     }

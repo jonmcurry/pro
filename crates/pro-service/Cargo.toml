@@ -7,6 +7,7 @@ edition.workspace = true
 pro-worker = { path = "../pro-worker" }
 pro-common = { path = "../pro-common" }
 pro-db = { path = "../pro-db" }
+pro-parser-csv = { path = "../pro-parser-csv" }
 
 # Async runtime
 tokio = { workspace = true }
@@ -46,6 +47,18 @@ chrono = { workspace = true }
 
 # CLI
 clap = { workspace = true }
+
+# File watching
+notify = "6.1"
+
+# CSV parsing
+csv = { workspace = true }
+
+# Decimal numbers
+rust_decimal = "1.36"
+
+[dev-dependencies]
+tempfile = "3.8"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["winsvc", "winbase", "winerror", "winnt"] }

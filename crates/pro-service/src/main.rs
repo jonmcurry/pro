@@ -20,6 +20,10 @@ use service::{run_service, SERVICE_NAME};
 mod websocket;
 mod api;
 
+// File watcher and claims importer
+mod file_watcher;
+mod claims_importer;
+
 // Constants for service metadata
 #[cfg(windows)]
 const SERVICE_DISPLAY_NAME: &str = "Professional SMART Claims Processing Service";
@@ -205,6 +209,25 @@ async fn run_console_mode() -> Result<()> {
 
     info!("Loading configuration...");
 
+    // Log configuration details (sanitized)
+    let db_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgresql://localhost/professional_smart".to_string())
+        .trim()
+        .to_string();
+
+    // Sanitize password from URL for logging
+    let sanitized_url = if let Some(at_pos) = db_url.find('@') {
+        if let Some(colon_pos) = db_url[..at_pos].rfind(':') {
+            format!("{}:****{}", &db_url[..colon_pos], &db_url[at_pos..])
+        } else {
+            db_url.clone()
+        }
+    } else {
+        db_url.clone()
+    };
+
+    info!("DATABASE_URL: '{}'", sanitized_url);
+
     // Initialize database connection pool
     info!("Connecting to database...");
     let db_pool = pro_db::connection::create_pool_default().await
@@ -240,16 +263,58 @@ async fn run_console_mode() -> Result<()> {
         None
     };
 
-    // TODO: Initialize worker pipeline
-    // For now, just demonstrate that we can run
+    // Initialize file watcher and claims importer
+    let input_dir = std::env::var("INPUT_DIR")
+        .unwrap_or_else(|_| "C:\\Program Files\\Professional SMART\\data\\input".to_string())
+        .trim()
+        .to_string();
+
+    info!("Initializing claims processing...");
+    info!("Input directory: '{}'", input_dir);
+
+    let mut file_watcher = file_watcher::FileWatcher::new(&input_dir)
+        .map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
+
+    let importer = claims_importer::ClaimsImporter::new(db_pool.clone());
+
     info!("Professional SMART console mode started");
     info!("Configuration loaded");
-    info!("File watcher ready");
+    info!("File watcher is monitoring: {}", input_dir);
+
+    // Spawn file watcher in background task
+    let watcher_handle = tokio::spawn(async move {
+        let result = file_watcher.run(move |file_path| {
+            let importer = importer.clone();
+            async move {
+                info!("Processing file: {}", file_path.display());
+
+                let import_result = importer.import_file(&file_path).await?;
+
+                info!("{}", import_result.summary());
+
+                if !import_result.is_success() {
+                    for error in &import_result.errors {
+                        error!("Import error: {}", error);
+                    }
+                }
+
+                Ok(())
+            }
+        }).await;
+
+        if let Err(e) = result {
+            error!("File watcher error: {}", e);
+        }
+    });
 
     // Keep running until Ctrl+C
     tokio::signal::ctrl_c().await?;
 
     info!("Shutting down...");
+
+    // Stop file watcher
+    info!("Stopping file watcher...");
+    watcher_handle.abort();
 
     // PHASE 5: Gracefully shutdown API server
     if let Some(handle) = api_handle {
@@ -260,6 +325,8 @@ async fn run_console_mode() -> Result<()> {
     // Close database pool
     info!("Closing database connections...");
     db_pool.close().await;
+
+    info!("Professional SMART service shutdown complete");
 
     Ok(())
 }

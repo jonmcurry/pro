@@ -32,7 +32,9 @@ impl Default for DbConfig {
     fn default() -> Self {
         Self {
             database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgresql://localhost/professional_smart".to_string()),
+                .unwrap_or_else(|_| "postgresql://localhost/professional_smart".to_string())
+                .trim()
+                .to_string(),
             max_connections: 50,
             min_connections: 5,
             connection_timeout_seconds: 30,

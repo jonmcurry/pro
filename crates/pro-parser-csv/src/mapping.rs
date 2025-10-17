@@ -198,6 +198,12 @@ impl PredefinedMappings {
         );
 
         mapping.add_mapping(
+            FieldMapping::new("Modifier 2".to_string(), "procedure_modifier_2".to_string(), "service_line".to_string(), DataType::String)
+                .with_alternate("Mod 2".to_string())
+                .with_validation(ValidationRule::MaxLength(2))
+        );
+
+        mapping.add_mapping(
             FieldMapping::new("Units".to_string(), "service_unit_count".to_string(), "service_line".to_string(), DataType::Decimal)
                 .required()
                 .with_default("1".to_string())
@@ -217,6 +223,24 @@ impl PredefinedMappings {
                 .required()
                 .with_alternate("DX1".to_string())
                 .with_alternate("Primary Diagnosis".to_string())
+                .with_validation(ValidationRule::Icd10)
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Diagnosis 2".to_string(), "diagnosis_code".to_string(), "encounter_diagnosis".to_string(), DataType::String)
+                .with_alternate("DX2".to_string())
+                .with_validation(ValidationRule::Icd10)
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Diagnosis 3".to_string(), "diagnosis_code".to_string(), "encounter_diagnosis".to_string(), DataType::String)
+                .with_alternate("DX3".to_string())
+                .with_validation(ValidationRule::Icd10)
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Diagnosis 4".to_string(), "diagnosis_code".to_string(), "encounter_diagnosis".to_string(), DataType::String)
+                .with_alternate("DX4".to_string())
                 .with_validation(ValidationRule::Icd10)
         );
 
@@ -251,6 +275,34 @@ impl PredefinedMappings {
             FieldMapping::new("POS".to_string(), "place_of_service_code".to_string(), "encounter".to_string(), DataType::String)
                 .with_alternate("Place of Service".to_string())
                 .with_validation(ValidationRule::MaxLength(2))
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Facility Code".to_string(), "facility_code".to_string(), "encounter".to_string(), DataType::String)
+                .required()
+                .with_alternate("Facility".to_string())
+                .with_alternate("Facility ID".to_string())
+                .with_validation(ValidationRule::NotEmpty)
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Member ID".to_string(), "subscriber_id".to_string(), "encounter".to_string(), DataType::String)
+                .required()
+                .with_alternate("Subscriber ID".to_string())
+                .with_alternate("Insurance ID".to_string())
+                .with_validation(ValidationRule::MaxLength(80))
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Payer ID".to_string(), "payer_id".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("Insurance Code".to_string())
+                .with_validation(ValidationRule::MaxLength(80))
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Payer Name".to_string(), "payer_name".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("Insurance Name".to_string())
+                .with_validation(ValidationRule::MaxLength(255))
         );
 
         mapping

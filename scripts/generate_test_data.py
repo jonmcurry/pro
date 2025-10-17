@@ -200,7 +200,7 @@ class TestDataGenerator:
             for i in range(regions_per_org):
                 region = {
                     "region_id": str(uuid.uuid4()),
-                    "organization_id": org["organization_id"],
+                    "organization_code": org["organization_code"],
                     "region_code": f"{org['organization_code']}-R{i+1}",
                     "region_name": f"{region_names[i]} Region",
                     "description": f"{region_names[i]} service area"
@@ -229,12 +229,12 @@ class TestDataGenerator:
         for region in self.regions:
             for i in range(facilities_per_region):
                 # Find the organization for this region
-                org = next(o for o in self.organizations if o["organization_id"] == region["organization_id"])
+                org = next(o for o in self.organizations if o["organization_code"] == region["organization_code"])
 
                 facility = {
                     "facility_id": str(uuid.uuid4()),
-                    "organization_id": region["organization_id"],
-                    "region_id": region["region_id"],
+                    "organization_code": region["organization_code"],
+                    "region_code": region["region_code"],
                     "facility_code": f"{region['region_code']}-F{i+1}",
                     "facility_name": f"{region['region_name']} {facility_types[i % len(facility_types)]}",
                     "npi": self.generate_npi(),
@@ -259,31 +259,62 @@ class TestDataGenerator:
 
         print(f"  ✓ Written to {filename}")
 
-    def generate_providers(self, count: int = 50):
-        """Generate providers"""
-        print(f"Generating {count} providers...")
+    def generate_providers(self, providers_per_facility: int = 5):
+        """Generate providers assigned to facilities"""
+        total = len(self.facilities) * providers_per_facility
+        print(f"Generating {total} providers ({providers_per_facility} per facility)...")
 
         specialties = [
-            "Family Medicine", "Internal Medicine", "Pediatrics", "Cardiology",
-            "Orthopedics", "Dermatology", "Neurology", "Psychiatry",
-            "General Surgery", "Emergency Medicine"
+            ("Family Medicine", "207Q00000X"),
+            ("Internal Medicine", "207R00000X"),
+            ("Pediatrics", "208000000X"),
+            ("Cardiology", "207RC0000X"),
+            ("Orthopedics", "207X00000X"),
+            ("Dermatology", "207N00000X"),
+            ("Neurology", "204D00000X"),
+            ("Psychiatry", "208D00000X"),
+            ("General Surgery", "208600000X"),
+            ("Emergency Medicine", "207P00000X")
         ]
 
-        for i in range(count):
-            provider = {
-                "npi": self.generate_npi(),
-                "last_name": random.choice(self.LAST_NAMES),
-                "first_name": random.choice(self.FIRST_NAMES),
-                "specialty": random.choice(specialties)
-            }
-            self.providers.append(provider)
+        credentials = ["MD", "DO", "NP", "PA"]
 
-        print(f"  ✓ Generated {count} providers")
+        for facility in self.facilities:
+            for i in range(providers_per_facility):
+                specialty, taxonomy = random.choice(specialties)
+                cred = random.choice(credentials)
+                first_name = random.choice(self.FIRST_NAMES)
+                last_name = random.choice(self.LAST_NAMES)
+                middle_initial = random.choice("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+                provider = {
+                    "facility_code": facility["facility_code"],
+                    "provider_npi": self.generate_npi(),
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "middle_name": middle_initial,
+                    "credentials": cred,
+                    "specialty": specialty,
+                    "taxonomy_code": taxonomy,
+                    "email": f"{first_name.lower()}.{last_name.lower()}@{facility['facility_code'].lower().replace('-', '')}.com",
+                    "phone": f"({random.randint(200, 999)}) {random.randint(200, 999)}-{random.randint(1000, 9999)}",
+                    "active": "true"
+                }
+                self.providers.append(provider)
+
+        # Write to CSV
+        filename = self.output_dir / "providers.csv"
+        with open(filename, 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=provider.keys())
+            writer.writeheader()
+            writer.writerows(self.providers)
+
+        print(f"  ✓ Written to {filename}")
 
     def generate_claims_for_facility(self, facility: Dict, claim_count: int = 10000):
         """Generate claims for a single facility in Athena CSV format"""
 
-        org = next(o for o in self.organizations if o["organization_id"] == facility["organization_id"])
+        org = next(o for o in self.organizations if o["organization_code"] == facility["organization_code"])
 
         print(f"  Generating {claim_count:,} claims for {facility['facility_name']}...")
 
@@ -354,7 +385,7 @@ class TestDataGenerator:
                     claim = {
                         "Patient ID": patient_id,
                         "DOS": dos.strftime("%Y-%m-%d"),
-                        "Provider NPI": provider["npi"],
+                        "Provider NPI": provider["provider_npi"],
                         "CPT": cpt_code,
                         "Modifier 1": mod1,
                         "Modifier 2": mod2,
@@ -398,7 +429,7 @@ class TestDataGenerator:
                      org_count: int = 2,
                      regions_per_org: int = 2,
                      facilities_per_region: int = 2,
-                     providers_count: int = 50,
+                     providers_per_facility: int = 5,
                      claims_per_facility: int = 10000):
         """Generate complete test dataset"""
 
@@ -410,7 +441,7 @@ class TestDataGenerator:
         self.generate_organizations(org_count)
         self.generate_regions(regions_per_org)
         self.generate_facilities(facilities_per_region)
-        self.generate_providers(providers_count)
+        self.generate_providers(providers_per_facility)
         self.generate_all_claims(claims_per_facility)
 
         print()
@@ -439,14 +470,14 @@ def main():
     # - 2 organizations
     # - 2 regions per organization (4 total)
     # - 2 facilities per region (8 total)
-    # - 50 providers
+    # - 5 providers per facility (40 total)
     # - 10,000 claims per facility (80,000 total claims)
 
     generator.generate_all(
         org_count=2,
         regions_per_org=2,
         facilities_per_region=2,
-        providers_count=50,
+        providers_per_facility=5,
         claims_per_facility=10000
     )
 

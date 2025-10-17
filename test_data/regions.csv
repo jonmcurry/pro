@@ -1,5 +1,5 @@
-organization_code,region_code,region_name,manager_name,manager_email,active
-ORG001,R1,North Region,John Smith,john.smith@org1.com,true
-ORG001,R2,South Region,Jane Doe,jane.doe@org1.com,true
-ORG002,R1,East Region,Bob Johnson,bob.johnson@org2.com,true
-ORG002,R2,West Region,Alice Williams,alice.williams@org2.com,true
+region_id,organization_code,region_code,region_name,description
+f15133aa-f85f-4035-ba8c-4a08d470e230,ORG001,ORG001-R1,North Region,North service area
+e2cb6a2c-8232-4fa6-bc58-dfdc309d4af8,ORG001,ORG001-R2,South Region,South service area
+f43cac90-28e9-47b7-ad40-8296ad7c2a71,ORG002,ORG002-R1,North Region,North service area
+533ea2ce-d1e5-4cd8-974f-43411389b58e,ORG002,ORG002-R2,South Region,South service area
