@@ -8,7 +8,10 @@ members = [
     "crates/pro-rvu",
     "crates/pro-worker",
     "crates/pro-service",
-    "crates/pro-setup", "crates/pro-ml",
+    "crates/pro-setup",
+    "crates/pro-ml",
+    "crates/pro-data-loader",
+    "crates/pro-data-loader-gui",
 ]
 resolver = "2"
 

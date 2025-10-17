@@ -1,3 +1,3 @@
-organization_id,organization_code,organization_name,tax_id,npi,address_line1,city,state_code,postal_code,phone,email
-2b9b2971-e08c-44ab-b1ae-809d4831930a,ORG001,Regional Health System,44-3914795,7449354503,1531 Medical Plaza,Houston,IL,96895,(822) 396-4884,contact@org1.com
-a4757141-c806-4edf-a2b1-234bbe3d1eb6,ORG002,Metropolitan Medical Group,36-9730636,8942656948,5773 Medical Plaza,Chicago,NY,10794,(509) 451-7665,contact@org2.com
+organization_code,organization_name,tax_id,contact_email,address_line1,address_line2,city,state,zip_code,active
+ORG001,Regional Health System,44-3914795,contact@org1.com,1531 Medical Plaza,,Houston,TX,77001,true
+ORG002,Metropolitan Medical Group,36-9730636,contact@org2.com,5773 Healthcare Blvd,,Chicago,IL,60601,true

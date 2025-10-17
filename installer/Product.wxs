@@ -79,6 +79,20 @@
                     KeyPath="yes"
                     Checksum="yes" />
             </Component>
+
+            <Component Id="DataLoaderExecutable" Guid="3B3B3B3B-3C3C-3D3D-3E3E-3F3F3F3F3F3F" Win64="yes">
+              <File Id="ProDataLoaderExe"
+                    Source="$(var.SolutionDir)target\release\pro-data-loader.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
+
+            <Component Id="DataLoaderGuiExecutable" Guid="4A4A4A4A-4B4B-4C4C-4D4D-4E4E4E4E4E4E" Win64="yes">
+              <File Id="ProDataLoaderGuiExe"
+                    Source="$(var.SolutionDir)target\release\pro-data-loader-gui.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
           </Directory>
 
           <!-- Documentation -->
@@ -204,6 +218,12 @@
                       Target="[BinFolder]pro-setup.exe"
                       WorkingDirectory="INSTALLFOLDER" />
 
+            <Shortcut Id="DataLoaderShortcut"
+                      Name="Load Master Data"
+                      Description="Load organizations, facilities, and providers from CSV"
+                      Target="[BinFolder]pro-data-loader-gui.exe"
+                      WorkingDirectory="INSTALLFOLDER" />
+
             <Shortcut Id="DocumentationShortcut"
                       Name="Documentation"
                       Description="Professional SMART documentation"
@@ -242,6 +262,8 @@
                Absent="disallow">
         <ComponentRef Id="MainExecutable" />
         <ComponentRef Id="SetupExecutable" />
+        <ComponentRef Id="DataLoaderExecutable" />
+        <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="InputDir" />
         <ComponentRef Id="ProcessedDir" />
         <ComponentRef Id="ErrorDir" />

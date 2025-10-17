@@ -22,7 +22,10 @@
       "Bash(cargo fix --bin pro-service --allow-dirty)",
       "Bash(cargo fix --bin pro-service --allow-dirty --allow-no-vcs)",
       "Bash(python3 scripts/generate_test_data.py test_data)",
-      "Bash(./build-release.sh:*)"
+      "Bash(./build-release.sh:*)",
+      "WebSearch",
+      "Bash(./target/release/pro-data-loader-gui.exe:*)",
+      "Bash(cargo run:*)"
     ],
     "deny": [],
     "ask": []

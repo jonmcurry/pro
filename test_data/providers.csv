@@ -1,0 +1,17 @@
+facility_code,provider_npi,first_name,last_name,middle_name,credentials,specialty,taxonomy_code,email,phone,active
+F1,1234567890,John,Smith,A,MD,Family Medicine,207Q00000X,john.smith@facility1.com,(555) 100-0001,true
+F1,1234567891,Jane,Doe,B,DO,Internal Medicine,207R00000X,jane.doe@facility1.com,(555) 100-0002,true
+F2,1234567892,Robert,Johnson,C,MD,Pediatrics,208000000X,robert.johnson@facility2.com,(555) 100-0003,true
+F2,1234567893,Mary,Williams,D,NP,Family Medicine,207Q00000X,mary.williams@facility2.com,(555) 100-0004,true
+F3,1234567894,David,Brown,E,MD,Cardiology,207RC0000X,david.brown@facility3.com,(555) 100-0005,true
+F3,1234567895,Sarah,Davis,F,DO,Emergency Medicine,207P00000X,sarah.davis@facility3.com,(555) 100-0006,true
+F4,1234567896,Michael,Miller,G,MD,Orthopedics,207X00000X,michael.miller@facility4.com,(555) 100-0007,true
+F4,1234567897,Lisa,Wilson,H,PA,Family Medicine,207Q00000X,lisa.wilson@facility4.com,(555) 100-0008,true
+F5,1234567898,James,Moore,I,MD,Neurology,204D00000X,james.moore@facility5.com,(555) 100-0009,true
+F5,1234567899,Patricia,Taylor,J,DO,Psychiatry,208D00000X,patricia.taylor@facility5.com,(555) 100-0010,true
+F6,1234567900,William,Anderson,K,MD,Radiology,2085R0202X,william.anderson@facility6.com,(555) 100-0011,true
+F6,1234567901,Jennifer,Thomas,L,NP,Internal Medicine,207R00000X,jennifer.thomas@facility6.com,(555) 100-0012,true
+F7,1234567902,Richard,Jackson,M,MD,Surgery,208600000X,richard.jackson@facility7.com,(555) 100-0013,true
+F7,1234567903,Linda,White,N,DO,Oncology,207RX0202X,linda.white@facility7.com,(555) 100-0014,true
+F8,1234567904,Charles,Harris,O,MD,Dermatology,207N00000X,charles.harris@facility8.com,(555) 100-0015,true
+F8,1234567905,Barbara,Martin,P,PA,Emergency Medicine,207P00000X,barbara.martin@facility8.com,(555) 100-0016,true

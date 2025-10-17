@@ -1,0 +1,30 @@
+[package]
+name = "pro-data-loader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Master data loader utility for Professional SMART"
+
+[lib]
+name = "pro_data_loader"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pro-data-loader"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+csv = "1.3"
+dotenvy = "0.15"
+serde = { version = "1.0", features = ["derive"] }
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid"] }
+tokio = { version = "1.40", features = ["full"] }
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.11", features = ["v4", "serde"] }
+console = "0.15"
+indicatif = "0.17"
+colored = "2.1"

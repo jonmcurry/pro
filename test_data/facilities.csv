@@ -1,9 +1,9 @@
-facility_id,organization_id,region_id,facility_code,facility_name,npi,tax_id,facility_type,address_line1,city,state_code,postal_code,phone,email,ehr_system
-6151a359-2607-4823-aaea-44d318dbfe34,2b9b2971-e08c-44ab-b1ae-809d4831930a,d9290019-9531-4afd-91f4-cd4c3a18787e,ORG001-R1-F1,North Region Medical Center,7657869459,44-3914795,Medical Center,2187 Healthcare Drive,Houston,IL,75222,(598) 280-2332,contact@facility1.com,ATHENA
-40445358-affb-4dac-8a6d-6a30ceb1ab9e,2b9b2971-e08c-44ab-b1ae-809d4831930a,d9290019-9531-4afd-91f4-cd4c3a18787e,ORG001-R1-F2,North Region Clinic,1739386432,44-3914795,Clinic,1719 Healthcare Drive,Houston,IL,80177,(859) 924-2607,contact@facility2.com,CERNER
-1daf4d83-ed24-481d-a91e-dee958780785,2b9b2971-e08c-44ab-b1ae-809d4831930a,a4bcb8bd-840d-4cf4-9e6e-c44a91e87d3e,ORG001-R2-F1,South Region Medical Center,3549321313,44-3914795,Medical Center,4609 Healthcare Drive,Houston,IL,42528,(867) 379-5997,contact@facility3.com,EPIC
-6042c3a1-4b39-4023-806b-502b9de70d85,2b9b2971-e08c-44ab-b1ae-809d4831930a,a4bcb8bd-840d-4cf4-9e6e-c44a91e87d3e,ORG001-R2-F2,South Region Clinic,8981160235,44-3914795,Clinic,4421 Healthcare Drive,Houston,IL,25409,(341) 510-7084,contact@facility4.com,CERNER
-fdc15102-dd2a-4aac-9626-b3f8f6761df8,a4757141-c806-4edf-a2b1-234bbe3d1eb6,ca16cd9f-3d50-4032-a0be-514c310f7926,ORG002-R1-F1,North Region Medical Center,3623360084,36-9730636,Medical Center,6243 Healthcare Drive,Chicago,NY,60672,(649) 399-2010,contact@facility5.com,CERNER
-92baf912-0317-4f4f-9450-b3930bbe2363,a4757141-c806-4edf-a2b1-234bbe3d1eb6,ca16cd9f-3d50-4032-a0be-514c310f7926,ORG002-R1-F2,North Region Clinic,7159457132,36-9730636,Clinic,9375 Healthcare Drive,Chicago,NY,86715,(640) 929-9463,contact@facility6.com,CERNER
-e81ad0e2-3cdc-492f-b094-331f10e19418,a4757141-c806-4edf-a2b1-234bbe3d1eb6,5c9a972e-7be3-40d0-a019-eeec9bcb0053,ORG002-R2-F1,South Region Medical Center,6969926951,36-9730636,Medical Center,603 Healthcare Drive,Chicago,NY,42967,(282) 629-4870,contact@facility7.com,EPIC
-1b7c5688-bc53-42d2-8a1d-281b43412977,a4757141-c806-4edf-a2b1-234bbe3d1eb6,5c9a972e-7be3-40d0-a019-eeec9bcb0053,ORG002-R2-F2,South Region Clinic,4675474269,36-9730636,Clinic,2080 Healthcare Drive,Chicago,NY,54346,(464) 735-4046,contact@facility8.com,CERNER
+organization_code,region_code,facility_code,facility_name,facility_npi,tax_id,address_line1,address_line2,city,state,zip_code,phone,ehr_system,active
+ORG001,R1,F1,North Medical Center,7657869459,44-3914795,2187 Healthcare Drive,,Houston,TX,77001,(598) 280-2332,ATHENA,true
+ORG001,R1,F2,North Clinic,1739386432,44-3914795,1719 Medical Plaza,,Houston,TX,77002,(859) 924-2607,CERNER,true
+ORG001,R2,F3,South Medical Center,3549321313,44-3914795,4609 Healthcare Blvd,,Houston,TX,77003,(867) 379-5997,EPIC,true
+ORG001,R2,F4,South Clinic,8981160235,44-3914795,4421 Medical Plaza,,Houston,TX,77004,(341) 510-7084,CERNER,true
+ORG002,R1,F5,East Medical Center,3623360084,36-9730636,6243 Healthcare Drive,,Chicago,IL,60601,(649) 399-2010,CERNER,true
+ORG002,R1,F6,East Clinic,7159457132,36-9730636,9375 Medical Plaza,,Chicago,IL,60602,(640) 929-9463,CERNER,true
+ORG002,R2,F7,West Medical Center,6969926951,36-9730636,603 Healthcare Blvd,,Chicago,IL,60603,(282) 629-4870,EPIC,true
+ORG002,R2,F8,West Clinic,4675474269,36-9730636,2080 Medical Plaza,,Chicago,IL,60604,(464) 735-4046,CERNER,true
