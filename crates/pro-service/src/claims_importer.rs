@@ -1,11 +1,16 @@
 //! Claims importer for CSV files
 //!
 //! Imports claims data from CSV files into the database using the pro-parser-csv crate.
+//! Integrates with the FIFO queue system and progress tracking.
 
 use anyhow::{Context, Result};
 use pro_parser_csv::CsvParser;
+use pro_worker::progress::ProgressTracker;
+use pro_worker::queue_manager::QueueManager;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::path::Path;
+use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -13,16 +18,208 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct ClaimsImporter {
     pool: PgPool,
+    queue_manager: QueueManager,
+    broadcaster: broadcast::Sender<pro_worker::progress::ProgressEvent>,
 }
 
 impl ClaimsImporter {
-    /// Create a new claims importer
+    /// Create a new claims importer with queue and progress tracking
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let queue_manager = QueueManager::new(pool.clone());
+        let (broadcaster, _) = broadcast::channel(1000);
+
+        Self {
+            pool,
+            queue_manager,
+            broadcaster,
+        }
     }
 
-    /// Import a CSV file containing claims
+    /// Import a CSV file containing claims with full queue integration and progress tracking
     pub async fn import_file(&self, file_path: &Path) -> Result<ImportResult> {
+        self.import_file_with_queue(file_path, None).await
+    }
+
+    /// Enqueue a file for processing (adds to staging.file_processing_queue)
+    pub async fn enqueue_file(&self, file_path: &Path) -> Result<Uuid> {
+        let file_path_str = file_path.display().to_string();
+        let filename = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        info!("Enqueuing file for processing: {}", filename);
+
+        // Calculate file hash for deduplication
+        let file_hash = self.calculate_file_hash(file_path)?;
+
+        // Get facility info from file
+        let (facility_id, org_id) = self.extract_facility_info(file_path).await?;
+
+        // Create import batch first
+        let batch_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO staging.import_batch (
+                batch_id,
+                organization_id,
+                facility_id,
+                batch_name,
+                batch_type,
+                file_format,
+                original_filename,
+                file_path,
+                file_hash,
+                import_status,
+                total_records
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#
+        )
+        .bind(batch_id)
+        .bind(org_id)
+        .bind(facility_id)
+        .bind(&filename)
+        .bind("CSV")
+        .bind("ATHENA")
+        .bind(&filename)
+        .bind(&file_path_str)
+        .bind(&file_hash)
+        .bind("QUEUED")
+        .bind(0) // Will be updated when processing starts
+        .execute(&self.pool)
+        .await
+        .context("Failed to create import batch record")?;
+
+        // Enqueue in file_processing_queue
+        let queue_id = self.queue_manager.enqueue_file(
+            facility_id.unwrap_or_else(|| Uuid::new_v4()),
+            batch_id,
+            file_path_str,
+            file_hash,
+            pro_worker::types::FileFormat::Csv,
+            org_id,
+            None // Default priority
+        ).await?;
+
+        info!("File enqueued successfully: queue_id={}, batch_id={}", queue_id, batch_id);
+
+        Ok(queue_id)
+    }
+
+    /// Extract facility information from file
+    async fn extract_facility_info(&self, file_path: &Path) -> Result<(Option<Uuid>, Uuid)> {
+        // Parse just the first row to get facility info
+        let file_path_str = file_path.display().to_string();
+        let mut parser = CsvParser::with_auto_detection();
+        let parsed_rows = parser.parse_file(&file_path_str)?;
+
+        if let Some(first_row) = parsed_rows.first() {
+            if let Some(facility_code) = first_row.encounter_fields.get("facility_code") {
+                let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+                    r#"
+                    SELECT facility_id, organization_id
+                    FROM claims.facility
+                    WHERE facility_code = $1 OR npi = $1
+                    LIMIT 1
+                    "#
+                )
+                .bind(facility_code)
+                .fetch_optional(&self.pool)
+                .await?;
+
+                if let Some((fac_id, org_id)) = result {
+                    return Ok((Some(fac_id), org_id));
+                }
+            }
+        }
+
+        // Fallback to first organization
+        let org: Uuid = sqlx::query_scalar(
+            "SELECT organization_id FROM claims.organization LIMIT 1"
+        )
+        .fetch_one(&self.pool)
+        .await
+        .context("No organization found in database")?;
+
+        Ok((None, org))
+    }
+
+    /// Calculate SHA-256 hash of file for deduplication
+    fn calculate_file_hash(&self, file_path: &Path) -> Result<String> {
+        use sha2::{Sha256, Digest};
+
+        let mut file = std::fs::File::open(file_path)
+            .context("Failed to open file for hashing")?;
+        let mut hasher = Sha256::new();
+        std::io::copy(&mut file, &mut hasher)
+            .context("Failed to read file for hashing")?;
+
+        let hash = hasher.finalize();
+        Ok(format!("{:x}", hash))
+    }
+
+    /// Log a processing metric to staging.processing_metrics
+    async fn log_processing_metric(
+        &self,
+        batch_id: Uuid,
+        metric_type: &str,
+        metric_name: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
+        completed_at: chrono::DateTime<chrono::Utc>,
+        records_processed: i32,
+        success_count: i32,
+        error_count: i32,
+        details: Option<serde_json::Value>,
+    ) -> Result<()> {
+        let duration_ms = (completed_at - started_at).num_milliseconds();
+        let duration_sec = duration_ms as f64 / 1000.0;
+        let records_per_second = if duration_sec > 0.0 {
+            records_processed as f64 / duration_sec
+        } else {
+            0.0
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO staging.processing_metrics (
+                metric_id,
+                batch_id,
+                metric_type,
+                metric_name,
+                started_at,
+                completed_at,
+                duration_milliseconds,
+                records_processed,
+                records_per_second,
+                success_count,
+                error_count,
+                details
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            "#
+        )
+        .bind(Uuid::new_v4())
+        .bind(batch_id)
+        .bind(metric_type)
+        .bind(metric_name)
+        .bind(started_at)
+        .bind(completed_at)
+        .bind(duration_ms as f64)
+        .bind(records_processed)
+        .bind(rust_decimal::Decimal::from_f64_retain(records_per_second).unwrap_or(rust_decimal::Decimal::ZERO))
+        .bind(success_count)
+        .bind(error_count)
+        .bind(details)
+        .execute(&self.pool)
+        .await
+        .context("Failed to insert processing metric")?;
+
+        Ok(())
+    }
+
+    /// Import a CSV file with optional queue_id for tracking
+    pub async fn import_file_with_queue(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<ImportResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
@@ -34,6 +231,7 @@ impl ClaimsImporter {
 
         // Parse CSV file using auto-detection
         info!("Parsing CSV file...");
+        let parse_start = chrono::Utc::now();
         let mut parser = CsvParser::with_auto_detection();
 
         let parsed_rows = match parser.parse_file(&file_path_str) {
@@ -46,6 +244,7 @@ impl ClaimsImporter {
                 return Err(e).context("Failed to parse CSV file");
             }
         };
+        let parse_end = chrono::Utc::now();
 
         info!("Parsed {} rows from CSV file", parsed_rows.len());
 
@@ -156,6 +355,24 @@ impl ClaimsImporter {
 
         info!("Import batch record created successfully");
 
+        // Log PARSE metric
+        if let Err(e) = self.log_processing_metric(
+            batch_id,
+            "PARSE",
+            "CSV Parsing",
+            parse_start,
+            parse_end,
+            parsed_rows.len() as i32,
+            parsed_rows.len() as i32,
+            0,
+            Some(serde_json::json!({
+                "filename": filename,
+                "format": "CSV"
+            }))
+        ).await {
+            warn!("Failed to log PARSE metric: {}", e);
+        }
+
         let mut result = ImportResult {
             total_rows: parsed_rows.len(),
             successful: 0,
@@ -163,11 +380,32 @@ impl ClaimsImporter {
             errors: Vec::new(),
         };
 
+        // Create progress tracker for real-time metrics
+        let progress_tracker = if let Some(qid) = queue_id {
+            Some(
+                ProgressTracker::new(qid, parsed_rows.len(), self.pool.clone(), self.broadcaster.clone())
+                    .await
+                    .context("Failed to create progress tracker")?
+            )
+        } else {
+            None
+        };
+
         // Begin transaction
         let mut tx = self.pool.begin().await
             .context("Failed to begin database transaction")?;
 
-        // Import each row
+        let insert_start = chrono::Utc::now();
+
+        // Batch commit configuration - commit every N rows for better performance
+        const BATCH_SIZE: usize = 1000;
+        let mut batch_count = 0;
+
+        // Facility lookup cache for performance optimization
+        // Key: facility_code, Value: (facility_id, organization_id, region_id)
+        let mut facility_cache: HashMap<String, (Uuid, Uuid, Option<Uuid>)> = HashMap::new();
+
+        // Import each row with progress tracking
         for parsed_row in parsed_rows {
             debug!("Processing row {}", parsed_row.row_number);
 
@@ -192,6 +430,23 @@ impl ClaimsImporter {
                     ).await {
                         warn!("Failed to log error to database: {}", e);
                     }
+
+                    // Record failed claim in progress tracker
+                    if let Some(ref tracker) = progress_tracker {
+                        let claim_number = parsed_row.encounter_fields.get("patient_control_number")
+                            .map(|s| s.to_string());
+                        let claim_data = serde_json::to_value(&parsed_row.encounter_fields).ok();
+
+                        if let Err(e) = tracker.record_claim_failed(
+                            claim_number,
+                            error_message,
+                            claim_data,
+                            Some("VALIDATION".to_string()),
+                            false // Validation errors can't be retried
+                        ).await {
+                            warn!("Failed to record claim failure: {}", e);
+                        }
+                    }
                 }
                 continue;
             }
@@ -202,10 +457,41 @@ impl ClaimsImporter {
             }
 
             // Import the row
-            match self.import_encounter(&mut tx, &parsed_row).await {
+            let start_time = std::time::Instant::now();
+            match self.import_encounter(&mut tx, &parsed_row, &mut facility_cache).await {
                 Ok(_) => {
                     result.successful += 1;
-                    debug!("Successfully imported row {}", parsed_row.row_number);
+                    batch_count += 1;
+                    let processing_time_ms = start_time.elapsed().as_millis() as u64;
+                    debug!("Successfully imported row {} in {}ms", parsed_row.row_number, processing_time_ms);
+
+                    // Record successful claim processing
+                    if let Some(ref tracker) = progress_tracker {
+                        let claim_number = parsed_row.encounter_fields.get("patient_control_number")
+                            .map(|s| s.to_string());
+
+                        if let Err(e) = tracker.record_claim_processed(
+                            claim_number,
+                            0, // flags_count - TODO: count actual flags from rules engine
+                            0, // critical_flags_count
+                            processing_time_ms
+                        ).await {
+                            warn!("Failed to record claim success: {}", e);
+                        }
+                    }
+
+                    // Commit batch every BATCH_SIZE rows for better performance
+                    if batch_count >= BATCH_SIZE {
+                        debug!("Committing batch of {} rows", batch_count);
+                        tx.commit().await
+                            .context("Failed to commit batch transaction")?;
+                        info!("Committed batch: {} claims processed so far", result.successful);
+
+                        // Start new transaction
+                        tx = self.pool.begin().await
+                            .context("Failed to begin new batch transaction")?;
+                        batch_count = 0;
+                    }
                 }
                 Err(e) => {
                     let error_message = format!("Row {}: {}", parsed_row.row_number, e);
@@ -224,6 +510,23 @@ impl ClaimsImporter {
                     ).await {
                         warn!("Failed to log error to database: {}", log_err);
                     }
+
+                    // Record failed claim in progress tracker
+                    if let Some(ref tracker) = progress_tracker {
+                        let claim_number = parsed_row.encounter_fields.get("patient_control_number")
+                            .map(|s| s.to_string());
+                        let claim_data = serde_json::to_value(&parsed_row.encounter_fields).ok();
+
+                        if let Err(e) = tracker.record_claim_failed(
+                            claim_number,
+                            error_message,
+                            claim_data,
+                            Some("IMPORT".to_string()),
+                            true // Import errors can be retried
+                        ).await {
+                            warn!("Failed to record claim failure: {}", e);
+                        }
+                    }
                 }
             }
         }
@@ -233,20 +536,52 @@ impl ClaimsImporter {
             tx.commit().await
                 .context("Failed to commit transaction")?;
             info!("Successfully imported all {} rows", result.successful);
+
+            // Mark progress as completed
+            if let Some(ref tracker) = progress_tracker {
+                tracker.complete().await
+                    .context("Failed to mark progress as completed")?;
+            }
+
             "COMPLETED"
         } else if result.successful > 0 {
             // Partial success - commit what we can
             tx.commit().await
                 .context("Failed to commit transaction")?;
             warn!("Imported {} rows, {} failed", result.successful, result.failed);
+
+            // Mark progress as completed (partial success)
+            if let Some(ref tracker) = progress_tracker {
+                tracker.complete().await
+                    .context("Failed to mark progress as completed")?;
+            }
+
             "PARTIAL"
         } else {
             // Total failure - rollback
             tx.rollback().await
                 .context("Failed to rollback transaction")?;
             error!("All rows failed to import");
+
+            // Mark progress as failed
+            if let Some(ref tracker) = progress_tracker {
+                tracker.fail("All claims failed to import".to_string()).await
+                    .context("Failed to mark progress as failed")?;
+            }
+
             "FAILED"
         };
+
+        // Update queue status if queue_id was provided
+        if let Some(qid) = queue_id {
+            if import_status == "COMPLETED" || import_status == "PARTIAL" {
+                self.queue_manager.mark_completed(qid).await
+                    .context("Failed to mark queue entry as completed")?;
+            } else {
+                self.queue_manager.mark_failed(qid, "Import failed").await
+                    .context("Failed to mark queue entry as failed")?;
+            }
+        }
 
         // Update import batch record with final status
         let completed_at = chrono::Utc::now();
@@ -274,6 +609,27 @@ impl ClaimsImporter {
         .execute(&self.pool)
         .await
         .context("Failed to update import batch record")?;
+
+        // Log INSERT metric
+        let insert_end = chrono::Utc::now();
+        if let Err(e) = self.log_processing_metric(
+            batch_id,
+            "INSERT",
+            "Database Insert",
+            insert_start,
+            insert_end,
+            result.total_rows as i32,
+            result.successful as i32,
+            result.failed as i32,
+            Some(serde_json::json!({
+                "total_rows": result.total_rows,
+                "successful": result.successful,
+                "failed": result.failed,
+                "import_status": import_status
+            }))
+        ).await {
+            warn!("Failed to log INSERT metric: {}", e);
+        }
 
         Ok(result)
     }
@@ -323,26 +679,37 @@ impl ClaimsImporter {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         parsed_row: &pro_parser_csv::parser::ParsedRow,
+        facility_cache: &mut HashMap<String, (Uuid, Uuid, Option<Uuid>)>,
     ) -> Result<Uuid> {
         // Extract facility_code from encounter fields
         let facility_code = parsed_row.encounter_fields.get("facility_code")
             .or_else(|| parsed_row.encounter_fields.get("facility_npi"))
             .context("Missing facility_code or facility_npi")?;
 
-        // Look up facility to get facility_id, organization_id, and region_id
-        let facility = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
-            r#"
-            SELECT facility_id, organization_id, region_id
-            FROM claims.facility
-            WHERE facility_code = $1 OR npi = $1
-            "#
-        )
-        .bind(facility_code)
-        .fetch_optional(&mut **tx)
-        .await?;
+        // Check cache first before querying database
+        let (facility_id, organization_id, region_id) = if let Some(cached) = facility_cache.get(facility_code) {
+            // Cache hit - use cached values
+            *cached
+        } else {
+            // Cache miss - query database and cache result
+            let facility = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+                r#"
+                SELECT facility_id, organization_id, region_id
+                FROM claims.facility
+                WHERE facility_code = $1 OR npi = $1
+                "#
+            )
+            .bind(facility_code)
+            .fetch_optional(&mut **tx)
+            .await?;
 
-        let (facility_id, organization_id, region_id) = facility
-            .with_context(|| format!("Facility not found: {}", facility_code))?;
+            let result = facility
+                .with_context(|| format!("Facility not found: {}", facility_code))?;
+
+            // Store in cache for future lookups
+            facility_cache.insert(facility_code.clone(), result);
+            result
+        };
 
         // Generate encounter ID
         let encounter_id = Uuid::new_v4();

@@ -9,6 +9,7 @@ Rule 6: NEVER use docker, this is a Windows only application and doesn't use con
 Rule 7: NEVER use character emoji's in any of the code or documentation.
 Rule 8: Create a .md file with what your plan is to resolve issues or to develop new functionaility and put it in a checklist.
 Rule 9:  No shortcuts - fully resolve issues by solving it the right way and not creating cascading failures elsewhere.
+Rule 10: Rebuild the installer after every change.
 
 ## Collaboration Guidelines
 - **Challenge and question**: Don't immediately agree or proceed with requests that seem suboptimal, unclear, or potentially problematic

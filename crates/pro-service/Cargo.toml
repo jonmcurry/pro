@@ -57,6 +57,9 @@ csv = { workspace = true }
 # Decimal numbers
 rust_decimal = "1.36"
 
+# Hashing (for file deduplication)
+sha2 = "0.10"
+
 [dev-dependencies]
 tempfile = "3.8"
 

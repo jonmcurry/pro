@@ -281,22 +281,17 @@ async fn run_console_mode() -> Result<()> {
     info!("Configuration loaded");
     info!("File watcher is monitoring: {}", input_dir);
 
-    // Spawn file watcher in background task
+    // Spawn file watcher in background task to enqueue files
+    let importer_for_watcher = importer.clone();
     let watcher_handle = tokio::spawn(async move {
         let result = file_watcher.run(move |file_path| {
-            let importer = importer.clone();
+            let importer = importer_for_watcher.clone();
             async move {
-                info!("Processing file: {}", file_path.display());
+                info!("Enqueuing file for FIFO processing: {}", file_path.display());
 
-                let import_result = importer.import_file(&file_path).await?;
-
-                info!("{}", import_result.summary());
-
-                if !import_result.is_success() {
-                    for error in &import_result.errors {
-                        error!("Import error: {}", error);
-                    }
-                }
+                // Enqueue file instead of processing directly
+                let queue_id = importer.enqueue_file(&file_path).await?;
+                info!("File enqueued successfully: queue_id={}", queue_id);
 
                 Ok(())
             }
@@ -304,6 +299,59 @@ async fn run_console_mode() -> Result<()> {
 
         if let Err(e) = result {
             error!("File watcher error: {}", e);
+        }
+    });
+
+    // Spawn queue processor to process enqueued files
+    let importer_for_processor = importer.clone();
+    let db_pool_for_processor = db_pool.clone();
+    let processor_handle = tokio::spawn(async move {
+        use pro_worker::queue_manager::QueueManager;
+
+        info!("Starting queue processor...");
+        let queue_manager = QueueManager::new(db_pool_for_processor);
+
+        loop {
+            // Dequeue next file (FIFO order)
+            match queue_manager.dequeue_next_global().await {
+                Ok(Some(queued_file)) => {
+                    info!("Processing queued file: {} (queue_id={})",
+                        queued_file.file_path, queued_file.queue_id);
+
+                    // Mark as processing
+                    if let Err(e) = queue_manager.mark_processing(queued_file.queue_id).await {
+                        error!("Failed to mark queue entry as processing: {}", e);
+                        continue;
+                    }
+
+                    // Process the file with queue_id for progress tracking
+                    let file_path = std::path::PathBuf::from(&queued_file.file_path);
+                    match importer_for_processor.import_file_with_queue(&file_path, Some(queued_file.queue_id)).await {
+                        Ok(result) => {
+                            info!("{}", result.summary());
+                            if !result.is_success() {
+                                for error in &result.errors {
+                                    error!("Import error: {}", error);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to process file: {}", e);
+                            if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
+                                error!("Failed to mark queue entry as failed: {}", mark_err);
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {
+                    // No files in queue, wait briefly
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+                Err(e) => {
+                    error!("Failed to dequeue file: {}", e);
+                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                }
+            }
         }
     });
 
@@ -315,6 +363,10 @@ async fn run_console_mode() -> Result<()> {
     // Stop file watcher
     info!("Stopping file watcher...");
     watcher_handle.abort();
+
+    // Stop queue processor
+    info!("Stopping queue processor...");
+    processor_handle.abort();
 
     // PHASE 5: Gracefully shutdown API server
     if let Some(handle) = api_handle {

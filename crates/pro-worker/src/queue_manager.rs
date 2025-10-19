@@ -48,6 +48,7 @@ impl QueueStatus {
 }
 
 /// Manages FIFO queue for file processing
+#[derive(Clone)]
 pub struct QueueManager {
     pool: PgPool,
 }
