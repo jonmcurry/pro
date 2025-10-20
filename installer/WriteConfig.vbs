@@ -76,7 +76,31 @@ Function WriteConfig()
         LogMessage "WriteConfig: WARNING - Config directory does not exist: " & configDir
     End If
 
-    ' Write configuration file directly
+    ' Check if config file already exists (upgrade scenario)
+    If fso.FileExists(configPath) Then
+        LogMessage "WriteConfig: Config file already exists - creating backup"
+
+        ' Create backup of existing config
+        Dim backupPath
+        backupPath = configPath & ".backup_" & Year(Now()) & Right("0" & Month(Now()), 2) & Right("0" & Day(Now()), 2) & "_" & Right("0" & Hour(Now()), 2) & Right("0" & Minute(Now()), 2) & Right("0" & Second(Now()), 2)
+
+        On Error Resume Next
+        fso.CopyFile configPath, backupPath
+        If Err.Number = 0 Then
+            LogMessage "WriteConfig: Backup created: " & backupPath
+        Else
+            LogMessage "WriteConfig: WARNING - Failed to create backup: " & Err.Description
+        End If
+        On Error GoTo 0
+
+        ' During upgrade, preserve existing config and only add new keys
+        LogMessage "WriteConfig: Upgrade detected - preserving existing configuration"
+        WriteConfig = 1
+        Set fso = Nothing
+        Exit Function
+    End If
+
+    ' Write configuration file directly (fresh install only)
     On Error Resume Next
     Dim configFile
     Set configFile = fso.CreateTextFile(configPath, True)

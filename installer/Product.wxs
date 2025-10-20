@@ -5,9 +5,9 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.0.0.0"
+           Version="1.2.1.0"
            Manufacturer="Professional SMART Team"
-           UpgradeCode="8F8D8F8D-8F8D-8F8D-8F8D-8F8D8F8D8F8D">
+           UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9D">
 
     <Package InstallerVersion="500"
              Compressed="yes"
@@ -18,7 +18,9 @@
              Manufacturer="Professional SMART Team" />
 
     <!-- Upgrade Logic -->
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Professional SMART is already installed. Please uninstall it first." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Professional SMART is already installed."
+                  Schedule="afterInstallInitialize"
+                  AllowSameVersionUpgrades="yes" />
 
     <!-- Media -->
     <MediaTemplate EmbedCab="yes" />
@@ -37,7 +39,25 @@
     <Property Id="DB_PORT" Value="5432" />
     <Property Id="DB_NAME" Value="professional_smart" />
     <Property Id="DB_USER" Value="postgres" />
-    <Property Id="DB_PASSWORD" Secure="yes" />
+    <Property Id="DB_PASSWORD" Hidden="yes" />
+
+    <!-- Upgrade Detection Properties -->
+    <Property Id="INSTALLMODE" Value="FRESH" />
+    <Property Id="DETECTEDVERSION" />
+    <Property Id="CREATE_BACKUP" Value="1" />
+    <Property Id="ENV_CREDENTIALS_LOADED" Value="0" />
+
+    <!-- Registry search for existing installation -->
+    <!-- TEMPORARILY DISABLED to allow fresh install -->
+    <!--
+    <Property Id="PREVIOUSVERSION">
+      <RegistrySearch Id="FindPreviousVersion"
+                      Root="HKLM"
+                      Key="SOFTWARE\ProfessionalSMART"
+                      Name="Version"
+                      Type="raw" />
+    </Property>
+    -->
 
     <!-- Installation Directory -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -90,6 +110,13 @@
             <Component Id="DataLoaderGuiExecutable" Guid="4A4A4A4A-4B4B-4C4C-4D4D-4E4E4E4E4E4E" Win64="yes">
               <File Id="ProDataLoaderGuiExe"
                     Source="$(var.SolutionDir)target\release\pro-data-loader-gui.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
+
+            <Component Id="UpgradeExecutable" Guid="5A5A5A5A-5B5B-5C5C-5D5D-5E5E5E5E5E5E" Win64="yes">
+              <File Id="ProUpgradeExe"
+                    Source="$(var.SolutionDir)target\release\pro-upgrade.exe"
                     KeyPath="yes"
                     Checksum="yes" />
             </Component>
@@ -170,6 +197,8 @@
               <File Id="Migration017" Source="$(var.SolutionDir)migrations\017_streaming_progress_tracking.sql" />
               <File Id="Migration018" Source="$(var.SolutionDir)migrations\018_phase6_strategic_indexes.sql" />
               <File Id="Migration019" Source="$(var.SolutionDir)migrations\019_phase6_materialized_views.sql" />
+              <File Id="Migration020" Source="$(var.SolutionDir)migrations\020_create_version_tracking.sql" />
+              <File Id="Migration021" Source="$(var.SolutionDir)migrations\021_insert_initial_version.sql" />
             </Component>
           </Directory>
 
@@ -202,6 +231,15 @@
               </CreateFolder>
               <RemoveFolder Id="RemoveProgramDataLogs" On="uninstall" />
               <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART" Name="LogsFolder" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
+          </Directory>
+          <Directory Id="ProgramDataBackupsFolder" Name="backups">
+            <Component Id="ProgramDataBackups" Guid="6F6F6F6F-6A6A-6B6B-6C6C-6D6D6D6D6D6D">
+              <CreateFolder>
+                <Permission User="Users" GenericAll="yes" />
+              </CreateFolder>
+              <RemoveFolder Id="RemoveProgramDataBackups" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART" Name="BackupsFolder" Type="integer" Value="1" KeyPath="yes" />
             </Component>
           </Directory>
         </Directory>
@@ -264,6 +302,7 @@
         <ComponentRef Id="SetupExecutable" />
         <ComponentRef Id="DataLoaderExecutable" />
         <ComponentRef Id="DataLoaderGuiExecutable" />
+        <ComponentRef Id="UpgradeExecutable" />
         <ComponentRef Id="InputDir" />
         <ComponentRef Id="ProcessedDir" />
         <ComponentRef Id="ErrorDir" />
@@ -272,6 +311,8 @@
         <ComponentRef Id="ProgramDataRoot" />
         <ComponentRef Id="ProgramDataConfig" />
         <ComponentRef Id="ProgramDataLogs" />
+        <ComponentRef Id="ProgramDataBackups" />
+        <ComponentRef Id="VersionRegistryKey" />
       </Feature>
 
       <Feature Id="Documentation" Level="1"
@@ -309,9 +350,10 @@
       <DialogRef Id="PrerequisiteDlg" />
       <DialogRef Id="DatabaseConfigDlg" />
 
-      <!-- Run prerequisite check BEFORE showing PrerequisiteDlg -->
+      <!-- Run prerequisite check and load credentials BEFORE showing PrerequisiteDlg -->
       <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">1</Publish>
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="PrerequisiteDlg" Order="2">1</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="LoadEnvCredentialsAction" Order="2">1</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="PrerequisiteDlg" Order="3">1</Publish>
 
       <!-- Change LicenseDlg Next to go to PrerequisiteDlg (if license dialog is used) -->
       <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">LicenseAccepted = "1"</Publish>
@@ -324,11 +366,17 @@
       <!-- PrerequisiteDlg Next goes to CustomizeDlg -->
       <Publish Dialog="PrerequisiteDlg" Control="Next" Event="NewDialog" Value="CustomizeDlg" Order="1">1</Publish>
 
-      <!-- Change CustomizeDlg Next to go to DatabaseConfigDlg instead of VerifyReadyDlg -->
-      <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="DatabaseConfigDlg" Order="2">1</Publish>
+      <!-- Change CustomizeDlg Next behavior based on whether credentials were loaded -->
+      <!-- If credentials loaded from .env (upgrade), skip DatabaseConfigDlg and go to VerifyReadyDlg -->
+      <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Order="2">ENV_CREDENTIALS_LOADED = "1"</Publish>
+      <!-- Otherwise (fresh install), go to DatabaseConfigDlg -->
+      <Publish Dialog="CustomizeDlg" Control="Next" Event="NewDialog" Value="DatabaseConfigDlg" Order="3">ENV_CREDENTIALS_LOADED = "0"</Publish>
 
-      <!-- Override VerifyReadyDlg back button to go to DatabaseConfigDlg -->
-      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DatabaseConfigDlg" Order="2">1</Publish>
+      <!-- Override VerifyReadyDlg back button based on whether credentials were loaded -->
+      <!-- If credentials loaded, go back to CustomizeDlg -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="CustomizeDlg" Order="2">ENV_CREDENTIALS_LOADED = "1"</Publish>
+      <!-- Otherwise, go back to DatabaseConfigDlg -->
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="DatabaseConfigDlg" Order="3">ENV_CREDENTIALS_LOADED = "0"</Publish>
     </UI>
 
     <!-- License -->
@@ -360,6 +408,24 @@
                   Return="check"
                   Impersonate="no" />
 
+    <!-- VBScript to detect installation type -->
+    <Binary Id="DetectInstallationScript" SourceFile="DetectInstallation.vbs" />
+
+    <CustomAction Id="DetectInstallationAction"
+                  BinaryKey="DetectInstallationScript"
+                  VBScriptCall="DetectInstallation"
+                  Execute="immediate"
+                  Return="check" />
+
+    <!-- VBScript to load credentials from .env file -->
+    <Binary Id="LoadEnvCredentialsScript" SourceFile="LoadEnvCredentials.vbs" />
+
+    <CustomAction Id="LoadEnvCredentialsAction"
+                  BinaryKey="LoadEnvCredentialsScript"
+                  VBScriptCall="LoadEnvCredentials"
+                  Execute="immediate"
+                  Return="check" />
+
     <!-- VBScript to create database -->
     <Binary Id="CreateDatabaseScript" SourceFile="CreateDatabase.vbs" />
 
@@ -371,6 +437,21 @@
     <CustomAction Id="CreateDatabaseAction"
                   BinaryKey="CreateDatabaseScript"
                   VBScriptCall="CreateDatabase"
+                  Execute="deferred"
+                  Return="check"
+                  Impersonate="no" />
+
+    <!-- VBScript to upgrade database -->
+    <Binary Id="UpgradeDatabaseScript" SourceFile="UpgradeDatabase.vbs" />
+
+    <CustomAction Id="SetUpgradeDatabaseData"
+                  Property="UpgradeDatabaseAction"
+                  Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]|[CREATE_BACKUP]"
+                  Execute="immediate" />
+
+    <CustomAction Id="UpgradeDatabaseAction"
+                  BinaryKey="UpgradeDatabaseScript"
+                  VBScriptCall="UpgradeDatabase"
                   Execute="deferred"
                   Return="check"
                   Impersonate="no" />
@@ -401,19 +482,40 @@
                   Impersonate="no" />
 
     <InstallExecuteSequence>
+      <!-- Detect installation type early in the sequence -->
+      <Custom Action="DetectInstallationAction" After="CostFinalize">NOT Installed OR (Installed AND NOT REMOVE="ALL")</Custom>
+
       <!-- Set data for deferred action -->
-      <Custom Action="SetWriteConfigData" After="InstallFiles">NOT Installed</Custom>
+      <Custom Action="SetWriteConfigData" After="InstallFiles">NOT REMOVE="ALL"</Custom>
       <!-- Write configuration file after folders are created -->
-      <Custom Action="WriteConfigAction" After="SetWriteConfigData">NOT Installed</Custom>
-      <!-- Create database after config is written -->
-      <Custom Action="SetCreateDatabaseData" After="WriteConfigAction">NOT Installed</Custom>
-      <Custom Action="CreateDatabaseAction" After="SetCreateDatabaseData">NOT Installed</Custom>
+      <Custom Action="WriteConfigAction" After="SetWriteConfigData">NOT REMOVE="ALL"</Custom>
+
+      <!-- Fresh install: Create database after config is written -->
+      <Custom Action="SetCreateDatabaseData" After="WriteConfigAction">NOT Installed AND NOT PREVIOUSVERSION</Custom>
+      <Custom Action="CreateDatabaseAction" After="SetCreateDatabaseData">NOT Installed AND NOT PREVIOUSVERSION</Custom>
+
+      <!-- Upgrade: Use upgrade database action right before InstallFinalize -->
+      <!-- Only run during upgrade install, not during uninstall -->
+      <Custom Action="SetUpgradeDatabaseData" Before="InstallFinalize">(Installed OR PREVIOUSVERSION) AND NOT REMOVE="ALL"</Custom>
+      <Custom Action="UpgradeDatabaseAction" After="SetUpgradeDatabaseData">(Installed OR PREVIOUSVERSION) AND NOT REMOVE="ALL"</Custom>
+
       <!-- Force stop service at the VERY START of InstallExecuteSequence during uninstall -->
       <Custom Action="ForceStopService" After="InstallInitialize">Installed AND REMOVE="ALL"</Custom>
+
       <!-- Remove ProgramData folder after removing files -->
       <Custom Action="SetRemoveProgramDataData" After="RemoveFiles">Installed AND REMOVE="ALL"</Custom>
       <Custom Action="RemoveProgramDataAction" After="SetRemoveProgramDataData">Installed AND REMOVE="ALL"</Custom>
     </InstallExecuteSequence>
+
+    <!-- Write registry value to track installed version -->
+    <Component Id="VersionRegistryKey" Guid="7E7E7E7E-7F7F-7A7A-7B7B-7C7C7C7C7C7C" Directory="TARGETDIR">
+      <RegistryValue Root="HKLM"
+                     Key="SOFTWARE\ProfessionalSMART"
+                     Name="Version"
+                     Type="string"
+                     Value="1.2.1.0"
+                     KeyPath="yes" />
+    </Component>
 
   </Product>
 </Wix>

@@ -2,6 +2,24 @@
 
 This guide provides step-by-step instructions for installing the Professional SMART claims processing system on Windows.
 
+## Upgrading from Previous Version
+
+**If you already have Professional SMART installed**, please see the [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) for upgrade instructions. Starting with version 1.1.0, you can upgrade in-place without losing your data.
+
+**Quick upgrade steps:**
+1. Download the latest MSI installer
+2. Run the installer (it will detect your existing installation)
+3. Follow the prompts to complete the upgrade
+4. Your data and configuration will be preserved automatically
+
+For detailed upgrade instructions, troubleshooting, and rollback procedures, see the complete [Upgrade Guide](UPGRADE_GUIDE.md).
+
+---
+
+## Fresh Installation
+
+The following instructions are for fresh installations on systems that have never had Professional SMART installed.
+
 ## System Requirements
 
 ### Minimum Requirements

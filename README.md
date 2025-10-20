@@ -15,6 +15,7 @@ Professional SMART is a Windows-based application designed to help healthcare or
 - **Audit Management**: Retrospective audit workflow with coder and provider accuracy tracking
 - **Machine Learning**: Predictive models for denial risk, coding suggestions, and audit prioritization
 - **Performance**: Designed to process 10,000 claims in 15 seconds
+- **Seamless Upgrades**: In-place upgrades with automatic data preservation and database backups (v1.1.0+)
 
 ## Project Structure
 
@@ -198,6 +199,27 @@ The system supports 11 flag categories from the SRD:
 - **Database**: Optimized with composite and partial indexes
 - **Concurrency**: Async processing with Tokio
 - **Caching**: Materialized views for dashboard performance
+
+## Installation and Upgrade
+
+### Fresh Installation
+For detailed installation instructions, see [docs/INSTALLATION.md](docs/INSTALLATION.md)
+
+Quick start:
+1. Install PostgreSQL 14+
+2. Download and run the `ProfessionalSMART.msi` installer
+3. Follow the installation wizard
+4. Configure database settings
+5. Load master data using the Data Loader tool
+
+### Upgrading
+Starting with version 1.1.0, Professional SMART supports seamless in-place upgrades. See [docs/UPGRADE_GUIDE.md](docs/UPGRADE_GUIDE.md) for complete upgrade instructions.
+
+Quick upgrade:
+1. Download the latest MSI installer
+2. Run the installer (it auto-detects existing installations)
+3. Your data and configuration are preserved automatically
+4. Database backup created before upgrade (recommended)
 
 ## Healthcare Standards Compliance
 

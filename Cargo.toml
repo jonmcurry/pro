@@ -11,7 +11,7 @@ members = [
     "crates/pro-setup",
     "crates/pro-ml",
     "crates/pro-data-loader",
-    "crates/pro-data-loader-gui",
+    "crates/pro-data-loader-gui", "crates/pro-upgrade-manager", "crates/pro-upgrade",
 ]
 resolver = "2"
 
