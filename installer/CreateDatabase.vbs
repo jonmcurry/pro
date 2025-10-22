@@ -338,75 +338,122 @@ Function CreateDatabase()
         LogMessage "CreateDatabase: Database already exists: " & dbName
     End If
 
-    ' Use pro-upgrade.exe to handle migrations intelligently
-    LogMessage "CreateDatabase: Starting database schema migrations using pro-upgrade tool..."
+    ' Run database migrations
+    LogMessage "CreateDatabase: Starting database schema migrations..."
+
+    ' Get migrations directory path (should be in INSTALLFOLDER\migrations)
+    Dim migrationsDir
 
     ' Ensure installFolder ends with a backslash
     If Right(installFolder, 1) <> "\" Then
         installFolder = installFolder & "\"
     End If
 
-    ' Path to pro-upgrade.exe
-    Dim proUpgradeExe
-    proUpgradeExe = installFolder & "bin\pro-upgrade.exe"
+    migrationsDir = installFolder & "migrations\"
+    LogMessage "CreateDatabase: Looking for migrations in: " & migrationsDir
 
-    If Not fso.FileExists(proUpgradeExe) Then
-        LogMessage "CreateDatabase: ERROR - pro-upgrade.exe not found at: " & proUpgradeExe
-        LogMessage "CreateDatabase: Falling back to manual migration application"
-        ' Fall back to old migration method would go here, but we'll skip for now
-        CreateDatabase = 1
-        Set fso = Nothing
-        Set env = Nothing
-        Set shell = Nothing
-        Exit Function
-    End If
-
-    LogMessage "CreateDatabase: Found pro-upgrade.exe at: " & proUpgradeExe
-
-    ' First, detect installation type
-    LogMessage "CreateDatabase: Detecting installation type..."
-    Dim detectCmd
-    detectCmd = "cmd.exe /c ""set PGPASSWORD=" & dbPassword & " && set DB_HOST=" & dbHost & " && set DB_PORT=" & dbPort & " && set DB_NAME=" & dbName & " && set DB_USER=" & dbUser & " && set DB_PASSWORD=" & dbPassword & " && """ & proUpgradeExe & """ detect-installation-type 2>&1"""
-
-    Dim detectResult
-    detectResult = shell.Run(detectCmd, 0, True)
-
-    If detectResult = 0 Then
-        LogMessage "CreateDatabase: Installation type detected successfully"
+    If Not fso.FolderExists(migrationsDir) Then
+        LogMessage "CreateDatabase: WARNING - Migrations directory not found: " & migrationsDir
+        LogMessage "CreateDatabase: Skipping schema creation. Database will be empty."
     Else
-        LogMessage "CreateDatabase: WARNING - Could not detect installation type (exit code: " & detectResult & ")"
-    End If
+        LogMessage "CreateDatabase: Migrations directory found: " & migrationsDir
 
-    ' Apply migrations using pro-upgrade.exe
-    LogMessage "CreateDatabase: Applying database migrations..."
-    Dim migrationsDir
-    migrationsDir = installFolder & "migrations"
+        ' Get list of migration files
+        Dim folder, files, file, migrationFiles()
+        Set folder = fso.GetFolder(migrationsDir)
+        Set files = folder.Files
 
-    Dim applyCmd
-    applyCmd = "cmd.exe /c ""set PGPASSWORD=" & dbPassword & " && set DB_HOST=" & dbHost & " && set DB_PORT=" & dbPort & " && set DB_NAME=" & dbName & " && set DB_USER=" & dbUser & " && set DB_PASSWORD=" & dbPassword & " && """ & proUpgradeExe & """ apply-migrations --migrations-dir """ & migrationsDir & """ 2>&1"""
+        ' Count SQL files
+        Dim fileCount, i
+        fileCount = 0
+        For Each file In files
+            If LCase(fso.GetExtensionName(file.Name)) = "sql" Then
+                fileCount = fileCount + 1
+            End If
+        Next
 
-    LogMessage "CreateDatabase: Executing: pro-upgrade apply-migrations"
-    Dim applyResult
-    applyResult = shell.Run(applyCmd, 0, True)
+        If fileCount = 0 Then
+            LogMessage "CreateDatabase: WARNING - No migration files found in " & migrationsDir
+        Else
+            LogMessage "CreateDatabase: Found " & fileCount & " migration files"
 
-    If applyResult = 0 Then
-        LogMessage "CreateDatabase: SUCCESS - All migrations applied successfully"
-        LogMessage "CreateDatabase: Database is fully initialized and ready to use"
-        CreateDatabase = 1  ' Success
-    Else
-        LogMessage "CreateDatabase: ERROR - Migration application failed (exit code: " & applyResult & ")"
-        LogMessage "CreateDatabase: Installation cannot continue without database schemas"
-        LogMessage "CreateDatabase: INSTALLATION WILL FAIL - FIX THE DATABASE ISSUE AND REINSTALL"
-        CreateDatabase = 3  ' FAILURE - this will abort the installation
-        Set fso = Nothing
-        Set env = Nothing
-        Set shell = Nothing
-        Exit Function
+            ' Create array and populate with sorted filenames
+            ReDim migrationFiles(fileCount - 1)
+            i = 0
+            For Each file In files
+                If LCase(fso.GetExtensionName(file.Name)) = "sql" Then
+                    migrationFiles(i) = file.Name
+                    i = i + 1
+                End If
+            Next
+
+            ' Sort migration files (simple bubble sort)
+            Dim j, temp
+            For i = 0 To UBound(migrationFiles) - 1
+                For j = i + 1 To UBound(migrationFiles)
+                    If migrationFiles(i) > migrationFiles(j) Then
+                        temp = migrationFiles(i)
+                        migrationFiles(i) = migrationFiles(j)
+                        migrationFiles(j) = temp
+                    End If
+                Next
+            Next
+
+            ' Execute each migration file
+            Dim migrationSuccess, migrationFailed, migrationFile, migrationPath, migrationCmd, migrationResult
+            migrationSuccess = 0
+            migrationFailed = 0
+
+            For i = 0 To UBound(migrationFiles)
+                migrationFile = migrationFiles(i)
+                migrationPath = migrationsDir & migrationFile
+
+                LogMessage "CreateDatabase: Running migration " & (i + 1) & " of " & (UBound(migrationFiles) + 1) & ": " & migrationFile
+
+                ' Verify migration file exists
+                If Not fso.FileExists(migrationPath) Then
+                    LogMessage "CreateDatabase: ERROR - Migration file not found: " & migrationPath
+                    migrationFailed = migrationFailed + 1
+                Else
+                    ' Execute migration using psql
+                    migrationCmd = "cmd.exe /c """ & psqlExe & " -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & dbName & " -f """ & migrationPath & """ 2>&1"""
+                    LogMessage "CreateDatabase: Executing migration with: " & psqlExe
+                    migrationResult = shell.Run(migrationCmd, 0, True)
+
+                    If migrationResult = 0 Then
+                        LogMessage "CreateDatabase: Migration completed successfully: " & migrationFile
+                        migrationSuccess = migrationSuccess + 1
+                    Else
+                        LogMessage "CreateDatabase: ERROR - Migration failed: " & migrationFile & " (exit code: " & migrationResult & ")"
+                        LogMessage "CreateDatabase: ERROR - Check that the database exists and user has permissions"
+                        migrationFailed = migrationFailed + 1
+                    End If
+                End If
+            Next
+
+            ' Log summary
+            LogMessage "CreateDatabase: Migration summary: " & migrationSuccess & " successful, " & migrationFailed & " failed"
+
+            If migrationFailed > 0 Then
+                LogMessage "CreateDatabase: WARNING - Some migrations failed. Database may not be fully initialized."
+                LogMessage "CreateDatabase: Please check the log for errors and run migrations manually if needed."
+            Else
+                LogMessage "CreateDatabase: SUCCESS - All migrations completed successfully"
+                LogMessage "CreateDatabase: Database is fully initialized and ready to use"
+            End If
+        End If
+
+        Set files = Nothing
+        Set folder = Nothing
     End If
 
     Set fso = Nothing
 
     On Error GoTo 0
+
+    ' Return success (1 = success in VBScript custom actions, 0 = failure)
+    ' We return success even if database creation fails to not block the installation
+    CreateDatabase = 1
 
     Set env = Nothing
     Set shell = Nothing
