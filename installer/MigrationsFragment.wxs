@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Fragment>
+        <DirectoryRef Id="MigrationsFolder">
+            <Component Id="cmpF2C6EE2F67826F60BFFEAA7A83A5DE2D" Guid="{26D23514-DC25-4551-8674-073CF6FACE12}" Win64="yes">
+                <File Id="filD97245C1092E84B749034F33FA8CF0D3" KeyPath="yes" Source="$(var.SolutionDir)migrations\020_create_version_tracking.sql" />
+            </Component>
+            <Component Id="cmpC9E87C66ECB01371013C97A38D24BA0E" Guid="{B50135D3-2B29-4F38-A1CA-AA5B2FD1884B}" Win64="yes">
+                <File Id="filFE8E09E41A9971D5795D552207377FD2" KeyPath="yes" Source="$(var.SolutionDir)migrations\021_insert_initial_version.sql" />
+            </Component>
+            <Component Id="cmp8AFC126FBCCD39DE84AB953A76FBDD30" Guid="{2D9CDFB8-ED76-40F1-B858-714F320B2E25}" Win64="yes">
+                <File Id="fil99AFE760245C05874DB9DF02131FCDD8" KeyPath="yes" Source="$(var.SolutionDir)migrations\022_test_upgrade_migration.sql" />
+            </Component>
+            <Component Id="cmpDD0D37BD2E9B8FA60677502648E26C92" Guid="{BBFFAD1A-1826-4A27-8975-A62CF42A264C}" Win64="yes">
+                <File Id="fil7F8670F228C220B42208B428B7205250" KeyPath="yes" Source="$(var.SolutionDir)migrations\baseline_v1.2.0.sql" />
+            </Component>
+            </DirectoryRef>
+    </Fragment>
+    <Fragment>
+        <ComponentGroup Id="MigrationsComponentGroup">
+            <ComponentRef Id="cmpF2C6EE2F67826F60BFFEAA7A83A5DE2D" />
+            <ComponentRef Id="cmpC9E87C66ECB01371013C97A38D24BA0E" />
+            <ComponentRef Id="cmp8AFC126FBCCD39DE84AB953A76FBDD30" />
+            <ComponentRef Id="cmpDD0D37BD2E9B8FA60677502648E26C92" />
+            </ComponentGroup>
+    </Fragment>
+</Wix>

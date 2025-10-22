@@ -5,9 +5,9 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.2.1.0"
+           Version="1.2.3.0"
            Manufacturer="Professional SMART Team"
-           UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9D">
+           UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
     <Package InstallerVersion="500"
              Compressed="yes"
@@ -47,17 +47,6 @@
     <Property Id="CREATE_BACKUP" Value="1" />
     <Property Id="ENV_CREDENTIALS_LOADED" Value="0" />
 
-    <!-- Registry search for existing installation -->
-    <!-- TEMPORARILY DISABLED to allow fresh install -->
-    <!--
-    <Property Id="PREVIOUSVERSION">
-      <RegistrySearch Id="FindPreviousVersion"
-                      Root="HKLM"
-                      Key="SOFTWARE\ProfessionalSMART"
-                      Name="Version"
-                      Type="raw" />
-    </Property>
-    -->
 
     <!-- Installation Directory -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -177,29 +166,8 @@
 
           <!-- Migrations Directory -->
           <Directory Id="MigrationsFolder" Name="migrations">
-            <Component Id="MigrationFiles" Guid="DDDDDDDD-EEEE-FFFF-0000-111111111111" Win64="yes">
-              <File Id="Migration001" Source="$(var.SolutionDir)migrations\001_create_schemas.sql" KeyPath="yes" />
-              <File Id="Migration002" Source="$(var.SolutionDir)migrations\002_create_organization_tables.sql" />
-              <File Id="Migration003" Source="$(var.SolutionDir)migrations\003_create_provider_tables.sql" />
-              <File Id="Migration004" Source="$(var.SolutionDir)migrations\004_create_encounter_tables.sql" />
-              <File Id="Migration005" Source="$(var.SolutionDir)migrations\005_create_diagnosis_procedure_tables.sql" />
-              <File Id="Migration006" Source="$(var.SolutionDir)migrations\006_create_flag_tables.sql" />
-              <File Id="Migration007" Source="$(var.SolutionDir)migrations\007_create_staging_tables.sql" />
-              <File Id="Migration008" Source="$(var.SolutionDir)migrations\008_create_audit_tables.sql" />
-              <File Id="Migration009" Source="$(var.SolutionDir)migrations\009_create_rvu_tables.sql" />
-              <File Id="Migration010" Source="$(var.SolutionDir)migrations\010_create_denial_tables.sql" />
-              <File Id="Migration011" Source="$(var.SolutionDir)migrations\011_create_schedule_tables.sql" />
-              <File Id="Migration012" Source="$(var.SolutionDir)migrations\012_create_ml_tables.sql" />
-              <File Id="Migration013" Source="$(var.SolutionDir)migrations\013_create_dashboard_views.sql" />
-              <File Id="Migration014" Source="$(var.SolutionDir)migrations\014_create_utility_functions.sql" />
-              <File Id="Migration015" Source="$(var.SolutionDir)migrations\015_create_fifo_queue.sql" />
-              <File Id="Migration016" Source="$(var.SolutionDir)migrations\016_phase5_performance_indexes.sql" />
-              <File Id="Migration017" Source="$(var.SolutionDir)migrations\017_streaming_progress_tracking.sql" />
-              <File Id="Migration018" Source="$(var.SolutionDir)migrations\018_phase6_strategic_indexes.sql" />
-              <File Id="Migration019" Source="$(var.SolutionDir)migrations\019_phase6_materialized_views.sql" />
-              <File Id="Migration020" Source="$(var.SolutionDir)migrations\020_create_version_tracking.sql" />
-              <File Id="Migration021" Source="$(var.SolutionDir)migrations\021_insert_initial_version.sql" />
-            </Component>
+            <!-- Migrations folder - uses Heat.exe to auto-generate file list during build -->
+            <!-- This allows unlimited migration files without manually updating WiX -->
           </Directory>
 
         </Directory>
@@ -307,7 +275,7 @@
         <ComponentRef Id="ProcessedDir" />
         <ComponentRef Id="ErrorDir" />
         <ComponentRef Id="LogsDir" />
-        <ComponentRef Id="MigrationFiles" />
+        <ComponentGroupRef Id="MigrationsComponentGroup" />
         <ComponentRef Id="ProgramDataRoot" />
         <ComponentRef Id="ProgramDataConfig" />
         <ComponentRef Id="ProgramDataLogs" />
@@ -426,6 +394,15 @@
                   Execute="immediate"
                   Return="check" />
 
+    <!-- VBScript to trim properties -->
+    <Binary Id="TrimPropertiesScript" SourceFile="TrimProperties.vbs" />
+
+    <CustomAction Id="TrimDatabaseProperties"
+                  BinaryKey="TrimPropertiesScript"
+                  VBScriptCall="TrimDatabaseProperties"
+                  Execute="immediate"
+                  Return="check" />
+
     <!-- VBScript to create database -->
     <Binary Id="CreateDatabaseScript" SourceFile="CreateDatabase.vbs" />
 
@@ -485,19 +462,23 @@
       <!-- Detect installation type early in the sequence -->
       <Custom Action="DetectInstallationAction" After="CostFinalize">NOT Installed OR (Installed AND NOT REMOVE="ALL")</Custom>
 
+      <!-- Trim properties before using them -->
+      <Custom Action="TrimDatabaseProperties" After="DetectInstallationAction">NOT REMOVE="ALL"</Custom>
+
       <!-- Set data for deferred action -->
       <Custom Action="SetWriteConfigData" After="InstallFiles">NOT REMOVE="ALL"</Custom>
       <!-- Write configuration file after folders are created -->
       <Custom Action="WriteConfigAction" After="SetWriteConfigData">NOT REMOVE="ALL"</Custom>
 
       <!-- Fresh install: Create database after config is written -->
-      <Custom Action="SetCreateDatabaseData" After="WriteConfigAction">NOT Installed AND NOT PREVIOUSVERSION</Custom>
-      <Custom Action="CreateDatabaseAction" After="SetCreateDatabaseData">NOT Installed AND NOT PREVIOUSVERSION</Custom>
+      <!-- Only run if NOT upgrading (WIX_UPGRADE_DETECTED will be set during upgrades) -->
+      <Custom Action="SetCreateDatabaseData" After="WriteConfigAction">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
+      <Custom Action="CreateDatabaseAction" After="SetCreateDatabaseData">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
 
       <!-- Upgrade: Use upgrade database action right before InstallFinalize -->
-      <!-- Only run during upgrade install, not during uninstall -->
-      <Custom Action="SetUpgradeDatabaseData" Before="InstallFinalize">(Installed OR PREVIOUSVERSION) AND NOT REMOVE="ALL"</Custom>
-      <Custom Action="UpgradeDatabaseAction" After="SetUpgradeDatabaseData">(Installed OR PREVIOUSVERSION) AND NOT REMOVE="ALL"</Custom>
+      <!-- Only run if upgrading (WIX_UPGRADE_DETECTED is set by MajorUpgrade when older version found) -->
+      <Custom Action="SetUpgradeDatabaseData" After="InstallFiles">WIX_UPGRADE_DETECTED</Custom>
+      <Custom Action="UpgradeDatabaseAction" After="SetUpgradeDatabaseData">WIX_UPGRADE_DETECTED</Custom>
 
       <!-- Force stop service at the VERY START of InstallExecuteSequence during uninstall -->
       <Custom Action="ForceStopService" After="InstallInitialize">Installed AND REMOVE="ALL"</Custom>

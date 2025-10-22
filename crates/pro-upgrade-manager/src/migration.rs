@@ -120,6 +120,12 @@ impl MigrationManager {
                             })?
                             .to_string();
 
+                        // Skip baseline files (they're handled separately)
+                        if file_name.starts_with("baseline_") {
+                            debug!("Skipping baseline file: {}", file_name);
+                            continue;
+                        }
+
                         let content = std::fs::read_to_string(&path)?;
                         let checksum = Self::calculate_checksum(&content);
 
@@ -139,6 +145,70 @@ impl MigrationManager {
 
         info!("Found {} migration files", migrations.len());
         Ok(migrations)
+    }
+
+    /// Find baseline file in migrations directory (e.g., baseline_v1.2.0.sql)
+    pub fn find_baseline_file(&self) -> Result<Option<PendingMigration>> {
+        if !self.migrations_dir.exists() {
+            return Ok(None);
+        }
+
+        for entry in std::fs::read_dir(&self.migrations_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
+                    // Look for baseline_*.sql files
+                    if file_name.starts_with("baseline_") && file_name.ends_with(".sql") {
+                        info!("Found baseline file: {}", file_name);
+                        let content = std::fs::read_to_string(&path)?;
+                        let checksum = Self::calculate_checksum(&content);
+
+                        return Ok(Some(PendingMigration {
+                            file_name: file_name.to_string(),
+                            file_path: path,
+                            content,
+                            checksum,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Apply baseline schema (for fresh installs)
+    pub async fn apply_baseline(&self, baseline: &PendingMigration) -> Result<()> {
+        info!("Applying baseline schema: {}", baseline.file_name);
+
+        let start = std::time::Instant::now();
+
+        // Execute the baseline SQL
+        sqlx::query(&baseline.content)
+            .execute(&self.pool)
+            .await?;
+
+        let execution_time = start.elapsed().as_millis() as i32;
+
+        // Record baseline in schema_migrations table with special marker
+        sqlx::query(
+            r#"
+            INSERT INTO staging.schema_migrations
+            (migration_name, applied_at, checksum, execution_time_ms, description)
+            VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4)
+            "#
+        )
+        .bind(&baseline.file_name)
+        .bind(&baseline.checksum)
+        .bind(execution_time)
+        .bind("Baseline schema snapshot")
+        .execute(&self.pool)
+        .await?;
+
+        info!("Baseline applied successfully in {}ms", execution_time);
+        Ok(())
     }
 
     /// Get pending migrations that haven't been applied yet
@@ -371,16 +441,34 @@ impl MigrationManager {
 
     /// Apply all pending migrations
     pub async fn apply_pending_migrations(&self) -> Result<Vec<String>> {
+        let mut applied = Vec::new();
+
+        // Check if this is a fresh install (no schema_migrations table)
+        let is_fresh_install = !self.is_migration_tracking_setup().await?;
+
+        if is_fresh_install {
+            info!("Fresh install detected - checking for baseline schema");
+
+            // Look for baseline file
+            if let Some(baseline) = self.find_baseline_file()? {
+                info!("Found baseline: {}, applying...", baseline.file_name);
+                self.apply_baseline(&baseline).await?;
+                applied.push(baseline.file_name.clone());
+                info!("Baseline applied successfully");
+            } else {
+                info!("No baseline file found, will apply all migrations sequentially");
+            }
+        }
+
+        // Now apply any pending incremental migrations
         let pending = self.get_pending_migrations().await?;
 
         if pending.is_empty() {
             info!("No pending migrations to apply");
-            return Ok(Vec::new());
+            return Ok(applied);
         }
 
         info!("Applying {} pending migrations", pending.len());
-
-        let mut applied = Vec::new();
 
         for migration in pending {
             match self.apply_migration(&migration).await {
@@ -398,7 +486,7 @@ impl MigrationManager {
             }
         }
 
-        info!("Successfully applied {} migrations", applied.len());
+        info!("Successfully applied {} total migrations/baselines", applied.len());
         Ok(applied)
     }
 

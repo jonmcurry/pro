@@ -461,7 +461,7 @@ SELECT
     aa.assigned_at,
     aa.completed_at,
     EXTRACT(EPOCH FROM (COALESCE(aa.completed_at, CURRENT_TIMESTAMP) - aa.assigned_at))/86400 AS days_in_progress,
-    EXTRACT(EPOCH FROM (aa.due_date - CURRENT_DATE)) AS days_until_due
+    (aa.due_date - CURRENT_DATE) AS days_until_due
 
 FROM claims.audit_assignment aa
 LEFT JOIN claims.reviewer r ON aa.reviewer_id = r.reviewer_id;

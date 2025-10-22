@@ -6,6 +6,19 @@ use std::path::PathBuf;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
+// Custom value parsers to trim whitespace from environment variables
+fn trim_string(s: &str) -> Result<String, String> {
+    Ok(s.trim().to_string())
+}
+
+fn trim_parse_u16(s: &str) -> Result<u16, String> {
+    s.trim().parse::<u16>().map_err(|e| e.to_string())
+}
+
+fn trim_optional_string(s: &str) -> Result<String, String> {
+    Ok(s.trim().to_string())
+}
+
 #[derive(Parser)]
 #[command(name = "pro-upgrade")]
 #[command(about = "Professional SMART Database Upgrade Tool", long_about = None)]
@@ -16,19 +29,19 @@ struct Cli {
     #[arg(long, env = "DATABASE_URL")]
     database_url: Option<String>,
 
-    #[arg(long, env = "DB_HOST", default_value = "localhost")]
+    #[arg(long, env = "DB_HOST", default_value = "localhost", value_parser = trim_string)]
     db_host: String,
 
-    #[arg(long, env = "DB_PORT", default_value = "5432")]
+    #[arg(long, env = "DB_PORT", default_value = "5432", value_parser = trim_parse_u16)]
     db_port: u16,
 
-    #[arg(long, env = "DB_NAME", default_value = "professional_smart")]
+    #[arg(long, env = "DB_NAME", default_value = "professional_smart", value_parser = trim_string)]
     db_name: String,
 
-    #[arg(long, env = "DB_USER", default_value = "postgres")]
+    #[arg(long, env = "DB_USER", default_value = "postgres", value_parser = trim_string)]
     db_user: String,
 
-    #[arg(long, env = "DB_PASSWORD")]
+    #[arg(long, env = "DB_PASSWORD", value_parser = trim_optional_string)]
     db_password: Option<String>,
 }
 

@@ -9,7 +9,7 @@
 CREATE TABLE IF NOT EXISTS staging.file_processing_queue (
     queue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     facility_id UUID NOT NULL REFERENCES claims.facility(facility_id),
-    import_batch_id UUID NOT NULL REFERENCES staging.import_batch(import_batch_id),
+    import_batch_id UUID NOT NULL REFERENCES staging.import_batch(batch_id),
     file_path TEXT NOT NULL,
     file_hash TEXT NOT NULL,
     file_format TEXT NOT NULL,
@@ -143,7 +143,7 @@ SELECT
     f.facility_code,
     f.facility_name,
     EXTRACT(EPOCH FROM (e1.import_date - e2.import_date)) as import_gap_seconds,
-    EXTRACT(DAYS FROM (e2.date_of_service_from - e1.date_of_service_from)) as service_date_gap_days
+    (e2.date_of_service_from - e1.date_of_service_from) as service_date_gap_days
 FROM claims.encounter e1
 JOIN claims.encounter e2 ON e1.facility_id = e2.facility_id
 JOIN claims.facility f ON e1.facility_id = f.facility_id
@@ -219,14 +219,20 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION staging.cleanup_old_queue_entries IS 'Removes completed/failed queue entries older than specified days (default 90)';
 
 -- ============================================================================
--- Grants
+-- Grants (only if role exists)
 -- ============================================================================
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON staging.file_processing_queue TO pro_user;
-GRANT SELECT ON staging.v_queue_health TO pro_user;
-GRANT SELECT ON staging.v_queue_statistics TO pro_user;
-GRANT SELECT ON claims.v_fifo_violations TO pro_user;
-GRANT EXECUTE ON FUNCTION staging.cleanup_old_queue_entries TO pro_user;
+DO $$
+BEGIN
+    IF EXISTS (SELECT FROM pg_roles WHERE rolname = 'pro_user') THEN
+        GRANT SELECT, INSERT, UPDATE, DELETE ON staging.file_processing_queue TO pro_user;
+        GRANT SELECT ON staging.v_queue_health TO pro_user;
+        GRANT SELECT ON staging.v_queue_statistics TO pro_user;
+        GRANT SELECT ON claims.v_fifo_violations TO pro_user;
+        GRANT EXECUTE ON FUNCTION staging.cleanup_old_queue_entries TO pro_user;
+    END IF;
+END
+$$;
 
 -- ============================================================================
 -- Comments

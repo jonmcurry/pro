@@ -40,19 +40,31 @@ Function DetectInstallation()
     env("DB_USER") = dbUser
     env("DB_PASSWORD") = dbPassword
 
-    ' Check if this is an existing installation by looking at registry
+    ' Check if this is an upgrade by checking WIX_UPGRADE_DETECTED property
+    ' This is the authoritative source set by the MajorUpgrade element
     Dim isUpgrade
     isUpgrade = False
 
+    Dim wixUpgradeDetected
+    wixUpgradeDetected = Session.Property("WIX_UPGRADE_DETECTED")
+
+    If wixUpgradeDetected <> "" Then
+        LogMessage "DetectInstallation: WIX_UPGRADE_DETECTED = " & wixUpgradeDetected
+        isUpgrade = True
+    Else
+        LogMessage "DetectInstallation: WIX_UPGRADE_DETECTED not set - this is a fresh install"
+    End If
+
+    ' Also check registry for version information
     On Error Resume Next
     Dim installedVersion
     installedVersion = shell.RegRead("HKLM\SOFTWARE\ProfessionalSMART\Version")
 
     If Err.Number = 0 And installedVersion <> "" Then
         LogMessage "DetectInstallation: Found existing installation in registry: " & installedVersion
-        isUpgrade = True
     Else
         LogMessage "DetectInstallation: No existing installation found in registry"
+        installedVersion = ""
     End If
     Err.Clear
     On Error GoTo 0
