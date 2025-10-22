@@ -218,7 +218,372 @@ impl ClaimsImporter {
         Ok(())
     }
 
+    /// STAGE 1: Ingest CSV file to staging.raw_claims (two-stage pipeline)
+    /// This is the new two-stage processing approach:
+    /// - Stage 1: Fast ingestion (file -> raw_claims) - THIS METHOD
+    /// - Stage 2: Validated processing (raw_claims -> encounters/errors) - ClaimsProcessor
+    pub async fn ingest_file_to_staging(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<IngestResult> {
+        let file_path_str = file_path.display().to_string();
+        let filename = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        info!("====== STAGE 1: Starting file ingestion to staging: {} ======", file_path_str);
+        info!("File name: {}", filename);
+
+        // Parse CSV file using auto-detection
+        info!("Parsing CSV file...");
+        let parse_start = chrono::Utc::now();
+        let mut parser = CsvParser::with_auto_detection();
+
+        let parsed_rows = match parser.parse_file(&file_path_str) {
+            Ok(rows) => {
+                info!("Successfully parsed CSV file");
+                rows
+            }
+            Err(e) => {
+                error!("Failed to parse CSV file: {}", e);
+                return Err(e).context("Failed to parse CSV file");
+            }
+        };
+        let parse_end = chrono::Utc::now();
+
+        info!("Parsed {} rows from CSV file", parsed_rows.len());
+
+        if parsed_rows.is_empty() {
+            warn!("CSV file is empty, no rows to ingest");
+        }
+
+        // Get facility info from the first row to set up the batch
+        info!("Looking up facility information...");
+        let (facility_id, org_id) = if let Some(first_row) = parsed_rows.first() {
+            if let Some(facility_code) = first_row.encounter_fields.get("facility_code") {
+                info!("Found facility_code in first row: {}", facility_code);
+
+                let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+                    r#"
+                    SELECT facility_id, organization_id
+                    FROM claims.facility
+                    WHERE facility_code = $1 OR npi = $1
+                    LIMIT 1
+                    "#
+                )
+                .bind(facility_code)
+                .fetch_optional(&self.pool)
+                .await?;
+
+                if let Some((fac_id, org_id)) = result {
+                    info!("Found facility in database: facility_id={}, organization_id={}", fac_id, org_id);
+                    (Some(fac_id), org_id)
+                } else {
+                    warn!("Facility not found in database: {}", facility_code);
+                    let org: Option<Uuid> = sqlx::query_scalar(
+                        "SELECT organization_id FROM claims.organization LIMIT 1"
+                    )
+                    .fetch_optional(&self.pool)
+                    .await?;
+
+                    let org = org.context("No organization found in database")?;
+                    info!("Using fallback organization: {}", org);
+                    (None, org)
+                }
+            } else {
+                warn!("No facility_code found in first row");
+                let org: Option<Uuid> = sqlx::query_scalar(
+                    "SELECT organization_id FROM claims.organization LIMIT 1"
+                )
+                .fetch_optional(&self.pool)
+                .await?;
+
+                let org = org.context("No organization found in database")?;
+                info!("Using fallback organization: {}", org);
+                (None, org)
+            }
+        } else {
+            warn!("CSV file has no rows");
+            let org: Option<Uuid> = sqlx::query_scalar(
+                "SELECT organization_id FROM claims.organization LIMIT 1"
+            )
+            .fetch_optional(&self.pool)
+            .await?;
+
+            let org = org.context("No organization found in database")?;
+            info!("Using fallback organization: {}", org);
+            (None, org)
+        };
+
+        // Get queue_id - must be provided for two-stage pipeline
+        let queue_id = queue_id.context("queue_id required for two-stage pipeline ingestion")?;
+
+        // Create import batch record with INGESTING status
+        let batch_id = Uuid::new_v4();
+        let started_at = chrono::Utc::now();
+
+        info!("Creating import batch record: batch_id={}", batch_id);
+
+        sqlx::query(
+            r#"
+            INSERT INTO staging.import_batch (
+                batch_id,
+                organization_id,
+                facility_id,
+                batch_name,
+                batch_type,
+                file_format,
+                original_filename,
+                file_path,
+                import_status,
+                total_records,
+                started_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            "#
+        )
+        .bind(batch_id)
+        .bind(org_id)
+        .bind(facility_id)
+        .bind(&filename)
+        .bind("CSV")
+        .bind("ATHENA")
+        .bind(&filename)
+        .bind(&file_path_str)
+        .bind("INGESTING")  // New status for Stage 1
+        .bind(parsed_rows.len() as i32)
+        .bind(started_at)
+        .execute(&self.pool)
+        .await
+        .context("Failed to create import batch record")?;
+
+        info!("Import batch record created successfully");
+
+        // Log PARSE metric
+        if let Err(e) = self.log_processing_metric(
+            batch_id,
+            "PARSE",
+            "CSV Parsing",
+            parse_start,
+            parse_end,
+            parsed_rows.len() as i32,
+            parsed_rows.len() as i32,
+            0,
+            Some(serde_json::json!({
+                "filename": filename,
+                "format": "CSV",
+                "stage": "INGEST"
+            }))
+        ).await {
+            warn!("Failed to log PARSE metric: {}", e);
+        }
+
+        // Begin transaction for batch insertion to staging.raw_claims
+        let mut tx = self.pool.begin().await
+            .context("Failed to begin database transaction")?;
+
+        let ingest_start = chrono::Utc::now();
+
+        // Batch commit configuration
+        const BATCH_SIZE: usize = 1000;
+        let mut batch_count = 0;
+        let mut ingested_count = 0;
+
+        info!("Ingesting {} rows to staging.raw_claims...", parsed_rows.len());
+
+        // Insert each parsed row to staging.raw_claims
+        for parsed_row in parsed_rows {
+            // Serialize parsed data to JSONB
+            let encounter_fields_json = serde_json::to_value(&parsed_row.encounter_fields)
+                .context("Failed to serialize encounter_fields to JSON")?;
+            let service_line_fields_json = if !parsed_row.service_line_fields.is_empty() {
+                Some(serde_json::to_value(&parsed_row.service_line_fields)
+                    .context("Failed to serialize service_line_fields to JSON")?)
+            } else {
+                None
+            };
+            let diagnosis_fields_json = if !parsed_row.diagnosis_fields.is_empty() {
+                Some(serde_json::to_value(&parsed_row.diagnosis_fields)
+                    .context("Failed to serialize diagnosis_fields to JSON")?)
+            } else {
+                None
+            };
+
+            // Extract facility_code and date_of_service_from for FIFO ordering
+            let facility_code = parsed_row.encounter_fields.get("facility_code").map(|s| s.as_str());
+            let date_of_service_from = parsed_row.encounter_fields.get("date_of_service_from")
+                .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
+            // Insert to staging.raw_claims
+            sqlx::query(
+                r#"
+                INSERT INTO staging.raw_claims (
+                    raw_claim_id,
+                    batch_id,
+                    queue_id,
+                    encounter_fields,
+                    service_line_fields,
+                    diagnosis_fields,
+                    row_number,
+                    facility_code,
+                    processing_status,
+                    date_of_service_from
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                "#
+            )
+            .bind(Uuid::new_v4())
+            .bind(batch_id)
+            .bind(queue_id)
+            .bind(encounter_fields_json)
+            .bind(service_line_fields_json)
+            .bind(diagnosis_fields_json)
+            .bind(parsed_row.row_number as i32)
+            .bind(facility_code)
+            .bind("PENDING")  // Stage 2 will process these
+            .bind(date_of_service_from)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to insert raw claim")?;
+
+            ingested_count += 1;
+            batch_count += 1;
+
+            // Commit batch every BATCH_SIZE rows for better performance
+            if batch_count >= BATCH_SIZE {
+                debug!("Committing batch of {} rows to staging.raw_claims", batch_count);
+                tx.commit().await
+                    .context("Failed to commit batch transaction")?;
+                info!("Committed batch: {} claims ingested so far", ingested_count);
+
+                // Start new transaction
+                tx = self.pool.begin().await
+                    .context("Failed to begin new batch transaction")?;
+                batch_count = 0;
+            }
+        }
+
+        // Commit final batch
+        tx.commit().await
+            .context("Failed to commit final batch transaction")?;
+        info!("Successfully ingested all {} rows to staging.raw_claims", ingested_count);
+
+        // Update batch status to INGESTED
+        let completed_at = chrono::Utc::now();
+        let duration = (completed_at - started_at).num_milliseconds() as f64 / 1000.0;
+
+        sqlx::query(
+            r#"
+            UPDATE staging.import_batch
+            SET import_status = $1,
+                processed_records = $2,
+                completed_at = $3,
+                processing_duration_seconds = $4
+            WHERE batch_id = $5
+            "#
+        )
+        .bind("INGESTED")  // Stage 1 complete, Stage 2 pending
+        .bind(ingested_count as i32)
+        .bind(completed_at)
+        .bind(duration)
+        .bind(batch_id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update import batch record")?;
+
+        // Log INGEST metric (Stage 1 performance)
+        let ingest_end = chrono::Utc::now();
+        if let Err(e) = self.log_processing_metric_with_stage(
+            batch_id,
+            "INGEST",  // New metric type for Stage 1
+            "Staging Ingestion",
+            ingest_start,
+            ingest_end,
+            ingested_count as i32,
+            ingested_count as i32,
+            0,
+            Some(serde_json::json!({
+                "total_rows": ingested_count,
+                "batch_id": batch_id,
+                "queue_id": queue_id
+            })),
+            "INGEST"  // Processing stage
+        ).await {
+            warn!("Failed to log INGEST metric: {}", e);
+        }
+
+        info!("====== STAGE 1 COMPLETE: {} rows ingested to staging.raw_claims ======", ingested_count);
+
+        Ok(IngestResult {
+            batch_id,
+            total_rows: ingested_count,
+            ingested_at: ingest_end,
+        })
+    }
+
+    /// Log a processing metric with processing_stage column (for two-stage pipeline)
+    async fn log_processing_metric_with_stage(
+        &self,
+        batch_id: Uuid,
+        metric_type: &str,
+        metric_name: &str,
+        started_at: chrono::DateTime<chrono::Utc>,
+        completed_at: chrono::DateTime<chrono::Utc>,
+        records_processed: i32,
+        success_count: i32,
+        error_count: i32,
+        details: Option<serde_json::Value>,
+        processing_stage: &str,
+    ) -> Result<()> {
+        let duration_ms = (completed_at - started_at).num_milliseconds();
+        let duration_sec = duration_ms as f64 / 1000.0;
+        let records_per_second = if duration_sec > 0.0 {
+            records_processed as f64 / duration_sec
+        } else {
+            0.0
+        };
+
+        sqlx::query(
+            r#"
+            INSERT INTO staging.processing_metrics (
+                metric_id,
+                batch_id,
+                metric_type,
+                metric_name,
+                started_at,
+                completed_at,
+                duration_milliseconds,
+                records_processed,
+                records_per_second,
+                success_count,
+                error_count,
+                details,
+                processing_stage
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#
+        )
+        .bind(Uuid::new_v4())
+        .bind(batch_id)
+        .bind(metric_type)
+        .bind(metric_name)
+        .bind(started_at)
+        .bind(completed_at)
+        .bind(duration_ms as f64)
+        .bind(records_processed)
+        .bind(rust_decimal::Decimal::from_f64_retain(records_per_second).unwrap_or(rust_decimal::Decimal::ZERO))
+        .bind(success_count)
+        .bind(error_count)
+        .bind(details)
+        .bind(processing_stage)
+        .execute(&self.pool)
+        .await
+        .context("Failed to insert processing metric")?;
+
+        Ok(())
+    }
+
     /// Import a CSV file with optional queue_id for tracking
+    /// LEGACY METHOD - For backward compatibility with single-stage processing
+    /// New code should use ingest_file_to_staging() for Stage 1 instead
     pub async fn import_file_with_queue(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<ImportResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
@@ -924,7 +1289,15 @@ impl ClaimsImporter {
     }
 }
 
-/// Result of a file import operation
+/// Result of a Stage 1 file ingestion operation
+#[derive(Debug, Clone)]
+pub struct IngestResult {
+    pub batch_id: Uuid,
+    pub total_rows: usize,
+    pub ingested_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Result of a file import operation (legacy single-stage)
 #[derive(Debug, Clone)]
 pub struct ImportResult {
     pub total_rows: usize,

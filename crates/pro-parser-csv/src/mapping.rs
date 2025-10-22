@@ -167,6 +167,7 @@ impl PredefinedMappings {
                 .required()
                 .with_alternate("PatientID".to_string())
                 .with_alternate("Patient #".to_string())
+                .with_alternate("Patient Control Number".to_string())
                 .with_validation(ValidationRule::MaxLength(38))
         );
 

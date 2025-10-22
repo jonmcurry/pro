@@ -1,0 +1,5 @@
+region_id,organization_code,region_code,region_name,description
+2ad3b3bb-e9ff-4998-be50-3049086d9fca,ORG001,ORG001-R1,North Region,North service area
+6810670d-51cf-40b9-8112-b3aaaee07ec8,ORG001,ORG001-R2,South Region,South service area
+162612dd-37ff-4ca7-b155-dead0a5bfa57,ORG002,ORG002-R1,North Region,North service area
+c0f6d64e-242e-4873-89e1-aaf017e63ab9,ORG002,ORG002-R2,South Region,South service area

@@ -130,8 +130,13 @@ impl FileWatcher {
                         self.move_to_processed(&path)?;
                     }
                     Err(e) => {
-                        error!("Failed to process existing file {}: {}", path.display(), e);
-                        self.move_to_error(&path, &e.to_string())?;
+                        // Check if this is a special SKIP_MOVE error
+                        if e.to_string().contains("SKIP_MOVE") {
+                            info!("Existing file enqueued, staying in place for processor: {}", path.display());
+                        } else {
+                            error!("Failed to process existing file {}: {}", path.display(), e);
+                            self.move_to_error(&path, &e.to_string())?;
+                        }
                     }
                 }
             }
@@ -169,8 +174,14 @@ impl FileWatcher {
                                 self.move_to_processed(&path)?;
                             }
                             Err(e) => {
-                                error!("Failed to process file {}: {}", path.display(), e);
-                                self.move_to_error(&path, &e.to_string())?;
+                                // Check if this is a special SKIP_MOVE error
+                                // (used when file is enqueued but should stay in place for later processing)
+                                if e.to_string().contains("SKIP_MOVE") {
+                                    info!("File enqueued, staying in place for processor: {}", path.display());
+                                } else {
+                                    error!("Failed to process file {}: {}", path.display(), e);
+                                    self.move_to_error(&path, &e.to_string())?;
+                                }
                             }
                         }
                     }

@@ -1,9 +1,0 @@
-facility_id,organization_code,region_code,facility_code,facility_name,npi,tax_id,facility_type,address_line1,city,state_code,postal_code,phone,email,ehr_system
-58de2873-45a6-4111-a562-2eab35a38a4f,ORG001,ORG001-R1,ORG001-R1-F1,North Region Medical Center,5228189259,95-7593076,Medical Center,8720 Healthcare Drive,Los Angeles,CA,14888,(379) 825-6178,contact@facility1.com,ATHENA
-7f92074e-3ddf-4f58-9a38-c08187d23954,ORG001,ORG001-R1,ORG001-R1-F2,North Region Clinic,9702388711,95-7593076,Clinic,1881 Healthcare Drive,Los Angeles,CA,90668,(312) 968-2176,contact@facility2.com,EPIC
-bea46e35-4046-4f56-8b4f-c3c3a19cfbb7,ORG001,ORG001-R2,ORG001-R2-F1,South Region Medical Center,3163141088,95-7593076,Medical Center,3192 Healthcare Drive,Los Angeles,CA,39206,(243) 961-5743,contact@facility3.com,EPIC
-50d73b11-44d3-4363-beae-9e7c143723b6,ORG001,ORG001-R2,ORG001-R2-F2,South Region Clinic,4570108683,95-7593076,Clinic,4987 Healthcare Drive,Los Angeles,CA,55893,(532) 458-6153,contact@facility4.com,ATHENA
-cd33bd15-fddc-4156-bcb1-1aefb72cd359,ORG002,ORG002-R1,ORG002-R1-F1,North Region Medical Center,6648154118,37-2873915,Medical Center,3176 Healthcare Drive,Chicago,NY,38088,(424) 889-7506,contact@facility5.com,EPIC
-92958dfd-6b4f-4087-9ef8-447e01097024,ORG002,ORG002-R1,ORG002-R1-F2,North Region Clinic,2227422556,37-2873915,Clinic,3338 Healthcare Drive,Chicago,NY,37879,(865) 927-1632,contact@facility6.com,CERNER
-4dea8258-2b66-415b-98a7-3f2444e1172e,ORG002,ORG002-R2,ORG002-R2-F1,South Region Medical Center,2422275028,37-2873915,Medical Center,2790 Healthcare Drive,Chicago,NY,52297,(579) 479-9198,contact@facility7.com,CERNER
-d4da4a70-7606-4e07-a91d-d0f702e97278,ORG002,ORG002-R2,ORG002-R2-F2,South Region Clinic,1737300477,37-2873915,Clinic,3274 Healthcare Drive,Chicago,NY,56320,(360) 975-8147,contact@facility8.com,CERNER

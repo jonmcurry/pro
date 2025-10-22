@@ -109,6 +109,11 @@
                     KeyPath="yes"
                     Checksum="yes" />
             </Component>
+            <Component Id="BinDir" Guid="BABABABA-BABB-BABC-BABD-BABABABABABC" Win64="yes">
+              <CreateFolder />
+              <RemoveFolder Id="RemoveBinFolder" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="BinDir" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
           </Directory>
 
           <!-- Documentation -->
@@ -143,24 +148,41 @@
             <Directory Id="InputFolder" Name="input">
               <Component Id="InputDir" Guid="5C5C5C5C-5D5D-5E5E-5F5F-6A6A6A6A6A6A" Win64="yes">
                 <CreateFolder />
+                <RemoveFile Id="RemoveInputFiles" Name="*.*" On="uninstall" />
+                <RemoveFolder Id="RemoveInputFolder" On="uninstall" />
+                <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="InputDir" Type="integer" Value="1" KeyPath="yes" />
               </Component>
             </Directory>
             <Directory Id="ProcessedFolder" Name="processed">
               <Component Id="ProcessedDir" Guid="6B6B6B6B-6C6C-6D6D-6E6E-6F6F6F6F6F6F" Win64="yes">
                 <CreateFolder />
+                <RemoveFile Id="RemoveProcessedFiles" Name="*.*" On="uninstall" />
+                <RemoveFolder Id="RemoveProcessedFolder" On="uninstall" />
+                <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="ProcessedDir" Type="integer" Value="1" KeyPath="yes" />
               </Component>
             </Directory>
             <Directory Id="ErrorFolder" Name="error">
               <Component Id="ErrorDir" Guid="7C7C7C7C-7D7D-7E7E-7F7F-8A8A8A8A8A8A" Win64="yes">
                 <CreateFolder />
+                <RemoveFile Id="RemoveErrorFiles" Name="*.*" On="uninstall" />
+                <RemoveFolder Id="RemoveErrorFolder" On="uninstall" />
+                <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="ErrorDir" Type="integer" Value="1" KeyPath="yes" />
               </Component>
             </Directory>
+            <Component Id="DataDir" Guid="DADADADA-DADB-DADC-DADD-DADADADADADB" Win64="yes">
+              <CreateFolder />
+              <RemoveFolder Id="RemoveDataFolder" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="DataDir" Type="integer" Value="1" KeyPath="yes" />
+            </Component>
           </Directory>
 
           <!-- Logs Directory -->
           <Directory Id="LogsFolder" Name="logs">
             <Component Id="LogsDir" Guid="8B8B8B8B-8C8C-8D8D-8E8E-8F8F8F8F8F8F" Win64="yes">
               <CreateFolder />
+              <RemoveFile Id="RemoveLogFiles" Name="*.*" On="uninstall" />
+              <RemoveFolder Id="RemoveLogsFolder" On="uninstall" />
+              <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="LogsDir" Type="integer" Value="1" KeyPath="yes" />
             </Component>
           </Directory>
 
@@ -170,6 +192,11 @@
             <!-- This allows unlimited migration files without manually updating WiX -->
           </Directory>
 
+          <!-- Component to remove the INSTALLFOLDER itself on uninstall -->
+          <Component Id="InstallFolderComponent" Guid="FAFAFAFA-FAFB-FAFC-FAFD-FAFAFAFAFABC" Win64="yes">
+            <RemoveFolder Id="RemoveINSTALLFOLDER" On="uninstall" />
+            <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="InstallFolder" Type="integer" Value="1" KeyPath="yes" />
+          </Component>
         </Directory>
       </Directory>
 
@@ -271,10 +298,13 @@
         <ComponentRef Id="DataLoaderExecutable" />
         <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="UpgradeExecutable" />
+        <ComponentRef Id="BinDir" />
         <ComponentRef Id="InputDir" />
         <ComponentRef Id="ProcessedDir" />
         <ComponentRef Id="ErrorDir" />
+        <ComponentRef Id="DataDir" />
         <ComponentRef Id="LogsDir" />
+        <ComponentRef Id="InstallFolderComponent" />
         <ComponentGroupRef Id="MigrationsComponentGroup" />
         <ComponentRef Id="ProgramDataRoot" />
         <ComponentRef Id="ProgramDataConfig" />
@@ -317,6 +347,10 @@
       <!-- Insert Prerequisite and Database Configuration dialogs -->
       <DialogRef Id="PrerequisiteDlg" />
       <DialogRef Id="DatabaseConfigDlg" />
+
+      <!-- Hide Reset and Disk Usage buttons in CustomizeDlg -->
+      <Publish Dialog="CustomizeDlg" Control="Reset" Property="WixUI_InstallMode" Value="Change" Order="1">0</Publish>
+      <Publish Dialog="CustomizeDlg" Control="DiskCost" Property="WixUI_InstallMode" Value="Change" Order="1">0</Publish>
 
       <!-- Run prerequisite check and load credentials BEFORE showing PrerequisiteDlg -->
       <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">1</Publish>
@@ -457,6 +491,7 @@
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
+
 
     <InstallExecuteSequence>
       <!-- Detect installation type early in the sequence -->

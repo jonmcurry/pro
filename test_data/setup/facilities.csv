@@ -1,0 +1,9 @@
+facility_id,organization_code,region_code,facility_code,facility_name,npi,tax_id,facility_type,address_line1,city,state_code,postal_code,phone,email,ehr_system
+2457bb67-b073-461a-bc92-4e27e67bdf3d,ORG001,ORG001-R1,ORG001-R1-F1,North Region Medical Center,7319437180,64-8316119,Medical Center,2938 Healthcare Drive,Chicago,CA,87941,(718) 768-1920,contact@facility1.com,CERNER
+d4ce5be9-8120-4636-abd5-9e1046fa8cac,ORG001,ORG001-R1,ORG001-R1-F2,North Region Clinic,4967786886,64-8316119,Clinic,7598 Healthcare Drive,Chicago,CA,74931,(314) 300-7576,contact@facility2.com,ATHENA
+4eb2c824-15bc-4d3c-b106-02ec3bb47f71,ORG001,ORG001-R2,ORG001-R2-F1,South Region Medical Center,9057397983,64-8316119,Medical Center,2756 Healthcare Drive,Chicago,CA,60366,(890) 279-1718,contact@facility3.com,CERNER
+129af3ba-7a42-4336-8aff-5128e5cbf5e3,ORG001,ORG001-R2,ORG001-R2-F2,South Region Clinic,1292573024,64-8316119,Clinic,9798 Healthcare Drive,Chicago,CA,12626,(256) 833-2199,contact@facility4.com,ATHENA
+24da18ef-1800-4e9a-ab44-fcbc1d510f73,ORG002,ORG002-R1,ORG002-R1-F1,North Region Medical Center,1997033985,82-4079966,Medical Center,1930 Healthcare Drive,Chicago,TX,54658,(486) 243-8890,contact@facility5.com,CERNER
+d08ef81e-428e-416f-8826-a7e0fb8f7504,ORG002,ORG002-R1,ORG002-R1-F2,North Region Clinic,7531225741,82-4079966,Clinic,110 Healthcare Drive,Chicago,TX,49214,(686) 371-9111,contact@facility6.com,EPIC
+ff24f000-be8e-416f-a234-57fb8a510d78,ORG002,ORG002-R2,ORG002-R2-F1,South Region Medical Center,9782808653,82-4079966,Medical Center,1034 Healthcare Drive,Chicago,TX,49548,(505) 974-9286,contact@facility7.com,CERNER
+414141d7-3bca-4184-bc65-bd8599460114,ORG002,ORG002-R2,ORG002-R2-F2,South Region Clinic,8327420318,82-4079966,Clinic,9377 Healthcare Drive,Chicago,TX,21607,(919) 940-3374,contact@facility8.com,CERNER

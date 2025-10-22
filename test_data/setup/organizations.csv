@@ -1,0 +1,3 @@
+organization_id,organization_code,organization_name,tax_id,npi,address_line1,city,state_code,postal_code,phone,email
+01847468-bcce-4603-9319-ae51ac318273,ORG001,Regional Health System,64-8316119,8841870567,7368 Medical Plaza,Chicago,CA,24694,(767) 263-4220,contact@org1.com
+bbbca80a-b9ef-4cfe-ae71-e32d7812fa46,ORG002,Metropolitan Medical Group,82-4079966,7550453672,4171 Medical Plaza,Chicago,TX,55999,(799) 246-7471,contact@org2.com

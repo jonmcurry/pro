@@ -1,0 +1,41 @@
+facility_code,provider_npi,first_name,last_name,middle_name,credentials,specialty,taxonomy_code,email,phone,active
+ORG001-R1-F1,3566862269,Robert,Wilson,J,NP,General Surgery,208600000X,robert.wilson@org001r1f1.com,(224) 655-8392,true
+ORG001-R1-F1,6563435583,Kevin,Turner,K,DO,Psychiatry,208D00000X,kevin.turner@org001r1f1.com,(735) 874-3801,true
+ORG001-R1-F1,7990088721,Donna,Morgan,T,NP,Cardiology,207RC0000X,donna.morgan@org001r1f1.com,(961) 262-5585,true
+ORG001-R1-F1,1017177481,Angela,Murphy,I,NP,Dermatology,207N00000X,angela.murphy@org001r1f1.com,(663) 879-1550,true
+ORG001-R1-F1,6645535270,John,Stewart,K,PA,General Surgery,208600000X,john.stewart@org001r1f1.com,(554) 377-5255,true
+ORG001-R1-F2,5352224058,Mark,Carter,T,MD,Psychiatry,208D00000X,mark.carter@org001r1f2.com,(304) 405-7922,true
+ORG001-R1-F2,8222045098,Michael,Gonzalez,K,PA,Psychiatry,208D00000X,michael.gonzalez@org001r1f2.com,(257) 927-1867,true
+ORG001-R1-F2,5581870530,Amy,Edwards,N,PA,Pediatrics,208000000X,amy.edwards@org001r1f2.com,(990) 249-1571,true
+ORG001-R1-F2,1663252967,Kenneth,Clark,E,DO,Internal Medicine,207R00000X,kenneth.clark@org001r1f2.com,(838) 347-6654,true
+ORG001-R1-F2,1465281869,Emily,Harris,U,PA,Psychiatry,208D00000X,emily.harris@org001r1f2.com,(651) 548-5399,true
+ORG001-R2-F1,5526595257,Patricia,Taylor,U,NP,Dermatology,207N00000X,patricia.taylor@org001r2f1.com,(891) 758-6178,true
+ORG001-R2-F1,1718155342,Paul,Sanchez,G,DO,General Surgery,208600000X,paul.sanchez@org001r2f1.com,(270) 467-3512,true
+ORG001-R2-F1,9372877177,Joseph,Hall,T,PA,Psychiatry,208D00000X,joseph.hall@org001r2f1.com,(848) 577-9814,true
+ORG001-R2-F1,9533188270,Timothy,Wright,J,PA,Orthopedics,207X00000X,timothy.wright@org001r2f1.com,(265) 366-2610,true
+ORG001-R2-F1,3530897321,Jennifer,Collins,W,MD,Orthopedics,207X00000X,jennifer.collins@org001r2f1.com,(565) 381-4979,true
+ORG001-R2-F2,2271542503,Anna,Carter,B,NP,Family Medicine,207Q00000X,anna.carter@org001r2f2.com,(532) 295-4508,true
+ORG001-R2-F2,1903200814,Ronald,Williams,V,NP,General Surgery,208600000X,ronald.williams@org001r2f2.com,(720) 395-5687,true
+ORG001-R2-F2,2734334093,Susan,Hernandez,W,NP,General Surgery,208600000X,susan.hernandez@org001r2f2.com,(716) 741-9238,true
+ORG001-R2-F2,3848481782,Amy,Reyes,T,PA,Family Medicine,207Q00000X,amy.reyes@org001r2f2.com,(509) 968-6473,true
+ORG001-R2-F2,1921768641,Amanda,Morris,A,NP,Neurology,204D00000X,amanda.morris@org001r2f2.com,(612) 528-3895,true
+ORG002-R1-F1,2867407456,Margaret,Walker,F,NP,Family Medicine,207Q00000X,margaret.walker@org002r1f1.com,(556) 760-7031,true
+ORG002-R1-F1,6313519861,Shirley,Flores,W,DO,General Surgery,208600000X,shirley.flores@org002r1f1.com,(659) 250-3320,true
+ORG002-R1-F1,4021618083,Jacob,Clark,D,DO,Pediatrics,208000000X,jacob.clark@org002r1f1.com,(816) 940-8110,true
+ORG002-R1-F1,6430542477,Jessica,Rogers,D,DO,General Surgery,208600000X,jessica.rogers@org002r1f1.com,(763) 486-4043,true
+ORG002-R1-F1,8865601012,Richard,Campbell,P,PA,Emergency Medicine,207P00000X,richard.campbell@org002r1f1.com,(266) 586-7553,true
+ORG002-R1-F2,9655591066,Charles,Allen,G,NP,Dermatology,207N00000X,charles.allen@org002r1f2.com,(939) 437-3544,true
+ORG002-R1-F2,2919665984,Melissa,Cruz,H,NP,Emergency Medicine,207P00000X,melissa.cruz@org002r1f2.com,(510) 595-5675,true
+ORG002-R1-F2,3860020630,Deborah,Diaz,Z,PA,Emergency Medicine,207P00000X,deborah.diaz@org002r1f2.com,(561) 674-5988,true
+ORG002-R1-F2,3883507851,Lisa,Smith,K,MD,Family Medicine,207Q00000X,lisa.smith@org002r1f2.com,(570) 208-1852,true
+ORG002-R1-F2,3138771147,Christopher,Moore,V,PA,Emergency Medicine,207P00000X,christopher.moore@org002r1f2.com,(959) 563-5709,true
+ORG002-R2-F1,3509292758,Lisa,Davis,U,MD,Cardiology,207RC0000X,lisa.davis@org002r2f1.com,(895) 683-3701,true
+ORG002-R2-F1,5971739209,Lisa,Diaz,H,DO,Pediatrics,208000000X,lisa.diaz@org002r2f1.com,(671) 720-9224,true
+ORG002-R2-F1,9765385744,Jeffrey,Rodriguez,U,DO,Cardiology,207RC0000X,jeffrey.rodriguez@org002r2f1.com,(273) 400-7149,true
+ORG002-R2-F1,8490325730,Michelle,Diaz,B,NP,Neurology,204D00000X,michelle.diaz@org002r2f1.com,(270) 457-9640,true
+ORG002-R2-F1,1247593958,Edward,Nelson,E,DO,Psychiatry,208D00000X,edward.nelson@org002r2f1.com,(426) 627-4395,true
+ORG002-R2-F2,3394170609,Andrew,Cooper,F,DO,Internal Medicine,207R00000X,andrew.cooper@org002r2f2.com,(612) 263-1234,true
+ORG002-R2-F2,8567635864,Steven,Adams,W,PA,Cardiology,207RC0000X,steven.adams@org002r2f2.com,(397) 541-9260,true
+ORG002-R2-F2,4859556758,Edward,Turner,K,PA,Orthopedics,207X00000X,edward.turner@org002r2f2.com,(559) 790-4018,true
+ORG002-R2-F2,3491453024,Betty,Carter,D,MD,Neurology,204D00000X,betty.carter@org002r2f2.com,(278) 823-8851,true
+ORG002-R2-F2,1743770219,Kathleen,Hernandez,N,DO,Cardiology,207RC0000X,kathleen.hernandez@org002r2f2.com,(521) 267-9652,true

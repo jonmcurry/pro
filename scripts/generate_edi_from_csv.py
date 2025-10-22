@@ -84,14 +84,14 @@ class EDIGenerator:
         with open(csv_filename, 'r') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                patient_id = row['Patient ID']
+                patient_id = row['Patient Control Number']
                 claims_by_patient[patient_id].append(row)
 
         # Group claims into encounters (same patient, same DOS)
         encounters = defaultdict(list)
         for patient_id, claims in claims_by_patient.items():
             for claim in claims:
-                encounter_key = (patient_id, claim['DOS'])
+                encounter_key = (patient_id, claim['Date of Service'])
                 encounters[encounter_key].append(claim)
 
         print(f"    Processing {len(encounters)} encounters from {len(claims_by_patient)} patients")
@@ -144,10 +144,6 @@ class EDIGenerator:
             for (patient_id, dos), service_lines in encounters.items():
                 encounter_num += 1
 
-                # Only process first 100 encounters for performance
-                if encounter_num > 100:
-                    break
-
                 first_line = service_lines[0]
 
                 # HL - Subscriber Level
@@ -172,7 +168,7 @@ class EDIGenerator:
                 f.write(f"NM1*PR*2*{first_line['Payer Name']}****PI*{first_line['Payer ID']}~\n")
 
                 # CLM - Claim Information
-                total_charges = sum(float(line['Charges']) for line in service_lines)
+                total_charges = sum(float(line['Charge Amount']) for line in service_lines)
                 f.write(f"CLM*{patient_id}*{total_charges:.2f}***11:B:1*Y*A*Y*Y~\n")
 
                 # DTP - Service Date
@@ -202,7 +198,7 @@ class EDIGenerator:
                     f.write(f"LX*{line_num}~\n")
 
                     # SV1 - Professional Service
-                    cpt = service_line['CPT']
+                    cpt = service_line['Procedure Code']
                     mod1 = service_line['Modifier 1']
                     mod2 = service_line['Modifier 2']
 
@@ -212,9 +208,9 @@ class EDIGenerator:
                     if mod2:
                         mods += f":{mod2}"
 
-                    charges = service_line['Charges']
+                    charges = service_line['Charge Amount']
                     units = service_line['Units']
-                    pos = service_line['POS']
+                    pos = service_line['Place of Service']
 
                     f.write(f"SV1*HC:{cpt}{mods}*{charges}*UN*{units}***{pos}~\n")
 
@@ -245,9 +241,8 @@ class EDIGenerator:
         print(f"Found {len(csv_files)} claims CSV files\n")
 
         for csv_file in csv_files:
-            # Extract facility code from filename: claims_ORG001-R1-F1.csv -> F1
-            parts = csv_file.stem.replace("claims_", "").split("-")
-            facility_code = parts[-1]  # Get last part (F1, F2, etc.)
+            # Extract facility code from filename: claims_ORG001-R1-F1.csv -> ORG001-R1-F1
+            facility_code = csv_file.stem.replace("claims_", "")
 
             self.process_csv_to_edi(csv_file, facility_code)
             print()
@@ -269,7 +264,7 @@ class EDIGenerator:
 
 
 def main():
-    generator = EDIGenerator("./test_data")
+    generator = EDIGenerator("../test_data")
     generator.run()
 
 

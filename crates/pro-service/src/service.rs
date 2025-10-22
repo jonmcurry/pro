@@ -213,6 +213,8 @@ pub fn run_service() -> Result<()> {
         // Initialize file watcher and claims importer
         let input_dir = std::env::var("INPUT_DIR")
             .unwrap_or_else(|_| "C:\\Program Files\\Professional SMART\\data\\input".to_string());
+        let processed_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("processed");
+        let error_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("error");
 
         info!("Initializing claims processing...");
         info!("Input directory: {}", input_dir);
@@ -229,29 +231,192 @@ pub fn run_service() -> Result<()> {
 
         info!("File watcher is monitoring: {}", input_dir);
 
-        // Spawn file watcher in background task
+        // Spawn file watcher in background task (enqueues files for two-stage processing)
+        let importer_for_watcher = importer.clone();
         let watcher_handle = tokio::spawn(async move {
             let result = file_watcher.run(move |file_path| {
-                let importer = importer.clone();
+                let importer = importer_for_watcher.clone();
                 async move {
-                    info!("Processing file: {}", file_path.display());
+                    info!("File detected: {} - enqueueing for processing", file_path.display());
 
-                    let import_result = importer.import_file(&file_path).await?;
-
-                    info!("{}", import_result.summary());
-
-                    if !import_result.is_success() {
-                        for error in &import_result.errors {
-                            error!("Import error: {}", error);
+                    // Enqueue file for two-stage processing
+                    // NOTE: Return Err("SKIP_MOVE") to prevent file_watcher from moving the file.
+                    // The file must stay in place for Stage 1 processor to read it.
+                    // Stage 1 will handle moving the file after successful ingestion.
+                    match importer.enqueue_file(&file_path).await {
+                        Ok(queue_id) => {
+                            info!("File enqueued successfully: queue_id={}", queue_id);
+                            // Return special error to prevent moving the file
+                            Err(anyhow::anyhow!("SKIP_MOVE"))
+                        }
+                        Err(e) => {
+                            error!("Failed to enqueue file: {}", e);
+                            Err(e)
                         }
                     }
-
-                    Ok(())
                 }
             }).await;
 
             if let Err(e) = result {
                 error!("File watcher error: {}", e);
+            }
+        });
+
+        // Spawn Stage 1 queue processor
+        let db_pool_for_processor = db_pool.clone();
+        let importer_for_processor = importer.clone();
+        let stage1_handle = tokio::spawn(async move {
+            use pro_worker::queue_manager::QueueManager;
+
+            info!("Starting STAGE 1 queue processor (file ingestion to staging)...");
+            let queue_manager = QueueManager::new(db_pool_for_processor);
+
+            loop {
+                match queue_manager.dequeue_next_global().await {
+                    Ok(Some(queued_file)) => {
+                        info!("STAGE 1: Processing queued file: {} (queue_id={})",
+                            queued_file.file_path, queued_file.queue_id);
+
+                        if let Err(e) = queue_manager.mark_processing(queued_file.queue_id).await {
+                            error!("Failed to mark queue entry as processing: {}", e);
+                            continue;
+                        }
+
+                        let file_path = std::path::PathBuf::from(&queued_file.file_path);
+                        match importer_for_processor.ingest_file_to_staging(&file_path, Some(queued_file.queue_id)).await {
+                            Ok(ingest_result) => {
+                                info!("STAGE 1 COMPLETE: batch_id={}, ingested {} rows",
+                                    ingest_result.batch_id, ingest_result.total_rows);
+
+                                if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                    error!("Failed to mark queue entry as completed: {}", e);
+                                }
+
+                                // Move file to processed directory
+                                if let Err(e) = move_file_to_processed(&file_path, &processed_dir) {
+                                    error!("Failed to move file to processed directory: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("STAGE 1 FAILED: {}", e);
+                                if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
+                                    error!("Failed to mark queue entry as failed: {}", mark_err);
+                                }
+
+                                // Move file to error directory
+                                if let Err(e) = move_file_to_error(&file_path, &error_dir, &e.to_string()) {
+                                    error!("Failed to move file to error directory: {}", e);
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    }
+                    Err(e) => {
+                        error!("Failed to dequeue file: {}", e);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        });
+
+        // ========================================================================
+        // STAGE 2: Multi-Worker Sequential Completion (Strict FIFO Ordering)
+        // ========================================================================
+        use tokio::sync::mpsc;
+        use crate::batch_sequencer::{SequencedBatchAcquirer, SequentialCompletionManager};
+
+        // Configuration
+        let worker_count = std::env::var("STAGE2_WORKER_COUNT")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(8); // Default: 8 workers
+
+        let batch_size = std::env::var("BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(750); // Default: 750 (Aegis proven optimal)
+
+        info!("Starting STAGE 2 with {} workers (batch_size: {})", worker_count, batch_size);
+
+        // Create channels for communication
+        // NOTE: Using mpsc (multi-producer single-consumer) for batch distribution
+        // Each batch should go to ONLY ONE worker to avoid duplicate processing
+        let (batch_tx, mut batch_rx) = mpsc::channel::<crate::batch_sequencer::SequencedBatch>(100);
+        let (result_tx, result_rx) = mpsc::channel::<crate::batch_sequencer::BatchResult>(100);
+        let (shutdown_tx_acquirer, shutdown_rx_acquirer) = mpsc::channel::<()>(1);
+        let (shutdown_tx_completion, shutdown_rx_completion) = mpsc::channel::<()>(1);
+
+        // Spawn SequencedBatchAcquirer
+        let acquirer = SequencedBatchAcquirer::new(db_pool.clone(), batch_size);
+        let batch_tx_for_acquirer = batch_tx.clone();
+        let acquirer_handle = tokio::spawn(async move {
+            if let Err(e) = acquirer.start(batch_tx_for_acquirer, shutdown_rx_acquirer).await {
+                error!("SequencedBatchAcquirer error: {}", e);
+            }
+        });
+
+        // Spawn Worker Pool
+        // Workers share a single batch_rx using Arc<Mutex<>>
+        let batch_rx = std::sync::Arc::new(tokio::sync::Mutex::new(batch_rx));
+        let mut worker_handles = Vec::new();
+        for worker_id in 0..worker_count {
+            let worker_id_str = format!("worker-{}", worker_id);
+            let processor = crate::claims_processor::ClaimsProcessor::new(db_pool.clone());
+            let batch_rx_clone = batch_rx.clone();
+            let result_tx_clone = result_tx.clone();
+
+            let worker_handle = tokio::spawn(async move {
+                info!("Stage 2 {} starting", worker_id_str);
+
+                loop {
+                    // Lock mutex to receive next batch (only one worker gets it)
+                    let sequenced_batch = {
+                        let mut rx = batch_rx_clone.lock().await;
+                        match rx.recv().await {
+                            Some(batch) => batch,
+                            None => {
+                                warn!("{} batch receiver closed", worker_id_str);
+                                break;
+                            }
+                        }
+                    };
+
+                    info!(
+                        "{} processing batch {} ({} claims)",
+                        worker_id_str,
+                        sequenced_batch.sequence_number,
+                        sequenced_batch.claim_ids.len()
+                    );
+
+                    match processor.process_sequenced_batch(
+                        &sequenced_batch.claim_ids,
+                        sequenced_batch.sequence_number,
+                        worker_id_str.clone(),
+                    ).await {
+                        Ok(batch_result) => {
+                            if let Err(e) = result_tx_clone.send(batch_result).await {
+                                error!("{} failed to send result: {}", worker_id_str, e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("{} failed to process batch: {}", worker_id_str, e);
+                        }
+                    }
+                }
+
+                info!("{} shutting down", worker_id_str);
+            });
+
+            worker_handles.push(worker_handle);
+        }
+
+        // Spawn SequentialCompletionManager
+        let completion_manager = SequentialCompletionManager::new(db_pool.clone());
+        let completion_handle = tokio::spawn(async move {
+            if let Err(e) = completion_manager.start(result_rx, shutdown_rx_completion).await {
+                error!("SequentialCompletionManager error: {}", e);
             }
         });
 
@@ -271,6 +436,23 @@ pub fn run_service() -> Result<()> {
 
         info!("Stopping file watcher...");
         watcher_handle.abort();
+
+        info!("Stopping STAGE 1 queue processor...");
+        stage1_handle.abort();
+
+        // Stop Stage 2 components
+        info!("Stopping STAGE 2 batch acquirer...");
+        shutdown_tx_acquirer.send(()).await.ok();
+        acquirer_handle.abort();
+
+        info!("Stopping STAGE 2 workers...");
+        for worker_handle in worker_handles {
+            worker_handle.abort();
+        }
+
+        info!("Stopping STAGE 2 completion manager...");
+        shutdown_tx_completion.send(()).await.ok();
+        completion_handle.abort();
 
         info!("Closing database connections...");
         db_pool.close().await;
@@ -548,4 +730,48 @@ fn init_service_logging() -> Result<tracing_appender::non_blocking::WorkerGuard>
 
     // Return guard so caller can keep it alive
     Ok(guard)
+}
+
+/// Move file to processed directory after successful Stage 1 ingestion
+fn move_file_to_processed(file_path: &std::path::Path, processed_dir: &std::path::Path) -> Result<()> {
+    use anyhow::Context;
+
+    let filename = file_path.file_name()
+        .context("Failed to get filename")?;
+
+    let dest = processed_dir.join(filename);
+
+    info!("Moving file to processed: {} -> {}", file_path.display(), dest.display());
+
+    std::fs::rename(file_path, &dest)
+        .context("Failed to move file to processed directory")?;
+
+    info!("File moved to processed directory: {}", dest.display());
+
+    Ok(())
+}
+
+/// Move file to error directory after Stage 1 failure
+fn move_file_to_error(file_path: &std::path::Path, error_dir: &std::path::Path, error_message: &str) -> Result<()> {
+    use anyhow::Context;
+
+    let filename = file_path.file_name()
+        .context("Failed to get filename")?;
+
+    let dest = error_dir.join(filename);
+
+    warn!("Moving failed file to error: {} -> {}", file_path.display(), dest.display());
+
+    std::fs::rename(file_path, &dest)
+        .context("Failed to move file to error directory")?;
+
+    // Write error message to companion .error file
+    let error_file = dest.with_extension("error");
+    std::fs::write(&error_file, error_message)
+        .context("Failed to write error file")?;
+
+    error!("File moved to error directory: {}", dest.display());
+    error!("Error details written to: {}", error_file.display());
+
+    Ok(())
 }

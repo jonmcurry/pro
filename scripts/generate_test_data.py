@@ -187,7 +187,7 @@ class TestDataGenerator:
             writer.writeheader()
             writer.writerows(self.organizations)
 
-        print(f"  ✓ Written to {filename}")
+        print(f"  [OK] Written to {filename}")
 
     def generate_regions(self, regions_per_org: int = 2):
         """Generate regions"""
@@ -214,7 +214,7 @@ class TestDataGenerator:
             writer.writeheader()
             writer.writerows(self.regions)
 
-        print(f"  ✓ Written to {filename}")
+        print(f"  [OK] Written to {filename}")
 
     def generate_facilities(self, facilities_per_region: int = 2):
         """Generate facilities"""
@@ -257,7 +257,7 @@ class TestDataGenerator:
             writer.writeheader()
             writer.writerows(self.facilities)
 
-        print(f"  ✓ Written to {filename}")
+        print(f"  [OK] Written to {filename}")
 
     def generate_providers(self, providers_per_facility: int = 5):
         """Generate providers assigned to facilities"""
@@ -309,7 +309,7 @@ class TestDataGenerator:
             writer.writeheader()
             writer.writerows(self.providers)
 
-        print(f"  ✓ Written to {filename}")
+        print(f"  [OK] Written to {filename}")
 
     def generate_claims_for_facility(self, facility: Dict, claim_count: int = 10000):
         """Generate claims for a single facility in Athena CSV format"""
@@ -324,12 +324,16 @@ class TestDataGenerator:
         start_date = datetime.now() - timedelta(days=365)
 
         with open(filename, 'w', newline='') as f:
-            # Athena Health CSV format
+            # Professional SMART CSV format (compatible with two-stage pipeline)
             fieldnames = [
-                "Patient ID", "DOS", "Provider NPI", "CPT", "Modifier 1", "Modifier 2",
-                "Units", "Charges", "Diagnosis 1", "Diagnosis 2", "Diagnosis 3", "Diagnosis 4",
-                "Patient Last Name", "Patient First Name", "DOB", "Gender", "POS",
-                "Payer ID", "Payer Name", "Member ID", "Facility Code", "Facility Name"
+                "Patient Control Number", "Date of Service", "Provider NPI",
+                "Procedure Code", "Modifier 1", "Modifier 2",
+                "Units", "Charge Amount",
+                "Diagnosis 1", "Diagnosis 2", "Diagnosis 3", "Diagnosis 4",
+                "Patient Last Name", "Patient First Name", "DOB", "Gender",
+                "Place of Service",
+                "Payer ID", "Payer Name", "Member ID",
+                "Facility Code", "Facility Name"
             ]
 
             writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -383,14 +387,14 @@ class TestDataGenerator:
                     mod2 = random.choice(["", ""] + self.MODIFIERS)  # Less common
 
                     claim = {
-                        "Patient ID": patient_id,
-                        "DOS": dos.strftime("%Y-%m-%d"),
+                        "Patient Control Number": patient_id,
+                        "Date of Service": dos.strftime("%Y-%m-%d"),
                         "Provider NPI": provider["provider_npi"],
-                        "CPT": cpt_code,
+                        "Procedure Code": cpt_code,
                         "Modifier 1": mod1,
                         "Modifier 2": mod2,
                         "Units": units,
-                        "Charges": f"{charge:.2f}",
+                        "Charge Amount": f"{charge:.2f}",
                         "Diagnosis 1": diagnoses[0][0] if len(diagnoses) > 0 else "",
                         "Diagnosis 2": diagnoses[1][0] if len(diagnoses) > 1 else "",
                         "Diagnosis 3": diagnoses[2][0] if len(diagnoses) > 2 else "",
@@ -399,7 +403,7 @@ class TestDataGenerator:
                         "Patient First Name": first_name,
                         "DOB": dob.strftime("%Y-%m-%d"),
                         "Gender": gender,
-                        "POS": pos,
+                        "Place of Service": pos,
                         "Payer ID": payer_id,
                         "Payer Name": payer_name,
                         "Member ID": member_id,
@@ -413,7 +417,7 @@ class TestDataGenerator:
                 if (claim_num + 1) % 1000 == 0:
                     print(f"    {claim_num + 1:,} / {claim_count:,} claims generated...")
 
-        print(f"  ✓ Written to {filename}")
+        print(f"  [OK] Written to {filename}")
         return filename
 
     def generate_all_claims(self, claims_per_facility: int = 10000):
