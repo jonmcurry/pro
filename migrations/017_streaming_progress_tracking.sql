@@ -2,9 +2,9 @@
 -- Real-time progress tracking for streaming file processing
 
 -- Progress tracking table for real-time updates
-CREATE TABLE staging.file_processing_progress (
+CREATE TABLE IF NOT EXISTS staging.file_processing_progress (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(id) ON DELETE CASCADE,
+    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
 
     -- Claim counts
     total_claims INTEGER NOT NULL DEFAULT 0,
@@ -31,8 +31,8 @@ CREATE TABLE staging.file_processing_progress (
 );
 
 -- Create indexes for progress tracking
-CREATE INDEX idx_progress_queue_id ON staging.file_processing_progress(queue_id);
-CREATE INDEX idx_progress_active ON staging.file_processing_progress(is_active, updated_at DESC) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_progress_queue_id ON staging.file_processing_progress(queue_id);
+CREATE INDEX IF NOT EXISTS idx_progress_active ON staging.file_processing_progress(is_active, updated_at DESC) WHERE is_active = true;
 
 -- Add trigger to update updated_at timestamp
 CREATE TRIGGER update_file_processing_progress_updated_at
@@ -41,9 +41,9 @@ CREATE TRIGGER update_file_processing_progress_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Failed claims table for streaming error handling
-CREATE TABLE staging.failed_claims (
+CREATE TABLE IF NOT EXISTS staging.failed_claims (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(id) ON DELETE CASCADE,
+    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
     progress_id UUID REFERENCES staging.file_processing_progress(id) ON DELETE CASCADE,
 
     -- Claim identification
@@ -70,14 +70,29 @@ CREATE TABLE staging.failed_claims (
 );
 
 -- Create indexes for failed claims
-CREATE INDEX idx_failed_claims_queue_id ON staging.failed_claims(queue_id);
-CREATE INDEX idx_failed_claims_progress_id ON staging.failed_claims(progress_id);
-CREATE INDEX idx_failed_claims_can_retry ON staging.failed_claims(can_retry, retry_count) WHERE can_retry = true;
-CREATE INDEX idx_failed_claims_error_type ON staging.failed_claims(error_type);
+CREATE INDEX IF NOT EXISTS idx_failed_claims_queue_id ON staging.failed_claims(queue_id);
+CREATE INDEX IF NOT EXISTS idx_failed_claims_progress_id ON staging.failed_claims(progress_id);
+CREATE INDEX IF NOT EXISTS idx_failed_claims_can_retry ON staging.failed_claims(can_retry, retry_count) WHERE can_retry = true;
+CREATE INDEX IF NOT EXISTS idx_failed_claims_error_type ON staging.failed_claims(error_type);
 
--- Add new queue statuses for streaming
-ALTER TYPE staging.queue_status ADD VALUE IF NOT EXISTS 'STREAMING';
-ALTER TYPE staging.queue_status ADD VALUE IF NOT EXISTS 'PARTIAL_SUCCESS';
+-- Add new queue statuses for streaming by updating the CHECK constraint
+DO $$
+BEGIN
+    -- Drop existing constraint if it exists
+    IF EXISTS (
+        SELECT 1 FROM information_schema.constraint_column_usage
+        WHERE table_schema = 'staging'
+        AND table_name = 'file_processing_queue'
+        AND constraint_name = 'valid_queue_status'
+    ) THEN
+        ALTER TABLE staging.file_processing_queue DROP CONSTRAINT valid_queue_status;
+    END IF;
+
+    -- Add updated constraint with new statuses
+    ALTER TABLE staging.file_processing_queue ADD CONSTRAINT valid_queue_status CHECK (
+        queue_status = ANY (ARRAY['QUEUED'::text, 'PROCESSING'::text, 'COMPLETED'::text, 'FAILED'::text, 'RETRY'::text, 'STREAMING'::text, 'PARTIAL_SUCCESS'::text])
+    );
+END $$;
 
 -- Comments for documentation
 COMMENT ON TABLE staging.file_processing_progress IS 'Real-time progress tracking for streaming file processing (PHASE 5)';

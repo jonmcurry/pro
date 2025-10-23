@@ -134,36 +134,137 @@ impl SequencedBatchAcquirer {
     }
 
     /// Acquire next batch of PENDING claims and assign sequence number
+    /// Groups claims by encounter to prevent splitting service lines across batches
     async fn acquire_next_batch(&self) -> Result<Option<SequencedBatch>> {
         let mut tx = self.pool.begin().await
             .context("Failed to begin transaction")?;
 
-        // Get next batch of PENDING claims in FIFO order (oldest first)
+        // Get next batch of PENDING claims with encounter grouping fields
+        // Query more claims than batch_size to ensure we can group by encounter
         // Use FOR UPDATE to lock the claims (prevents other acquirers from getting same batch)
-        let claims: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        let raw_claims: Vec<(Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
-            SELECT raw_claim_id, batch_id
+            SELECT
+                raw_claim_id,
+                batch_id,
+                encounter_fields->>'patient_control_number' as patient_control_number,
+                encounter_fields->>'date_of_service_from' as date_of_service_from,
+                ingested_at
             FROM staging.raw_claims
             WHERE processing_status = 'PENDING'
             AND batch_sequence_number IS NULL
-            ORDER BY ingested_at ASC
+            ORDER BY ingested_at ASC, raw_claim_id ASC
             LIMIT $1
             FOR UPDATE
             "#
         )
-        .bind(self.batch_size as i64)
+        .bind((self.batch_size + 100) as i64)  // Buffer to ensure complete encounter groups
         .fetch_all(&mut *tx)
         .await
         .context("Failed to fetch pending claims")?;
 
-        if claims.is_empty() {
+        if raw_claims.is_empty() {
             tx.rollback().await?;
             return Ok(None);
         }
 
-        // Get batch_id (all claims in this acquisition should have same batch_id from Stage 1)
-        let batch_id = claims[0].1;
-        let claim_ids: Vec<Uuid> = claims.iter().map(|(id, _)| *id).collect();
+        // Group claims by encounter key (patient_control_number + date_of_service_from)
+        // Maintain FIFO order by processing in ingested_at order
+        use std::collections::HashMap;
+        let mut encounter_groups: HashMap<(String, String), Vec<Uuid>> = HashMap::new();
+        let mut encounter_order: Vec<(String, String)> = Vec::new();
+        let mut batch_id_set: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+
+        for (claim_id, batch_id, patient_control_number, date_of_service, _ingested_at) in raw_claims {
+            batch_id_set.insert(batch_id);
+
+            // Handle missing encounter fields
+            if patient_control_number.is_empty() || date_of_service.is_empty() {
+                warn!("Claim {} has missing encounter fields, skipping grouping", claim_id);
+                continue;
+            }
+
+            let encounter_key = (patient_control_number, date_of_service);
+
+            // Track encounter order for FIFO
+            if !encounter_groups.contains_key(&encounter_key) {
+                encounter_order.push(encounter_key.clone());
+            }
+
+            encounter_groups
+                .entry(encounter_key)
+                .or_insert_with(Vec::new)
+                .push(claim_id);
+        }
+
+        // Accumulate complete encounter groups until we reach batch_size
+        let mut claim_ids: Vec<Uuid> = Vec::new();
+        let mut total_count = 0;
+        let mut encounters_to_complete: Vec<(String, String)> = Vec::new();
+
+        for encounter_key in encounter_order {
+            if let Some(encounter_claim_ids) = encounter_groups.get(&encounter_key) {
+                // Check if we've reached batch size before adding this encounter
+                if total_count >= self.batch_size {
+                    break;
+                }
+
+                // Add complete encounter group
+                claim_ids.extend(encounter_claim_ids.clone());
+                total_count += encounter_claim_ids.len();
+
+                // Track encounter for completion check
+                encounters_to_complete.push(encounter_key.clone());
+            }
+        }
+
+        // CRITICAL: Fetch any remaining service lines for the encounters we've selected
+        // This ensures we never split an encounter across batches
+        if !encounters_to_complete.is_empty() {
+            for (patient_control_number, date_of_service) in encounters_to_complete {
+                let additional_claims: Vec<Uuid> = sqlx::query_scalar(
+                    r#"
+                    SELECT raw_claim_id
+                    FROM staging.raw_claims
+                    WHERE processing_status = 'PENDING'
+                    AND batch_sequence_number IS NULL
+                    AND encounter_fields->>'patient_control_number' = $1
+                    AND encounter_fields->>'date_of_service_from' = $2
+                    AND raw_claim_id != ALL($3)
+                    FOR UPDATE
+                    "#
+                )
+                .bind(&patient_control_number)
+                .bind(&date_of_service)
+                .bind(&claim_ids)
+                .fetch_all(&mut *tx)
+                .await
+                .context("Failed to fetch remaining claims for encounter")?;
+
+                if !additional_claims.is_empty() {
+                    debug!("Found {} additional claims for encounter {}/{}",
+                        additional_claims.len(), patient_control_number, date_of_service);
+                    claim_ids.extend(additional_claims);
+                }
+            }
+        }
+
+        if claim_ids.is_empty() {
+            tx.rollback().await?;
+            return Ok(None);
+        }
+
+        // Get batch_id (should be consistent, but handle multiple if needed)
+        let batch_id = if batch_id_set.len() == 1 {
+            *batch_id_set.iter().next().unwrap()
+        } else {
+            // Multiple batch_ids - use the first one (should be rare)
+            warn!("Multiple batch_ids in acquisition: {:?}", batch_id_set);
+            *batch_id_set.iter().next().unwrap()
+        };
+
+        info!("Acquired batch with {} claims across {} encounters (batch_size: {})",
+            claim_ids.len(), encounter_groups.len(), self.batch_size);
 
         // Assign sequence number
         let sequence_number = self.sequence_counter.next();

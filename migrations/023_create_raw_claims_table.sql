@@ -4,7 +4,7 @@
 -- Stage 2: raw_claims -> encounters/errors (validated processing)
 
 -- Create raw_claims table for storing parsed but unvalidated claims
-CREATE TABLE staging.raw_claims (
+CREATE TABLE IF NOT EXISTS staging.raw_claims (
     raw_claim_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     batch_id UUID NOT NULL REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
     queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
@@ -44,21 +44,21 @@ CREATE TABLE staging.raw_claims (
 
 -- Primary index for Stage 2 processor to find next batch of pending claims
 -- Partial index only on PENDING/PROCESSING for efficiency
-CREATE INDEX idx_raw_claims_pending ON staging.raw_claims(ingested_at ASC)
+CREATE INDEX IF NOT EXISTS idx_raw_claims_pending ON staging.raw_claims(ingested_at ASC)
     WHERE processing_status IN ('PENDING', 'PROCESSING');
 
 -- Index for tracking claims by batch (useful for batch status queries)
-CREATE INDEX idx_raw_claims_batch ON staging.raw_claims(batch_id, processing_status);
+CREATE INDEX IF NOT EXISTS idx_raw_claims_batch ON staging.raw_claims(batch_id, processing_status);
 
 -- Index for tracking claims by queue (useful for queue metrics)
-CREATE INDEX idx_raw_claims_queue ON staging.raw_claims(queue_id, processing_status);
+CREATE INDEX IF NOT EXISTS idx_raw_claims_queue ON staging.raw_claims(queue_id, processing_status);
 
 -- Index for FIFO compliance within facilities (if needed for prioritization)
-CREATE INDEX idx_raw_claims_fifo ON staging.raw_claims(facility_code, date_of_service_from ASC, ingested_at ASC)
+CREATE INDEX IF NOT EXISTS idx_raw_claims_fifo ON staging.raw_claims(facility_code, date_of_service_from ASC, ingested_at ASC)
     WHERE processing_status = 'PENDING';
 
 -- Index for finding stale PROCESSING claims (for recovery after crashes)
-CREATE INDEX idx_raw_claims_stale ON staging.raw_claims(processing_status, ingested_at)
+CREATE INDEX IF NOT EXISTS idx_raw_claims_stale ON staging.raw_claims(processing_status, ingested_at)
     WHERE processing_status = 'PROCESSING';
 
 -- Add comment explaining table purpose
@@ -80,18 +80,25 @@ BEGIN
         SELECT 1 FROM information_schema.constraint_column_usage
         WHERE table_schema = 'staging'
         AND table_name = 'import_batch'
-        AND constraint_name = 'ck_import_batch_status'
+        AND constraint_name = 'ck_import_batch_import_status'
     ) THEN
-        ALTER TABLE staging.import_batch DROP CONSTRAINT ck_import_batch_status;
+        ALTER TABLE staging.import_batch DROP CONSTRAINT ck_import_batch_import_status;
     END IF;
 
     -- Add new constraint with additional states
-    ALTER TABLE staging.import_batch ADD CONSTRAINT ck_import_batch_status CHECK (
-        batch_status IN ('PENDING', 'INGESTING', 'INGESTED', 'PROCESSING', 'COMPLETED', 'FAILED')
-    );
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.constraint_column_usage
+        WHERE table_schema = 'staging'
+        AND table_name = 'import_batch'
+        AND constraint_name = 'ck_import_batch_import_status'
+    ) THEN
+        ALTER TABLE staging.import_batch ADD CONSTRAINT ck_import_batch_import_status CHECK (
+            import_status IN ('PENDING', 'QUEUED', 'INGESTING', 'INGESTED', 'PROCESSING', 'COMPLETED', 'FAILED')
+        );
+    END IF;
 END $$;
 
-COMMENT ON CONSTRAINT ck_import_batch_status ON staging.import_batch IS 'INGESTING: Stage 1 reading file | INGESTED: Stage 1 complete, raw_claims populated | PROCESSING: Stage 2 validating claims | COMPLETED: All claims processed | FAILED: Pipeline error';
+-- Note: Can't add comment on constraint in this version, skipping
 
 -- Add new column to processing_metrics to track which stage is being measured
 ALTER TABLE staging.processing_metrics ADD COLUMN IF NOT EXISTS processing_stage TEXT DEFAULT 'IMPORT';
@@ -105,8 +112,8 @@ COMMENT ON COLUMN staging.processing_metrics.processing_stage IS 'IMPORT (legacy
 CREATE OR REPLACE VIEW staging.vw_raw_claims_status AS
 SELECT
     b.batch_id,
-    b.file_name,
-    b.batch_status,
+    b.file_path,
+    b.import_status,
     COUNT(*) AS total_claims,
     COUNT(*) FILTER (WHERE rc.processing_status = 'PENDING') AS pending_claims,
     COUNT(*) FILTER (WHERE rc.processing_status = 'PROCESSING') AS processing_claims,
@@ -118,7 +125,7 @@ SELECT
     AVG(EXTRACT(EPOCH FROM (rc.processed_at - rc.ingested_at))) FILTER (WHERE rc.processing_status = 'COMPLETED') AS avg_processing_seconds
 FROM staging.import_batch b
 LEFT JOIN staging.raw_claims rc ON b.batch_id = rc.batch_id
-GROUP BY b.batch_id, b.file_name, b.batch_status;
+GROUP BY b.batch_id, b.file_path, b.import_status;
 
 COMMENT ON VIEW staging.vw_raw_claims_status IS 'Monitoring view: raw_claims processing progress by batch';
 

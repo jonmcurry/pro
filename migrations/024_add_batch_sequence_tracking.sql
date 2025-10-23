@@ -4,15 +4,15 @@
 
 -- Add batch_sequence_number to raw_claims for strict FIFO ordering
 ALTER TABLE staging.raw_claims
-ADD COLUMN batch_sequence_number INTEGER;
+ADD COLUMN IF NOT EXISTS batch_sequence_number INTEGER;
 
 -- Index for sequence-based queries (used by workers to fetch batches)
-CREATE INDEX idx_raw_claims_sequence_status
+CREATE INDEX IF NOT EXISTS idx_raw_claims_sequence_status
 ON staging.raw_claims(batch_sequence_number, processing_status)
 WHERE processing_status IN ('PENDING', 'PROCESSING', 'COMPLETED');
 
 -- Table to track batch sequences (audit trail + coordination)
-CREATE TABLE staging.batch_sequences (
+CREATE TABLE IF NOT EXISTS staging.batch_sequences (
     sequence_number INTEGER PRIMARY KEY,
     assigned_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMPTZ,
@@ -39,12 +39,12 @@ CREATE TABLE staging.batch_sequences (
 );
 
 -- Index for finding incomplete sequences (monitoring)
-CREATE INDEX idx_batch_sequences_incomplete
+CREATE INDEX IF NOT EXISTS idx_batch_sequences_incomplete
 ON staging.batch_sequences(sequence_number)
 WHERE completed_at IS NULL;
 
 -- Index for performance analysis
-CREATE INDEX idx_batch_sequences_performance
+CREATE INDEX IF NOT EXISTS idx_batch_sequences_performance
 ON staging.batch_sequences(assigned_at, completed_at, processing_time_seconds);
 
 -- Add comments
@@ -60,7 +60,7 @@ SELECT
     bs.assigned_at,
     bs.completed_at,
     bs.batch_id,
-    b.file_name,
+    b.file_path,
     bs.claim_count,
     bs.processing_stage,
     bs.worker_id,

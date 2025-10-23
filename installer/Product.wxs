@@ -5,7 +5,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.2.4.0"
+           Version="1.2.5.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -89,12 +89,8 @@
                     Checksum="yes" />
             </Component>
 
-            <Component Id="DataLoaderExecutable" Guid="3B3B3B3B-3C3C-3D3D-3E3E-3F3F3F3F3F3F" Win64="yes">
-              <File Id="ProDataLoaderExe"
-                    Source="$(var.SolutionDir)target\release\pro-data-loader.exe"
-                    KeyPath="yes"
-                    Checksum="yes" />
-            </Component>
+            <!-- pro-data-loader.exe removed (CLI version not needed) -->
+            <!-- pro-data-loader-gui.exe kept (GUI version needed) -->
 
             <Component Id="DataLoaderGuiExecutable" Guid="4A4A4A4A-4B4B-4C4C-4D4D-4E4E4E4E4E4E" Win64="yes">
               <File Id="ProDataLoaderGuiExe"
@@ -292,7 +288,7 @@
                Absent="disallow">
         <ComponentRef Id="MainExecutable" />
         <ComponentRef Id="SetupExecutable" />
-        <ComponentRef Id="DataLoaderExecutable" />
+        <!-- pro-data-loader.exe removed (CLI not needed) -->
         <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="UpgradeExecutable" />
         <ComponentRef Id="BinDir" />

@@ -10,6 +10,7 @@ CREATE SCHEMA IF NOT EXISTS analytics;
 -- FLAG STATISTICS - Daily Aggregation
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.flag_statistics_daily CASCADE;
 CREATE MATERIALIZED VIEW analytics.flag_statistics_daily AS
 SELECT
     f.organization_id,
@@ -47,10 +48,10 @@ CREATE UNIQUE INDEX idx_flag_stats_daily_pk
         flag_status
     );
 
-CREATE INDEX idx_flag_stats_org_date
+CREATE INDEX IF NOT EXISTS idx_flag_stats_org_date
     ON analytics.flag_statistics_daily(organization_id, flag_date DESC);
 
-CREATE INDEX idx_flag_stats_facility_date
+CREATE INDEX IF NOT EXISTS idx_flag_stats_facility_date
     ON analytics.flag_statistics_daily(facility_id, flag_date DESC)
     WHERE facility_id IS NOT NULL;
 
@@ -60,6 +61,7 @@ COMMENT ON MATERIALIZED VIEW analytics.flag_statistics_daily IS 'Phase 6: Daily 
 -- ENCOUNTER STATISTICS - Daily Aggregation
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.encounter_statistics_daily CASCADE;
 CREATE MATERIALIZED VIEW analytics.encounter_statistics_daily AS
 SELECT
     e.organization_id,
@@ -101,7 +103,7 @@ CREATE UNIQUE INDEX idx_encounter_stats_daily_pk
         payer_responsibility_code
     );
 
-CREATE INDEX idx_encounter_stats_org_date
+CREATE INDEX IF NOT EXISTS idx_encounter_stats_org_date
     ON analytics.encounter_statistics_daily(organization_id, service_date DESC);
 
 COMMENT ON MATERIALIZED VIEW analytics.encounter_statistics_daily IS 'Phase 6: Daily encounter volume and financial statistics';
@@ -110,6 +112,7 @@ COMMENT ON MATERIALIZED VIEW analytics.encounter_statistics_daily IS 'Phase 6: D
 -- PROCEDURE CODE STATISTICS - Top Procedures by Volume
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.procedure_statistics CASCADE;
 CREATE MATERIALIZED VIEW analytics.procedure_statistics AS
 SELECT
     sl.procedure_code,
@@ -137,10 +140,10 @@ HAVING COUNT(*) >= 5; -- Only procedures with at least 5 occurrences
 CREATE UNIQUE INDEX idx_procedure_stats_pk
     ON analytics.procedure_statistics(procedure_code);
 
-CREATE INDEX idx_procedure_stats_count
+CREATE INDEX IF NOT EXISTS idx_procedure_stats_count
     ON analytics.procedure_statistics(procedure_count DESC);
 
-CREATE INDEX idx_procedure_stats_charges
+CREATE INDEX IF NOT EXISTS idx_procedure_stats_charges
     ON analytics.procedure_statistics(total_charges DESC);
 
 COMMENT ON MATERIALIZED VIEW analytics.procedure_statistics IS 'Phase 6: Procedure code usage and financial statistics';
@@ -149,6 +152,7 @@ COMMENT ON MATERIALIZED VIEW analytics.procedure_statistics IS 'Phase 6: Procedu
 -- PROVIDER PERFORMANCE STATISTICS
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.provider_performance CASCADE;
 CREATE MATERIALIZED VIEW analytics.provider_performance AS
 SELECT
     e.rendering_provider_id as provider_id,
@@ -181,10 +185,10 @@ HAVING COUNT(DISTINCT e.encounter_id) >= 5; -- Providers with at least 5 encount
 CREATE UNIQUE INDEX idx_provider_performance_pk
     ON analytics.provider_performance(provider_id);
 
-CREATE INDEX idx_provider_performance_encounter_count
+CREATE INDEX IF NOT EXISTS idx_provider_performance_encounter_count
     ON analytics.provider_performance(encounter_count DESC);
 
-CREATE INDEX idx_provider_performance_flag_rate
+CREATE INDEX IF NOT EXISTS idx_provider_performance_flag_rate
     ON analytics.provider_performance(flags_per_encounter DESC);
 
 COMMENT ON MATERIALIZED VIEW analytics.provider_performance IS 'Phase 6: Provider activity and quality metrics';
@@ -193,6 +197,7 @@ COMMENT ON MATERIALIZED VIEW analytics.provider_performance IS 'Phase 6: Provide
 -- PAYER STATISTICS
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.payer_statistics CASCADE;
 CREATE MATERIALIZED VIEW analytics.payer_statistics AS
 SELECT
     e.payer_id,
@@ -224,7 +229,7 @@ HAVING COUNT(DISTINCT e.encounter_id) >= 5;
 CREATE UNIQUE INDEX idx_payer_stats_pk
     ON analytics.payer_statistics(payer_id, organization_id);
 
-CREATE INDEX idx_payer_stats_denial_rate
+CREATE INDEX IF NOT EXISTS idx_payer_stats_denial_rate
     ON analytics.payer_statistics(denial_rate DESC);
 
 COMMENT ON MATERIALIZED VIEW analytics.payer_statistics IS 'Phase 6: Payer performance and denial rate tracking';
@@ -233,6 +238,7 @@ COMMENT ON MATERIALIZED VIEW analytics.payer_statistics IS 'Phase 6: Payer perfo
 -- ML MODEL PERFORMANCE TRACKING
 -- ============================================================================
 
+DROP MATERIALIZED VIEW IF EXISTS analytics.ml_model_performance_summary CASCADE;
 CREATE MATERIALIZED VIEW analytics.ml_model_performance_summary AS
 SELECT
     mr.model_id,
@@ -265,7 +271,7 @@ GROUP BY mr.model_id, mr.model_name, mr.model_type, mr.model_purpose, mr.deploym
 CREATE UNIQUE INDEX idx_ml_performance_pk
     ON analytics.ml_model_performance_summary(model_id);
 
-CREATE INDEX idx_ml_performance_accuracy
+CREATE INDEX IF NOT EXISTS idx_ml_performance_accuracy
     ON analytics.ml_model_performance_summary(accuracy DESC NULLS LAST);
 
 COMMENT ON MATERIALIZED VIEW analytics.ml_model_performance_summary IS 'Phase 6: ML model performance tracking';
