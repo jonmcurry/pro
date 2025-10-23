@@ -338,113 +338,46 @@ Function CreateDatabase()
         LogMessage "CreateDatabase: Database already exists: " & dbName
     End If
 
-    ' Run database migrations
-    LogMessage "CreateDatabase: Starting database schema migrations..."
-
-    ' Get migrations directory path (should be in INSTALLFOLDER\migrations)
-    Dim migrationsDir
+    ' Run database migrations using pro-upgrade.exe with embedded migrations
+    LogMessage "CreateDatabase: Starting database schema migrations using pro-upgrade.exe..."
 
     ' Ensure installFolder ends with a backslash
     If Right(installFolder, 1) <> "\" Then
         installFolder = installFolder & "\"
     End If
 
-    migrationsDir = installFolder & "migrations\"
-    LogMessage "CreateDatabase: Looking for migrations in: " & migrationsDir
+    ' Set environment variables for pro-upgrade
+    env("DB_HOST") = dbHost
+    env("DB_PORT") = dbPort
+    env("DB_NAME") = dbName
+    env("DB_USER") = dbUser
+    env("DB_PASSWORD") = dbPassword
 
-    If Not fso.FolderExists(migrationsDir) Then
-        LogMessage "CreateDatabase: WARNING - Migrations directory not found: " & migrationsDir
-        LogMessage "CreateDatabase: Skipping schema creation. Database will be empty."
+    ' Path to pro-upgrade.exe
+    Dim proUpgradeExe
+    proUpgradeExe = installFolder & "bin\pro-upgrade.exe"
+
+    If Not fso.FileExists(proUpgradeExe) Then
+        LogMessage "CreateDatabase: WARNING - pro-upgrade.exe not found at: " & proUpgradeExe
+        LogMessage "CreateDatabase: Skipping schema creation. Migrations must be run manually."
     Else
-        LogMessage "CreateDatabase: Migrations directory found: " & migrationsDir
+        LogMessage "CreateDatabase: Found pro-upgrade.exe at: " & proUpgradeExe
 
-        ' Get list of migration files
-        Dim folder, files, file, migrationFiles()
-        Set folder = fso.GetFolder(migrationsDir)
-        Set files = folder.Files
+        ' Apply all migrations using embedded migrations (no --migrations-dir needed)
+        Dim applyCmd, applyResult
+        applyCmd = "cmd.exe /c """ & proUpgradeExe & """ apply-migrations 2>&1"
 
-        ' Count SQL files
-        Dim fileCount, i
-        fileCount = 0
-        For Each file In files
-            If LCase(fso.GetExtensionName(file.Name)) = "sql" Then
-                fileCount = fileCount + 1
-            End If
-        Next
+        LogMessage "CreateDatabase: Executing pro-upgrade apply-migrations (using embedded migrations)..."
+        applyResult = shell.Run(applyCmd, 0, True)
 
-        If fileCount = 0 Then
-            LogMessage "CreateDatabase: WARNING - No migration files found in " & migrationsDir
+        If applyResult = 0 Then
+            LogMessage "CreateDatabase: SUCCESS - All migrations applied successfully"
+            LogMessage "CreateDatabase: Database is fully initialized and ready to use"
         Else
-            LogMessage "CreateDatabase: Found " & fileCount & " migration files"
-
-            ' Create array and populate with sorted filenames
-            ReDim migrationFiles(fileCount - 1)
-            i = 0
-            For Each file In files
-                If LCase(fso.GetExtensionName(file.Name)) = "sql" Then
-                    migrationFiles(i) = file.Name
-                    i = i + 1
-                End If
-            Next
-
-            ' Sort migration files (simple bubble sort)
-            Dim j, temp
-            For i = 0 To UBound(migrationFiles) - 1
-                For j = i + 1 To UBound(migrationFiles)
-                    If migrationFiles(i) > migrationFiles(j) Then
-                        temp = migrationFiles(i)
-                        migrationFiles(i) = migrationFiles(j)
-                        migrationFiles(j) = temp
-                    End If
-                Next
-            Next
-
-            ' Execute each migration file
-            Dim migrationSuccess, migrationFailed, migrationFile, migrationPath, migrationCmd, migrationResult
-            migrationSuccess = 0
-            migrationFailed = 0
-
-            For i = 0 To UBound(migrationFiles)
-                migrationFile = migrationFiles(i)
-                migrationPath = migrationsDir & migrationFile
-
-                LogMessage "CreateDatabase: Running migration " & (i + 1) & " of " & (UBound(migrationFiles) + 1) & ": " & migrationFile
-
-                ' Verify migration file exists
-                If Not fso.FileExists(migrationPath) Then
-                    LogMessage "CreateDatabase: ERROR - Migration file not found: " & migrationPath
-                    migrationFailed = migrationFailed + 1
-                Else
-                    ' Execute migration using psql
-                    migrationCmd = "cmd.exe /c """ & psqlExe & " -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & dbName & " -f """ & migrationPath & """ 2>&1"""
-                    LogMessage "CreateDatabase: Executing migration with: " & psqlExe
-                    migrationResult = shell.Run(migrationCmd, 0, True)
-
-                    If migrationResult = 0 Then
-                        LogMessage "CreateDatabase: Migration completed successfully: " & migrationFile
-                        migrationSuccess = migrationSuccess + 1
-                    Else
-                        LogMessage "CreateDatabase: ERROR - Migration failed: " & migrationFile & " (exit code: " & migrationResult & ")"
-                        LogMessage "CreateDatabase: ERROR - Check that the database exists and user has permissions"
-                        migrationFailed = migrationFailed + 1
-                    End If
-                End If
-            Next
-
-            ' Log summary
-            LogMessage "CreateDatabase: Migration summary: " & migrationSuccess & " successful, " & migrationFailed & " failed"
-
-            If migrationFailed > 0 Then
-                LogMessage "CreateDatabase: WARNING - Some migrations failed. Database may not be fully initialized."
-                LogMessage "CreateDatabase: Please check the log for errors and run migrations manually if needed."
-            Else
-                LogMessage "CreateDatabase: SUCCESS - All migrations completed successfully"
-                LogMessage "CreateDatabase: Database is fully initialized and ready to use"
-            End If
+            LogMessage "CreateDatabase: ERROR - Migration application failed (exit code: " & applyResult & ")"
+            LogMessage "CreateDatabase: WARNING - Database may not be fully initialized."
+            LogMessage "CreateDatabase: Please check the log for errors and run migrations manually if needed."
         End If
-
-        Set files = Nothing
-        Set folder = Nothing
     End If
 
     Set fso = Nothing

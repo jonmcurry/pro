@@ -84,41 +84,10 @@ if not exist "%~dp0icon.ico" (
 
 echo.
 echo ================================================
-echo Auto-generating migration files list...
+echo Migrations are now embedded in pro-upgrade.exe
 echo ================================================
 echo.
-
-REM Auto-generate MigrationsFragment.wxs from migrations folder using Heat.exe
-REM This scans the migrations folder and creates WiX components for all .sql files
-REM This way you never have to manually list migration files!
-
-REM Find Heat.exe (should be in same directory as candle/light)
-set "HEAT=%CANDLE:candle.exe=heat.exe%"
-
-if not exist "%HEAT%" (
-    echo ERROR: heat.exe not found at %HEAT%
-    exit /b 1
-)
-
-echo Running Heat.exe to harvest migrations folder...
-"%HEAT%" dir "%SOLUTION_DIR%\migrations" -cg MigrationsComponentGroup -dr MigrationsFolder -var var.SolutionDir -gg -sfrag -srd -platform x64 -out "%~dp0MigrationsFragment_temp.wxs"
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to run Heat.exe
-    exit /b 1
-)
-
-echo Processing Heat.exe output to fix paths and add Win64 attribute...
-
-REM Use PowerShell script to fix the generated file
-powershell -ExecutionPolicy Bypass -File "%~dp0fix_migrations_fragment.ps1" -InputFile "%~dp0MigrationsFragment_temp.wxs" -OutputFile "%~dp0MigrationsFragment.wxs"
-if %ERRORLEVEL% NEQ 0 (
-    echo WARNING: PowerShell processing failed, using temp file as-is
-    copy /Y "%~dp0MigrationsFragment_temp.wxs" "%~dp0MigrationsFragment.wxs" >nul
-)
-
-del "%~dp0MigrationsFragment_temp.wxs" 2>nul
-
-echo MigrationsFragment.wxs generated successfully
+echo Skipping migration file harvesting - migrations are compiled into the binary
 echo.
 
 echo ================================================
@@ -152,15 +121,6 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo PrerequisiteDlg.wxs compiled successfully
-
-REM Compile MigrationsFragment.wxs
-"%CANDLE%" -dSolutionDir="%SOLUTION_DIR%\\" -out "%~dp0MigrationsFragment.wixobj" "%~dp0MigrationsFragment.wxs"
-if %ERRORLEVEL% NEQ 0 (
-    echo ERROR: Failed to compile MigrationsFragment.wxs
-    exit /b 1
-)
-
-echo MigrationsFragment.wxs compiled successfully
 echo.
 
 echo ================================================
@@ -169,7 +129,7 @@ echo ================================================
 echo.
 
 REM Link to create MSI
-"%LIGHT%" -ext WixUIExtension -out "%~dp0ProfessionalSMART.msi" "%~dp0Product.wixobj" "%~dp0DatabaseConfigDlg.wixobj" "%~dp0PrerequisiteDlg.wixobj" "%~dp0MigrationsFragment.wixobj"
+"%LIGHT%" -ext WixUIExtension -out "%~dp0ProfessionalSMART.msi" "%~dp0Product.wixobj" "%~dp0DatabaseConfigDlg.wixobj" "%~dp0PrerequisiteDlg.wixobj"
 if %ERRORLEVEL% NEQ 0 (
     echo ERROR: Failed to link installer
     exit /b 1

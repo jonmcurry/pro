@@ -54,7 +54,11 @@
       "Read(//c/Program Files/Professional SMART/data/processed/**)",
       "Bash(test:*)",
       "Read(//c/Program Files/Professional SMART//**)",
-      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -d professional_smart -c \"DELETE FROM staging.batch_sequences WHERE batch_id = ''2b980018-0afc-4463-b47b-79875f3a2fba'';\")"
+      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -d professional_smart -c \"DELETE FROM staging.batch_sequences WHERE batch_id = ''2b980018-0afc-4463-b47b-79875f3a2fba'';\")",
+      "Bash(./target/release/pro-upgrade.exe:*)",
+      "Bash(DB_HOST=localhost DB_PORT=5432 DB_NAME=professional_smart DB_USER=postgres DB_PASSWORD=ClearToFly1 ./target/release/pro-upgrade.exe:*)",
+      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -d postgres -c \"DROP DATABASE professional_smart\")",
+      "Bash(/dev/null)"
     ],
     "deny": [],
     "ask": []

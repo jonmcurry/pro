@@ -13,7 +13,7 @@
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_service_line_duplicate_lookup
 ON claims.service_line (procedure_code, service_date_from, rendering_provider_id)
 WHERE service_date_from IS NOT NULL
-  AND is_active = true;
+  AND line_status = 'ACTIVE';
 
 COMMENT ON INDEX claims.idx_service_line_duplicate_lookup IS
 'Phase 5: Optimizes duplicate service line detection in rule cache population. Used by DuplicateServiceRule.';
@@ -22,7 +22,7 @@ COMMENT ON INDEX claims.idx_service_line_duplicate_lookup IS
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_service_line_date_range
 ON claims.service_line (service_date_from DESC, service_date_to)
 WHERE service_date_from IS NOT NULL
-  AND is_active = true;
+  AND line_status = 'ACTIVE';
 
 COMMENT ON INDEX claims.idx_service_line_date_range IS
 'Phase 5: Optimizes date-range queries for service line history lookups.';
@@ -43,12 +43,12 @@ COMMENT ON INDEX claims.idx_provider_npi_lookup IS
 'Phase 5: Optimizes provider lookups by NPI in cache population.';
 
 -- Index for provider specialty lookups (for future ML features)
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_provider_specialty
-ON claims.provider (specialty_code, provider_type)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_provider_specialty_type
+ON claims.provider (specialty, provider_type)
 WHERE is_active = true
-  AND specialty_code IS NOT NULL;
+  AND specialty IS NOT NULL;
 
-COMMENT ON INDEX claims.idx_provider_specialty IS
+COMMENT ON INDEX claims.idx_provider_specialty_type IS
 'Phase 5: Optimizes provider specialty lookups for analytics and ML features.';
 
 -- ============================================================================
@@ -141,47 +141,32 @@ COMMENT ON INDEX claims.idx_encounter_diagnosis_sequence IS
 -- Purpose: Speed up flag queries by encounter and status
 -- Impact: Moderate - improves dashboard and reporting performance
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flag_encounter_severity
-ON claims.flag (encounter_id, severity_level, flag_status)
-WHERE flag_status IN ('ACTIVE', 'PENDING');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_encounter_flag_severity
+ON claims.encounter_flag (encounter_id, severity, flag_status)
+WHERE flag_status IN ('OPEN', 'CLOSED');
 
-COMMENT ON INDEX claims.idx_flag_encounter_severity IS
-'Phase 5: Optimizes flag queries by encounter and severity.';
+COMMENT ON INDEX claims.idx_encounter_flag_severity IS
+'Phase 5: Optimizes encounter flag queries by severity and status.';
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flag_service_line_severity
-ON claims.flag (service_line_id, severity_level, flag_status)
-WHERE service_line_id IS NOT NULL
-  AND flag_status IN ('ACTIVE', 'PENDING');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_service_line_flag_severity
+ON claims.service_line_flag (service_line_id, severity, flag_status)
+WHERE flag_status IN ('OPEN', 'CLOSED');
 
-COMMENT ON INDEX claims.idx_flag_service_line_severity IS
-'Phase 5: Optimizes flag queries by service line and severity.';
+COMMENT ON INDEX claims.idx_service_line_flag_severity IS
+'Phase 5: Optimizes service line flag queries by severity and status.';
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_flag_category_date
-ON claims.flag (flag_category, created_at DESC)
-WHERE flag_status IN ('ACTIVE', 'PENDING');
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_encounter_flag_created
+ON claims.encounter_flag (created_at DESC, flag_status)
+WHERE flag_status = 'OPEN';
 
-COMMENT ON INDEX claims.idx_flag_category_date IS
-'Phase 5: Optimizes flag category queries for reporting.';
+COMMENT ON INDEX claims.idx_encounter_flag_created IS
+'Phase 5: Optimizes recent open flag queries for dashboards.';
 
 -- ============================================================================
 -- Import Batch Indexes (Job Processing)
 -- ============================================================================
--- Used by: Job status tracking and file processing
--- Purpose: Speed up batch status queries
--- Impact: Low - improves job monitoring performance
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_import_batch_status_date
-ON staging.import_batch (status, created_at DESC)
-WHERE status IN ('PENDING', 'PROCESSING');
-
-COMMENT ON INDEX staging.idx_import_batch_status_date IS
-'Phase 5: Optimizes import batch status queries for monitoring.';
-
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_import_batch_org_date
-ON staging.import_batch (organization_id, created_at DESC);
-
-COMMENT ON INDEX staging.idx_import_batch_org_date IS
-'Phase 5: Optimizes organization-based batch queries.';
+-- NOTE: These indexes already exist from earlier migrations (007_create_staging_tables.sql)
+-- Skipping to avoid duplicates and errors
 
 -- ============================================================================
 -- Verification and Statistics
@@ -192,45 +177,20 @@ ANALYZE claims.service_line;
 ANALYZE claims.provider;
 ANALYZE claims.encounter;
 ANALYZE claims.encounter_diagnosis;
-ANALYZE claims.flag;
+ANALYZE claims.encounter_flag;
+ANALYZE claims.service_line_flag;
 ANALYZE staging.file_processing_queue;
 ANALYZE staging.import_batch;
 
--- Report index sizes for monitoring
-DO $$
-DECLARE
-    index_record RECORD;
-    total_size BIGINT := 0;
-BEGIN
-    RAISE NOTICE '=== Phase 5 Index Size Report ===';
-
-    FOR index_record IN
-        SELECT
-            schemaname,
-            tablename,
-            indexname,
-            pg_size_pretty(pg_relation_size(indexname::regclass)) as size,
-            pg_relation_size(indexname::regclass) as bytes
-        FROM pg_indexes
-        WHERE schemaname IN ('claims', 'staging')
-          AND indexname LIKE 'idx_%'
-        ORDER BY pg_relation_size(indexname::regclass) DESC
-    LOOP
-        total_size := total_size + index_record.bytes;
-        RAISE NOTICE 'Index: %.% - Size: %',
-            index_record.tablename,
-            index_record.indexname,
-            index_record.size;
-    END LOOP;
-
-    RAISE NOTICE 'Total index size: %', pg_size_pretty(total_size);
-END $$;
+-- Index size reporting skipped - can be run manually if needed
+-- NOTICE: Run this query to check index sizes:
+-- SELECT schemaname, tablename, indexname, pg_size_pretty(pg_relation_size(indexname::regclass)) as size
+-- FROM pg_indexes WHERE schemaname IN ('claims', 'staging') AND indexname LIKE 'idx_%'
+-- ORDER BY pg_relation_size(indexname::regclass) DESC;
 
 -- ============================================================================
 -- Migration Complete
 -- ============================================================================
 
--- Log completion
-INSERT INTO audit.schema_version_log (version, description, applied_at)
-VALUES ('016', 'Phase 5: Performance indexes for cache population and queue processing', CURRENT_TIMESTAMP)
-ON CONFLICT DO NOTHING;
+-- Migration tracking is handled automatically by staging.schema_migrations
+-- No additional logging needed here

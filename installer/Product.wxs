@@ -5,7 +5,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.2.3.0"
+           Version="1.2.4.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -186,11 +186,8 @@
             </Component>
           </Directory>
 
-          <!-- Migrations Directory -->
-          <Directory Id="MigrationsFolder" Name="migrations">
-            <!-- Migrations folder - uses Heat.exe to auto-generate file list during build -->
-            <!-- This allows unlimited migration files without manually updating WiX -->
-          </Directory>
+          <!-- Migrations are now embedded in pro-upgrade.exe binary -->
+          <!-- No longer need to deploy migration files to disk -->
 
           <!-- Component to remove the INSTALLFOLDER itself on uninstall -->
           <Component Id="InstallFolderComponent" Guid="FAFAFAFA-FAFB-FAFC-FAFD-FAFAFAFAFABC" Win64="yes">
@@ -305,7 +302,7 @@
         <ComponentRef Id="DataDir" />
         <ComponentRef Id="LogsDir" />
         <ComponentRef Id="InstallFolderComponent" />
-        <ComponentGroupRef Id="MigrationsComponentGroup" />
+        <!-- Migrations are now embedded in pro-upgrade.exe -->
         <ComponentRef Id="ProgramDataRoot" />
         <ComponentRef Id="ProgramDataConfig" />
         <ComponentRef Id="ProgramDataLogs" />

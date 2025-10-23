@@ -9,14 +9,15 @@ members = [
     "crates/pro-worker",
     "crates/pro-service",
     "crates/pro-setup",
-    "crates/pro-ml",
     "crates/pro-data-loader",
-    "crates/pro-data-loader-gui", "crates/pro-upgrade-manager", "crates/pro-upgrade",
+    "crates/pro-data-loader-gui",
+    "crates/pro-upgrade-manager",
+    "crates/pro-upgrade",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 authors = ["Professional SMART Team"]

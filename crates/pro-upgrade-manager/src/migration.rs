@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn, error};
 
 use crate::error::{Result, UpgradeError};
+use crate::embedded_migrations::get_all_migrations;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationInfo {
@@ -26,14 +27,28 @@ pub struct PendingMigration {
 
 pub struct MigrationManager {
     pool: PgPool,
-    migrations_dir: PathBuf,
+    migrations_dir: Option<PathBuf>,
+    use_embedded: bool,
 }
 
 impl MigrationManager {
-    pub fn new(pool: PgPool, migrations_dir: PathBuf) -> Self {
+    /// Create a new MigrationManager that uses embedded migrations (recommended)
+    pub fn new_embedded(pool: PgPool) -> Self {
+        info!("MigrationManager initialized with embedded migrations");
         Self {
             pool,
-            migrations_dir,
+            migrations_dir: None,
+            use_embedded: true,
+        }
+    }
+
+    /// Create a new MigrationManager that reads migrations from disk (legacy)
+    pub fn new(pool: PgPool, migrations_dir: PathBuf) -> Self {
+        info!("MigrationManager initialized with disk-based migrations from: {}", migrations_dir.display());
+        Self {
+            pool,
+            migrations_dir: Some(migrations_dir),
+            use_embedded: false,
         }
     }
 
@@ -91,18 +106,42 @@ impl MigrationManager {
         Ok(migrations)
     }
 
+    /// Get embedded migrations as PendingMigration objects
+    fn get_embedded_migration_files(&self) -> Result<Vec<PendingMigration>> {
+        let embedded = get_all_migrations();
+        let migrations = embedded
+            .iter()
+            .map(|m| PendingMigration {
+                file_name: m.file_name(),
+                file_path: PathBuf::from(format!("embedded://{}", m.file_name())),
+                content: m.sql.to_string(),
+                checksum: m.checksum(),
+            })
+            .collect();
+
+        info!("Loaded {} embedded migrations", embedded.len());
+        Ok(migrations)
+    }
+
     /// Get all migration files from the migrations directory
     pub fn get_migration_files(&self) -> Result<Vec<PendingMigration>> {
-        if !self.migrations_dir.exists() {
+        if self.use_embedded {
+            return self.get_embedded_migration_files();
+        }
+
+        let migrations_dir = self.migrations_dir.as_ref()
+            .ok_or_else(|| UpgradeError::Migration("No migrations directory configured".to_string()))?;
+
+        if !migrations_dir.exists() {
             return Err(UpgradeError::Migration(format!(
                 "Migrations directory not found: {}",
-                self.migrations_dir.display()
+                migrations_dir.display()
             )));
         }
 
         let mut migrations = Vec::new();
 
-        for entry in std::fs::read_dir(&self.migrations_dir)? {
+        for entry in std::fs::read_dir(migrations_dir)? {
             let entry = entry?;
             let path = entry.path();
 
@@ -149,11 +188,19 @@ impl MigrationManager {
 
     /// Find baseline file in migrations directory (e.g., baseline_v1.2.0.sql)
     pub fn find_baseline_file(&self) -> Result<Option<PendingMigration>> {
-        if !self.migrations_dir.exists() {
+        // Embedded migrations don't use baselines - we apply all migrations sequentially
+        if self.use_embedded {
             return Ok(None);
         }
 
-        for entry in std::fs::read_dir(&self.migrations_dir)? {
+        let migrations_dir = self.migrations_dir.as_ref()
+            .ok_or_else(|| UpgradeError::Migration("No migrations directory configured".to_string()))?;
+
+        if !migrations_dir.exists() {
+            return Ok(None);
+        }
+
+        for entry in std::fs::read_dir(migrations_dir)? {
             let entry = entry?;
             let path = entry.path();
 
@@ -507,8 +554,8 @@ impl MigrationManager {
         Ok(table_exists)
     }
 
-    /// Get migrations directory
-    pub fn migrations_dir(&self) -> &Path {
-        &self.migrations_dir
+    /// Get migrations directory (returns None for embedded migrations)
+    pub fn migrations_dir(&self) -> Option<&Path> {
+        self.migrations_dir.as_deref()
     }
 }

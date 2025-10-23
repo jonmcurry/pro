@@ -130,15 +130,13 @@ Function UpgradeDatabase()
         LogMessage "UpgradeDatabase: Backup is disabled, skipping backup creation"
     End If
 
-    ' Apply pending migrations
-    LogMessage "UpgradeDatabase: Applying pending database migrations..."
-    Dim migrationsDir
-    migrationsDir = installFolder & "migrations"
+    ' Apply pending migrations (using embedded migrations in pro-upgrade.exe)
+    LogMessage "UpgradeDatabase: Applying pending database migrations using embedded migrations..."
 
     Dim applyCmd
-    applyCmd = "cmd.exe /c """ & proUpgradeExe & """ apply-migrations --migrations-dir """ & migrationsDir & """ 2>&1"
+    applyCmd = "cmd.exe /c """ & proUpgradeExe & """ apply-migrations 2>&1"
 
-    LogMessage "UpgradeDatabase: Executing: pro-upgrade apply-migrations"
+    LogMessage "UpgradeDatabase: Executing: pro-upgrade apply-migrations (using embedded migrations)"
     Dim applyResult
     applyResult = shell.Run(applyCmd, 0, True)
 

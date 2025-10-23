@@ -59,13 +59,13 @@ enum Commands {
     },
 
     ListPendingMigrations {
-        #[arg(long, default_value = "C:\\Program Files\\Professional SMART\\migrations")]
-        migrations_dir: PathBuf,
+        #[arg(long)]
+        migrations_dir: Option<PathBuf>,
     },
 
     ApplyMigrations {
-        #[arg(long, default_value = "C:\\Program Files\\Professional SMART\\migrations")]
-        migrations_dir: PathBuf,
+        #[arg(long)]
+        migrations_dir: Option<PathBuf>,
     },
 
     ListBackups {
@@ -74,8 +74,8 @@ enum Commands {
     },
 
     VerifyChecksums {
-        #[arg(long, default_value = "C:\\Program Files\\Professional SMART\\migrations")]
-        migrations_dir: PathBuf,
+        #[arg(long)]
+        migrations_dir: Option<PathBuf>,
     },
 
     DetectInstallationType,
@@ -225,8 +225,14 @@ async fn restore_database(backup_file: &PathBuf, cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-async fn list_pending_migrations(pool: &sqlx::PgPool, migrations_dir: &PathBuf) -> Result<()> {
-    let migration_manager = MigrationManager::new(pool.clone(), migrations_dir.clone());
+async fn list_pending_migrations(pool: &sqlx::PgPool, migrations_dir: &Option<PathBuf>) -> Result<()> {
+    let migration_manager = if let Some(dir) = migrations_dir {
+        info!("Using disk-based migrations from: {}", dir.display());
+        MigrationManager::new(pool.clone(), dir.clone())
+    } else {
+        info!("Using embedded migrations");
+        MigrationManager::new_embedded(pool.clone())
+    };
 
     let pending = migration_manager.get_pending_migrations().await?;
 
@@ -242,8 +248,14 @@ async fn list_pending_migrations(pool: &sqlx::PgPool, migrations_dir: &PathBuf) 
     Ok(())
 }
 
-async fn apply_migrations(pool: &sqlx::PgPool, migrations_dir: &PathBuf) -> Result<()> {
-    let migration_manager = MigrationManager::new(pool.clone(), migrations_dir.clone());
+async fn apply_migrations(pool: &sqlx::PgPool, migrations_dir: &Option<PathBuf>) -> Result<()> {
+    let migration_manager = if let Some(dir) = migrations_dir {
+        info!("Using disk-based migrations from: {}", dir.display());
+        MigrationManager::new(pool.clone(), dir.clone())
+    } else {
+        info!("Using embedded migrations");
+        MigrationManager::new_embedded(pool.clone())
+    };
 
     info!("Applying pending migrations...");
     let applied = migration_manager.apply_pending_migrations().await?;
@@ -282,8 +294,14 @@ async fn list_backups(backup_dir: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-async fn verify_checksums(pool: &sqlx::PgPool, migrations_dir: &PathBuf) -> Result<()> {
-    let migration_manager = MigrationManager::new(pool.clone(), migrations_dir.clone());
+async fn verify_checksums(pool: &sqlx::PgPool, migrations_dir: &Option<PathBuf>) -> Result<()> {
+    let migration_manager = if let Some(dir) = migrations_dir {
+        info!("Using disk-based migrations from: {}", dir.display());
+        MigrationManager::new(pool.clone(), dir.clone())
+    } else {
+        info!("Using embedded migrations");
+        MigrationManager::new_embedded(pool.clone())
+    };
 
     info!("Verifying migration checksums...");
     let mismatches = migration_manager.verify_checksums().await?;
