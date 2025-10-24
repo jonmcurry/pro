@@ -5,7 +5,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.2.5.0"
+           Version="1.2.8.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -410,7 +410,7 @@
                   BinaryKey="DetectInstallationScript"
                   VBScriptCall="DetectInstallation"
                   Execute="immediate"
-                  Return="check" />
+                  Return="ignore" />
 
     <!-- VBScript to load credentials from .env file -->
     <Binary Id="LoadEnvCredentialsScript" SourceFile="LoadEnvCredentials.vbs" />
@@ -486,9 +486,17 @@
                   Impersonate="no" />
 
 
+    <!-- InstallUISequence runs during UI phase - need to detect installation type here -->
+    <InstallUISequence>
+      <!-- Detect installation type and load .env credentials BEFORE dialogs are shown -->
+      <!-- Always run this action (condition="1") for both fresh installs and upgrades -->
+      <Custom Action="DetectInstallationAction" After="CostFinalize">1</Custom>
+    </InstallUISequence>
+
     <InstallExecuteSequence>
       <!-- Detect installation type early in the sequence -->
-      <Custom Action="DetectInstallationAction" After="CostFinalize">NOT Installed OR (Installed AND NOT REMOVE="ALL")</Custom>
+      <!-- Always run this action (condition="1") for both fresh installs and upgrades -->
+      <Custom Action="DetectInstallationAction" After="CostFinalize">1</Custom>
 
       <!-- Trim properties before using them -->
       <Custom Action="TrimDatabaseProperties" After="DetectInstallationAction">NOT REMOVE="ALL"</Custom>

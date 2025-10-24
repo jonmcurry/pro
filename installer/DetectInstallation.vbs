@@ -116,16 +116,38 @@ Function DetectInstallation()
     If Not isUpgrade Then
         Session.Property("INSTALLMODE") = "FRESH"
         Session.Property("DETECTEDVERSION") = ""
-        LogMessage "DetectInstallation: Installation mode = FRESH"
-    End If
-
-    ' Set default backup option (enabled for upgrades)
-    If isUpgrade Then
-        Session.Property("CREATE_BACKUP") = "1"
-        LogMessage "DetectInstallation: Backup enabled by default for upgrade"
-    Else
+        Session.Property("ENV_CREDENTIALS_LOADED") = "0"
         Session.Property("CREATE_BACKUP") = "0"
-        LogMessage "DetectInstallation: Backup disabled for fresh install"
+        LogMessage "DetectInstallation: Installation mode = FRESH"
+    Else
+        Session.Property("INSTALLMODE") = "UPGRADE"
+        Session.Property("DETECTEDVERSION") = installedVersion
+        Session.Property("CREATE_BACKUP") = "1"
+        LogMessage "DetectInstallation: Installation mode = UPGRADE"
+        LogMessage "DetectInstallation: Detected version = " & installedVersion
+
+        ' For upgrades, try to load credentials from .env file
+        Dim programDataFolder, envFilePath
+        programDataFolder = shell.ExpandEnvironmentStrings("%ProgramData%")
+        If Right(programDataFolder, 1) <> "\" Then
+            programDataFolder = programDataFolder & "\"
+        End If
+        envFilePath = programDataFolder & "Professional SMART\config\.env"
+
+        LogMessage "DetectInstallation: Checking for .env at: " & envFilePath
+
+        If fso.FileExists(envFilePath) Then
+            LogMessage "DetectInstallation: .env file exists - will skip DatabaseConfigDlg"
+            Session.Property("ENV_CREDENTIALS_LOADED") = "1"
+        Else
+            LogMessage "DetectInstallation: .env file not found - will show DatabaseConfigDlg with defaults"
+            Session.Property("ENV_CREDENTIALS_LOADED") = "0"
+            ' Set default values for database configuration
+            If Session.Property("DB_HOST") = "" Then Session.Property("DB_HOST") = "localhost"
+            If Session.Property("DB_PORT") = "" Then Session.Property("DB_PORT") = "5432"
+            If Session.Property("DB_NAME") = "" Then Session.Property("DB_NAME") = "professional_smart"
+            If Session.Property("DB_USER") = "" Then Session.Property("DB_USER") = "postgres"
+        End If
     End If
 
     Set fso = Nothing

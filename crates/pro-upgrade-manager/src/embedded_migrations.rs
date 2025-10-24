@@ -141,5 +141,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_batch_sequence_tracking",
             sql: include_str!("../../../migrations/024_add_batch_sequence_tracking.sql"),
         },
+        EmbeddedMigration {
+            version: "025",
+            name: "rename_duration_column",
+            sql: include_str!("../../../migrations/025_rename_duration_column.sql"),
+        },
+        EmbeddedMigration {
+            version: "026",
+            name: "fix_timestamp_columns",
+            sql: include_str!("../../../migrations/026_fix_timestamp_columns.sql"),
+        },
     ]
 }

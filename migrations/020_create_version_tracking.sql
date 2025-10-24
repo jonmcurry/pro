@@ -5,7 +5,7 @@
 -- Create schema_migrations table to track which migrations have been applied
 CREATE TABLE IF NOT EXISTS staging.schema_migrations (
     migration_name VARCHAR(255) PRIMARY KEY,
-    applied_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     checksum TEXT NOT NULL,
     execution_time_ms INTEGER,
     description TEXT
@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS staging.schema_migrations (
 -- Create application_version table to track application versions
 CREATE TABLE IF NOT EXISTS staging.application_version (
     version VARCHAR(50) PRIMARY KEY,
-    installed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    installed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     upgraded_from VARCHAR(50),
     notes TEXT
 );

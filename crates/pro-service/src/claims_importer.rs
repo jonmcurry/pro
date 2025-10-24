@@ -189,7 +189,7 @@ impl ClaimsImporter {
                 metric_name,
                 started_at,
                 completed_at,
-                duration_milliseconds,
+                duration_seconds,
                 records_processed,
                 records_per_second,
                 success_count,
@@ -205,7 +205,7 @@ impl ClaimsImporter {
         .bind(metric_name)
         .bind(started_at)
         .bind(completed_at)
-        .bind(duration_ms as f64)
+        .bind(duration_sec)
         .bind(records_processed)
         .bind(rust_decimal::Decimal::from_f64_retain(records_per_second).unwrap_or(rust_decimal::Decimal::ZERO))
         .bind(success_count)
@@ -550,7 +550,7 @@ impl ClaimsImporter {
                 metric_name,
                 started_at,
                 completed_at,
-                duration_milliseconds,
+                duration_seconds,
                 records_processed,
                 records_per_second,
                 success_count,
@@ -567,7 +567,7 @@ impl ClaimsImporter {
         .bind(metric_name)
         .bind(started_at)
         .bind(completed_at)
-        .bind(duration_ms as f64)
+        .bind(duration_sec)
         .bind(records_processed)
         .bind(rust_decimal::Decimal::from_f64_retain(records_per_second).unwrap_or(rust_decimal::Decimal::ZERO))
         .bind(success_count)

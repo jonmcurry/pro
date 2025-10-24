@@ -8,7 +8,14 @@
       "Bash(tasklist:*)",
       "Bash(sc query:*)",
       "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -c \"DROP DATABASE IF EXISTS professional_smart;\")",
-      "Bash(net stop ProfessionalSMART)"
+      "Bash(net stop ProfessionalSMART)",
+      "Bash(PGPASSWORD='ClearToFly1' \"C:/Program Files/Professional SMART/bin/pro-upgrade.exe\" --db-host localhost --db-port 5432 --db-name professional_smart --db-user postgres --db-password ClearToFly1 check-version)",
+      "Read(//c/ProgramData/**)",
+      "Bash(cscript:*)",
+      "Read(//tmp/**)",
+      "Bash(wevtutil qe:*)",
+      "Bash(iconv:*)",
+      "Bash(cmd.exe /c 'if exist \"\"C:\\Program Files\\Professional SMART\"\" (echo Exists) else (echo Not found)')"
     ],
     "deny": [],
     "ask": []

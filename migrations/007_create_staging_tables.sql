@@ -241,7 +241,7 @@ CREATE TABLE staging.processing_metrics (
     -- Performance data
     started_at TIMESTAMPTZ NOT NULL,
     completed_at TIMESTAMPTZ,
-    duration_milliseconds NUMERIC(15,3),
+    duration_seconds NUMERIC(15,3),
     records_processed INTEGER DEFAULT 0,
     records_per_second NUMERIC(15,3),
 
