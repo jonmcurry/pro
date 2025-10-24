@@ -151,5 +151,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "drop_unused_scheduling_tables",
             sql: include_str!("../../../migrations/027_drop_unused_scheduling_tables.sql"),
         },
+        EmbeddedMigration {
+            version: "028",
+            name: "add_project_id_to_organization",
+            sql: include_str!("../../../migrations/028_add_project_id_to_organization.sql"),
+        },
+        EmbeddedMigration {
+            version: "029",
+            name: "drop_charge_amount_constraints",
+            sql: include_str!("../../../migrations/029_drop_charge_amount_constraints.sql"),
+        },
     ]
 }

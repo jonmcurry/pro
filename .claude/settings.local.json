@@ -16,7 +16,10 @@
       "Bash(wevtutil qe:*)",
       "Bash(iconv:*)",
       "Bash(cmd.exe /c 'if exist \"\"C:\\Program Files\\Professional SMART\"\" (echo Exists) else (echo Not found)')",
-      "Bash(cargo build:*)"
+      "Bash(cargo build:*)",
+      "Bash(\"/c/Users/jonmc/dev/pro/target/release/pro-upgrade.exe\" --help)",
+      "Bash(PGPASSWORD='ClearToFly1' \"/c/Users/jonmc/dev/pro/target/release/pro-upgrade.exe\":*)",
+      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -d professional_smart -c \"SELECT conname, conrelid::regclass, pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN (''encounter_total_claim_charge_amount_check'', ''service_line_line_item_charge_amount_check'');\")"
     ],
     "deny": [],
     "ask": []

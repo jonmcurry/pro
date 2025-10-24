@@ -46,7 +46,7 @@ CREATE TABLE claims.service_line (
     procedure_modifier_3 VARCHAR(2),
     procedure_modifier_4 VARCHAR(2),
     procedure_description TEXT,
-    line_item_charge_amount NUMERIC(18,2) NOT NULL CHECK (line_item_charge_amount >= 0),
+    line_item_charge_amount NUMERIC(18,2) NOT NULL,
     unit_basis_measurement_code VARCHAR(2) DEFAULT 'UN', -- UN for units, MJ for minutes
     service_unit_count NUMERIC(15,1) NOT NULL CHECK (service_unit_count > 0 AND service_unit_count <= 9999.9),
 

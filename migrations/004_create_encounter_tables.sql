@@ -52,7 +52,7 @@ CREATE TABLE claims.encounter (
     billing_provider_postal_code VARCHAR(15),
 
     -- Claim information (Loop 2300 CLM)
-    total_claim_charge_amount NUMERIC(18,2) NOT NULL CHECK (total_claim_charge_amount >= 0 AND total_claim_charge_amount <= 99999.99),
+    total_claim_charge_amount NUMERIC(18,2) NOT NULL,
     place_of_service_code VARCHAR(2),
     claim_frequency_code CHAR(1) DEFAULT '1', -- 1 = Original
     signature_indicator CHAR(1),
