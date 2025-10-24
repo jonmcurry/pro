@@ -15,7 +15,8 @@
       "Read(//tmp/**)",
       "Bash(wevtutil qe:*)",
       "Bash(iconv:*)",
-      "Bash(cmd.exe /c 'if exist \"\"C:\\Program Files\\Professional SMART\"\" (echo Exists) else (echo Not found)')"
+      "Bash(cmd.exe /c 'if exist \"\"C:\\Program Files\\Professional SMART\"\" (echo Exists) else (echo Not found)')",
+      "Bash(cargo build:*)"
     ],
     "deny": [],
     "ask": []

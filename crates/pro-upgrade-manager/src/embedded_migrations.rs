@@ -72,11 +72,6 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             sql: include_str!("../../../migrations/010_create_denial_tables.sql"),
         },
         EmbeddedMigration {
-            version: "011",
-            name: "create_schedule_tables",
-            sql: include_str!("../../../migrations/011_create_schedule_tables.sql"),
-        },
-        EmbeddedMigration {
             version: "012",
             name: "create_ml_tables",
             sql: include_str!("../../../migrations/012_create_ml_tables.sql"),
@@ -150,6 +145,11 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             version: "026",
             name: "fix_timestamp_columns",
             sql: include_str!("../../../migrations/026_fix_timestamp_columns.sql"),
+        },
+        EmbeddedMigration {
+            version: "027",
+            name: "drop_unused_scheduling_tables",
+            sql: include_str!("../../../migrations/027_drop_unused_scheduling_tables.sql"),
         },
     ]
 }
