@@ -1,5 +1,10 @@
 # Professional SMART Project - Implementation Progress
 
+## Schema Changes
+[] CSV headers per file per facility that indicated which data elements are being loaded
+[] Match the data elements to the field columns
+
+
 ## Completed
 - [x] Read and analyze 837p companion guide PDF
 - [x] Design comprehensive PostgreSQL database schema

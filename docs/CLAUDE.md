@@ -11,6 +11,7 @@ Rule 8: Create a .md file with what your plan is to resolve issues or to develop
 Rule 9:  No shortcuts - fully resolve issues by solving it the right way and not creating cascading failures elsewhere.
 Rule 10: Rebuild the installer after every change.
 Rule 11: Version the build after every change and determine if it's a minor or major version change.
+Rule 12: Absolutely no manual fixes.
 
 ## Collaboration Guidelines
 - **Challenge and question**: Don't immediately agree or proceed with requests that seem suboptimal, unclear, or potentially problematic
