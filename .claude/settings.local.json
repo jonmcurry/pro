@@ -1,25 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(PGPASSWORD='ClearToFly1' psql:*)",
-      "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/candle.exe\" -dSolutionDir=\"/c/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
-      "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
-      "Read(//c/Program Files//**)",
-      "Bash(tasklist:*)",
-      "Bash(sc query:*)",
-      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -c \"DROP DATABASE IF EXISTS professional_smart;\")",
-      "Bash(net stop ProfessionalSMART)",
-      "Bash(PGPASSWORD='ClearToFly1' \"C:/Program Files/Professional SMART/bin/pro-upgrade.exe\" --db-host localhost --db-port 5432 --db-name professional_smart --db-user postgres --db-password ClearToFly1 check-version)",
-      "Read(//c/ProgramData/**)",
-      "Bash(cscript:*)",
-      "Read(//tmp/**)",
-      "Bash(wevtutil qe:*)",
-      "Bash(iconv:*)",
-      "Bash(cmd.exe /c 'if exist \"\"C:\\Program Files\\Professional SMART\"\" (echo Exists) else (echo Not found)')",
-      "Bash(cargo build:*)",
-      "Bash(\"/c/Users/jonmc/dev/pro/target/release/pro-upgrade.exe\" --help)",
-      "Bash(PGPASSWORD='ClearToFly1' \"/c/Users/jonmc/dev/pro/target/release/pro-upgrade.exe\":*)",
-      "Bash(PGPASSWORD='ClearToFly1' psql -h localhost -U postgres -d professional_smart -c \"SELECT conname, conrelid::regclass, pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN (''encounter_total_claim_charge_amount_check'', ''service_line_line_item_charge_amount_check'');\")"
+      "Bash(wmic product where \"name like ''%Professional SMART%''\" get name,version,identifyingnumber)",
+      "Bash(reg query \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\" /s /f \"Professional SMART\")",
+      "Bash(reg query 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' /s /f 'Professional SMART')",
+      "Bash(sc stop:*)",
+      "Bash(reg query 'HKLM\\SOFTWARE\\ProfessionalSMART' /v Version)"
     ],
     "deny": [],
     "ask": []

@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
 
   <!-- Product Information -->
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.2.9.0"
+           Version="1.3.16.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -47,6 +48,13 @@
     <Property Id="CREATE_BACKUP" Value="1" />
     <Property Id="ENV_CREDENTIALS_LOADED" Value="0" />
 
+    <!-- Disable Windows Restart Manager to prevent automatic reboot prompts -->
+    <!-- We handle service stopping manually via custom actions -->
+    <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+
+    <!-- Suppress reboot prompts - we stop services manually before file operations -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
+
 
     <!-- Installation Directory -->
     <Directory Id="TARGETDIR" Name="SourceDir">
@@ -76,10 +84,8 @@
 
               <ServiceControl Id="ServiceControl"
                               Start="install"
-                              Stop="both"
-                              Remove="both"
-                              Name="ProfessionalSMART"
-                              Wait="no" />
+                              Remove="uninstall"
+                              Name="ProfessionalSMART" />
             </Component>
 
             <Component Id="SetupExecutable" Guid="2B2B2B2B-2C2C-2D2D-2E2E-2F2F2F2F2F2F" Win64="yes">
@@ -107,6 +113,7 @@
             </Component>
             <Component Id="BinDir" Guid="BABABABA-BABB-BABC-BABD-BABABABABABC" Win64="yes">
               <CreateFolder />
+              <RemoveFile Id="RemoveAllBinFiles" Name="*.*" On="uninstall" />
               <RemoveFolder Id="RemoveBinFolder" On="uninstall" />
               <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="BinDir" Type="integer" Value="1" KeyPath="yes" />
             </Component>
@@ -185,10 +192,16 @@
           <!-- Migrations are now embedded in pro-upgrade.exe binary -->
           <!-- No longer need to deploy migration files to disk -->
 
-          <!-- Component to remove the INSTALLFOLDER itself on uninstall -->
+          <!-- Component to remove the INSTALLFOLDER on uninstall -->
           <Component Id="InstallFolderComponent" Guid="FAFAFAFA-FAFB-FAFC-FAFD-FAFAFAFAFABC" Win64="yes">
+            <CreateFolder />
             <RemoveFolder Id="RemoveINSTALLFOLDER" On="uninstall" />
-            <RegistryValue Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="InstallFolder" Type="integer" Value="1" KeyPath="yes" />
+            <RegistryValue Root="HKLM"
+                          Key="Software\Professional SMART"
+                          Name="InstallPath"
+                          Type="string"
+                          Value="[INSTALLFOLDER]"
+                          KeyPath="yes" />
           </Component>
         </Directory>
       </Directory>
@@ -341,10 +354,6 @@
       <DialogRef Id="PrerequisiteDlg" />
       <DialogRef Id="DatabaseConfigDlg" />
 
-      <!-- Hide Reset and Disk Usage buttons in CustomizeDlg -->
-      <Publish Dialog="CustomizeDlg" Control="Reset" Property="WixUI_InstallMode" Value="Change" Order="1">0</Publish>
-      <Publish Dialog="CustomizeDlg" Control="DiskCost" Property="WixUI_InstallMode" Value="Change" Order="1">0</Publish>
-
       <!-- Run prerequisite check and load credentials BEFORE showing PrerequisiteDlg -->
       <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="CheckPrerequisitesAction" Order="1">1</Publish>
       <Publish Dialog="WelcomeDlg" Control="Next" Event="DoAction" Value="LoadEnvCredentialsAction" Order="2">1</Publish>
@@ -460,12 +469,12 @@
                   Return="check"
                   Impersonate="no" />
 
-    <!-- VBScript to stop service on uninstall -->
-    <Binary Id="StopServiceScript" SourceFile="StopService.vbs" />
+    <!-- VBScript to stop service and wait before file removal -->
+    <Binary Id="StopServiceAndWaitScript" SourceFile="StopServiceAndWait.vbs" />
 
-    <CustomAction Id="ForceStopService"
-                  BinaryKey="StopServiceScript"
-                  VBScriptCall="StopService"
+    <CustomAction Id="StopServiceAndWaitAction"
+                  BinaryKey="StopServiceAndWaitScript"
+                  VBScriptCall="StopServiceAndWait"
                   Execute="deferred"
                   Return="ignore"
                   Impersonate="no" />
@@ -501,6 +510,10 @@
       <!-- Trim properties before using them -->
       <Custom Action="TrimDatabaseProperties" After="DetectInstallationAction">NOT REMOVE="ALL"</Custom>
 
+      <!-- Stop service immediately after InstallInitialize for both upgrades and uninstalls -->
+      <!-- This runs before RemoveExistingProducts (upgrades) and before RemoveFiles (uninstalls) -->
+      <Custom Action="StopServiceAndWaitAction" After="InstallInitialize">WIX_UPGRADE_DETECTED OR (Installed AND REMOVE="ALL")</Custom>
+
       <!-- Set data for deferred action -->
       <Custom Action="SetWriteConfigData" After="InstallFiles">NOT REMOVE="ALL"</Custom>
       <!-- Write configuration file after folders are created -->
@@ -515,9 +528,6 @@
       <!-- Only run if upgrading (WIX_UPGRADE_DETECTED is set by MajorUpgrade when older version found) -->
       <Custom Action="SetUpgradeDatabaseData" After="InstallFiles">WIX_UPGRADE_DETECTED</Custom>
       <Custom Action="UpgradeDatabaseAction" After="SetUpgradeDatabaseData">WIX_UPGRADE_DETECTED</Custom>
-
-      <!-- Force stop service at the VERY START of InstallExecuteSequence during uninstall -->
-      <Custom Action="ForceStopService" After="InstallInitialize">Installed AND REMOVE="ALL"</Custom>
 
       <!-- Remove ProgramData folder after removing files -->
       <Custom Action="SetRemoveProgramDataData" After="RemoveFiles">Installed AND REMOVE="ALL"</Custom>

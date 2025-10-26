@@ -161,5 +161,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "drop_charge_amount_constraints",
             sql: include_str!("../../../migrations/029_drop_charge_amount_constraints.sql"),
         },
+        EmbeddedMigration {
+            version: "030",
+            name: "create_import_headers_table",
+            sql: include_str!("../../../migrations/030_create_import_headers_table.sql"),
+        },
     ]
 }

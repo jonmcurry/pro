@@ -91,7 +91,7 @@ Function DetectInstallation()
         LogMessage "DetectInstallation: Found pro-upgrade.exe, using it to detect installation type"
 
         Dim detectCmd
-        detectCmd = "cmd.exe /c """ & proUpgradeExe & """ detect-installation-type 2>&1"
+        detectCmd = """" & proUpgradeExe & """ detect-installation-type"
 
         Dim detectResult
         detectResult = shell.Run(detectCmd, 0, True)

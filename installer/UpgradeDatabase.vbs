@@ -146,7 +146,7 @@ Function UpgradeDatabase()
 
     ' Check current version
     LogMessage "UpgradeDatabase: Checking current database version..."
-    applyCmd = "cmd.exe /c """ & proUpgradeExe & """ check-version 2>&1"
+    applyCmd = """" & proUpgradeExe & """ check-version"
 
     applyResult = shell.Run(applyCmd, 0, True)
 
@@ -168,7 +168,7 @@ Function UpgradeDatabase()
             LogMessage "UpgradeDatabase: Created backup directory: " & programDataFolder
         End If
 
-        applyCmd = "cmd.exe /c """ & proUpgradeExe & """ backup-database --backup-dir """ & programDataFolder & """ 2>&1"
+        applyCmd = """" & proUpgradeExe & """ backup-database --backup-dir """ & programDataFolder & """"
 
         LogMessage "UpgradeDatabase: Executing backup..."
         applyResult = shell.Run(applyCmd, 0, True)
@@ -188,7 +188,7 @@ Function UpgradeDatabase()
     ' Apply pending migrations (using embedded migrations in pro-upgrade.exe)
     LogMessage "UpgradeDatabase: Applying pending database migrations using embedded migrations..."
 
-    applyCmd = "cmd.exe /c """ & proUpgradeExe & """ apply-migrations 2>&1"
+    applyCmd = """" & proUpgradeExe & """ apply-migrations"
 
     LogMessage "UpgradeDatabase: Executing: pro-upgrade apply-migrations (using embedded migrations)"
     applyResult = shell.Run(applyCmd, 0, True)
