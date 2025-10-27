@@ -3,6 +3,24 @@
 ## Schema Changes
 [] CSV headers per file per facility that indicated which data elements are being loaded
 [] Match the data elements to the field columns
+uniqueness for a claim: mrn, dos, billing provider
+same mrn, same dos, different billing provider, flag the claim - but make exceptions for things:  podiatrist, hand doctor same day then they are two different claims
+however, if you have podiatrist and then a lab, those are the same claim:  notes:  seems like same speciality, update the claims
+use the npi+taxonomy code to determine speciality - https://taxonomy.nucc.org
+more than 6 services and more than 12 dx codes would generate another 1500 claims form
+per service line you can only point up to 4 codes per dx code
+create a taxonomy lookup table for provider
+
+cms/medicare fee schedule: load from cms
+
+claims:
+patient info: demo insurance
+provider info: npi, speciality
+encounter info: dos, place of service (office, telehealth, etc.)
+codes: cpt/hcpcs -= procs, service codes
+dx codes
+modifiers (contextual details - bilateral, repeat procedure)
+financials: units, charge amount, and expected reimbursement
 
 
 ## Completed

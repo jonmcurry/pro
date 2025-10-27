@@ -166,5 +166,20 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "create_import_headers_table",
             sql: include_str!("../../../migrations/030_create_import_headers_table.sql"),
         },
+        EmbeddedMigration {
+            version: "031",
+            name: "create_delete_project_procedure",
+            sql: include_str!("../../../migrations/031_create_delete_project_procedure.sql"),
+        },
+        EmbeddedMigration {
+            version: "032",
+            name: "create_claims_detail_view",
+            sql: include_str!("../../../migrations/032_create_claims_detail_view.sql"),
+        },
+        EmbeddedMigration {
+            version: "033",
+            name: "create_field_definitions_table",
+            sql: include_str!("../../../migrations/033_create_field_definitions_table.sql"),
+        },
     ]
 }
