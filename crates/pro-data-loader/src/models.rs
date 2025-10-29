@@ -52,9 +52,12 @@ pub struct Facility {
 pub struct Provider {
     pub facility_code: String,
     pub provider_npi: String,
+    #[serde(alias = "physician_first_name", alias = "doctor_first_name")]
     pub first_name: String,
     pub last_name: String,
     pub middle_name: Option<String>,
+    #[serde(alias = "full_physician_name", alias = "physician_name", alias = "doctor_name", alias = "provider_name")]
+    pub full_name: Option<String>,
     pub credentials: Option<String>,
     pub specialty: Option<String>,
     pub taxonomy_code: Option<String>,

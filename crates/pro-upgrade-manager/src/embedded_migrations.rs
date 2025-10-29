@@ -181,5 +181,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "create_field_definitions_table",
             sql: include_str!("../../../migrations/033_create_field_definitions_table.sql"),
         },
+        EmbeddedMigration {
+            version: "034",
+            name: "add_provider_full_name",
+            sql: include_str!("../../../migrations/034_add_provider_full_name.sql"),
+        },
     ]
 }

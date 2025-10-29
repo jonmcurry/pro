@@ -335,18 +335,30 @@ async fn import_providers(
             .get(&provider.facility_code)
             .context(format!("Facility '{}' not found in map", provider.facility_code))?;
 
+        // Parse full_name if provided and first_name/last_name are empty
+        let (first_name, last_name) = if provider.first_name.is_empty() || provider.last_name.is_empty() {
+            if let Some(full_name) = &provider.full_name {
+                parse_full_name(full_name)
+            } else {
+                (provider.first_name.clone(), provider.last_name.clone())
+            }
+        } else {
+            (provider.first_name.clone(), provider.last_name.clone())
+        };
+
         sqlx::query(
             r#"
             INSERT INTO claims.provider (
-                npi, provider_type, first_name, last_name, middle_name,
+                npi, provider_type, first_name, last_name, middle_name, full_name,
                 specialty, taxonomy_code, email, is_active
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             ON CONFLICT (npi) DO UPDATE
             SET provider_type = EXCLUDED.provider_type,
                 first_name = EXCLUDED.first_name,
                 last_name = EXCLUDED.last_name,
                 middle_name = EXCLUDED.middle_name,
+                full_name = EXCLUDED.full_name,
                 specialty = EXCLUDED.specialty,
                 taxonomy_code = EXCLUDED.taxonomy_code,
                 email = EXCLUDED.email,
@@ -356,9 +368,10 @@ async fn import_providers(
         )
         .bind(&provider.provider_npi)
         .bind("Rendering") // Default provider_type since it's required
-        .bind(&provider.first_name)
-        .bind(&provider.last_name)
+        .bind(&first_name)
+        .bind(&last_name)
         .bind(&provider.middle_name)
+        .bind(&provider.full_name)
         .bind(&provider.specialty)
         .bind(&provider.taxonomy_code)
         .bind(&provider.email)
@@ -370,4 +383,33 @@ async fn import_providers(
     }
 
     Ok(count)
+}
+
+/// Parse a full name into first and last name components
+/// Simple parser that handles common formats:
+/// - "First Last"
+/// - "Last, First"
+/// - "First Middle Last" (treats everything before last word as first name)
+fn parse_full_name(full_name: &str) -> (String, String) {
+    let trimmed = full_name.trim();
+
+    // Handle "Last, First" format
+    if let Some(comma_pos) = trimmed.find(',') {
+        let last = trimmed[..comma_pos].trim();
+        let first = trimmed[comma_pos + 1..].trim();
+        return (first.to_string(), last.to_string());
+    }
+
+    // Handle "First Last" or "First Middle Last" format
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    match parts.len() {
+        0 => (String::new(), String::new()),
+        1 => (parts[0].to_string(), String::new()),
+        _ => {
+            // Everything except last word is first name
+            let first = parts[..parts.len() - 1].join(" ");
+            let last = parts[parts.len() - 1].to_string();
+            (first, last)
+        }
+    }
 }
