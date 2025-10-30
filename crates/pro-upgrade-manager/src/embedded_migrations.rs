@@ -186,5 +186,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_provider_full_name",
             sql: include_str!("../../../migrations/034_add_provider_full_name.sql"),
         },
+        EmbeddedMigration {
+            version: "035",
+            name: "add_medical_record_number",
+            sql: include_str!("../../../migrations/035_add_medical_record_number.sql"),
+        },
     ]
 }

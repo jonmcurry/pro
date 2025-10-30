@@ -1,15 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(wmic product where \"name like ''%Professional SMART%''\" get name,version,identifyingnumber)",
-      "Bash(reg query \"HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\" /s /f \"Professional SMART\")",
-      "Bash(reg query 'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall' /s /f 'Professional SMART')",
-      "Bash(sc stop:*)",
-      "Bash(reg query 'HKLM\\SOFTWARE\\ProfessionalSMART' /v Version)",
+      "Bash(Select-Object -First 30)",
+      "Bash(powershell -Command:*)",
+      "Read(//c/Program Files/Professional SMART/bin/**)",
+      "Bash(./pro-upgrade.exe apply-migrations:*)",
+      "Bash(export DB_PASSWORD=\"ClearToFly1\")",
       "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/candle.exe\" -ext WixUtilExtension -dSolutionDir=\"/c/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
-      "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
-      "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
-      "Bash(psql:*)"
+      "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)"
     ],
     "deny": [],
     "ask": []

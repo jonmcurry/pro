@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.4.1.0"
+           Version="1.4.3.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -82,8 +82,9 @@
                               ErrorControl="normal"
                               Arguments="service" />
 
+              <!-- Do not automatically start service during install/upgrade - let user start manually -->
+              <!-- This prevents installation failure if database is not ready -->
               <ServiceControl Id="ServiceControl"
-                              Start="install"
                               Remove="uninstall"
                               Name="ProfessionalSMART" />
             </Component>
@@ -540,7 +541,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="1.2.1.0"
+                     Value="1.4.3.0"
                      KeyPath="yes" />
     </Component>
 

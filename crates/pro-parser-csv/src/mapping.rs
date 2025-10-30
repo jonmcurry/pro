@@ -306,6 +306,14 @@ impl PredefinedMappings {
                 .with_validation(ValidationRule::MaxLength(255))
         );
 
+        mapping.add_mapping(
+            FieldMapping::new("MRN".to_string(), "medical_record_number".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("Medical Record Number".to_string())
+                .with_alternate("Medical Record #".to_string())
+                .with_alternate("Chart Number".to_string())
+                .with_validation(ValidationRule::MaxLength(80))
+        );
+
         mapping
     }
 
@@ -337,6 +345,12 @@ impl PredefinedMappings {
                 .with_alternate("CHARGE".to_string())
         );
 
+        mapping.add_mapping(
+            FieldMapping::new("MRN".to_string(), "medical_record_number".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("MEDICAL RECORD NUMBER".to_string())
+                .with_alternate("MED REC NUM".to_string())
+        );
+
         mapping
     }
 
@@ -358,6 +372,12 @@ impl PredefinedMappings {
         mapping.add_mapping(
             FieldMapping::new("CPT_Code".to_string(), "procedure_code".to_string(), "service_line".to_string(), DataType::String)
                 .required()
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("MRN".to_string(), "medical_record_number".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("Medical_Record_Number".to_string())
+                .with_alternate("Chart_Number".to_string())
         );
 
         mapping
@@ -400,6 +420,14 @@ impl PredefinedMappings {
                 .with_alternate("Charges".to_string())
                 .with_alternate("Billed".to_string())
                 .with_alternate("Amount".to_string())
+        );
+
+        mapping.add_mapping(
+            FieldMapping::new("Medical Record Number".to_string(), "medical_record_number".to_string(), "encounter".to_string(), DataType::String)
+                .with_alternate("MRN".to_string())
+                .with_alternate("Chart Number".to_string())
+                .with_alternate("Medical Record #".to_string())
+                .with_alternate("Patient MRN".to_string())
         );
 
         mapping

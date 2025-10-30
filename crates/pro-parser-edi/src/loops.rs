@@ -200,6 +200,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         subscriber_state: None,
         subscriber_postal_code: None,
         subscriber_country: None,
+        medical_record_number: None,
 
         payer_entity_identifier: String::new(),
         payer_entity_type: String::new(),
@@ -326,6 +327,13 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                         diagnosis_code: code.clone(),
                         is_principal: idx == 0,
                     });
+                }
+            }
+            "REF" => {
+                let ref_seg = RefSegment::parse(segment)?;
+                match ref_seg.reference_identification_qualifier.as_str() {
+                    "EA" => claim.medical_record_number = ref_seg.reference_identification,
+                    _ => {}
                 }
             }
             _ => {}

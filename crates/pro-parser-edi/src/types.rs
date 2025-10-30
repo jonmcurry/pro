@@ -140,6 +140,9 @@ pub struct ParsedClaim {
     pub subscriber_postal_code: Option<String>,
     pub subscriber_country: Option<String>,
 
+    // Loop 2010BA - Medical Record Number (REF*EA)
+    pub medical_record_number: Option<String>,
+
     // Loop 2010BB - Payer
     pub payer_entity_identifier: String,
     pub payer_entity_type: String,

@@ -438,6 +438,7 @@ impl ClaimsProcessor {
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
         let payer_name = encounter_fields.get("payer_name").map(|s| s.as_str());
         let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
+        let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
         // Insert encounter (ONE record)
         sqlx::query(
@@ -460,9 +461,10 @@ impl ClaimsProcessor {
                 payer_name,
                 payer_responsibility_code,
                 place_of_service_code,
+                medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             "#
         )
         .bind(encounter_id)
@@ -482,6 +484,7 @@ impl ClaimsProcessor {
         .bind(payer_name)
         .bind(payer_responsibility_code)
         .bind(place_of_service)
+        .bind(medical_record_number)
         .bind("NEW")
         .execute(&mut **tx)
         .await
@@ -586,6 +589,7 @@ impl ClaimsProcessor {
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
         let payer_name = encounter_fields.get("payer_name").map(|s| s.as_str());
         let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
+        let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
         // Insert encounter
         sqlx::query(
@@ -607,9 +611,10 @@ impl ClaimsProcessor {
                 total_claim_charge_amount,
                 place_of_service_code,
                 date_of_service_from,
+                medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             "#
         )
         .bind(encounter_id)
@@ -628,6 +633,7 @@ impl ClaimsProcessor {
         .bind(total_claim_charge)
         .bind(place_of_service)
         .bind(dos_from)
+        .bind(medical_record_number)
         .bind("IMPORTED")
         .execute(&mut **tx)
         .await

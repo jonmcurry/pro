@@ -1117,6 +1117,7 @@ impl ClaimsImporter {
         let payer_id = parsed_row.encounter_fields.get("payer_id").map(|s| s.as_str());
         let payer_name = parsed_row.encounter_fields.get("payer_name").map(|s| s.as_str());
         let place_of_service = parsed_row.encounter_fields.get("place_of_service_code").map(|s| s.as_str());
+        let medical_record_number = parsed_row.encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
         // Insert encounter with all required fields
         sqlx::query(
@@ -1138,9 +1139,10 @@ impl ClaimsImporter {
                 total_claim_charge_amount,
                 place_of_service_code,
                 date_of_service_from,
+                medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
             "#
         )
         .bind(encounter_id)
@@ -1159,6 +1161,7 @@ impl ClaimsImporter {
         .bind(total_claim_charge)
         .bind(place_of_service)
         .bind(dos_from)
+        .bind(medical_record_number)
         .bind("IMPORTED")
         .execute(&mut **tx)
         .await

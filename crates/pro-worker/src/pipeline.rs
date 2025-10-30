@@ -668,6 +668,9 @@ impl IngestionPipeline {
             subscriber_postal_code: get_optional("subscriber_postal_code"),
             subscriber_country: get_optional("subscriber_country"),
 
+            // Medical Record Number
+            medical_record_number: get_optional("medical_record_number"),
+
             // Payer information
             payer_entity_identifier: "PR".to_string(), // Payer
             payer_entity_type: "2".to_string(), // Non-Person Entity
