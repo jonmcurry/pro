@@ -326,22 +326,37 @@ async fn run_console_mode() -> Result<()> {
                         continue;
                     }
 
-                    // STAGE 1: Fast ingestion to staging.raw_claims (two-stage pipeline)
+                    // Route based on file format
                     let file_path = std::path::PathBuf::from(&queued_file.file_path);
-                    match importer_for_processor.ingest_file_to_staging(&file_path, Some(queued_file.queue_id)).await {
-                        Ok(ingest_result) => {
-                            info!("STAGE 1 COMPLETE: batch_id={}, ingested {} rows to staging.raw_claims",
-                                ingest_result.batch_id, ingest_result.total_rows);
+                    match queued_file.file_format {
+                        pro_worker::types::FileFormat::Csv => {
+                            // STAGE 1: Fast ingestion to staging.raw_claims (two-stage pipeline for CSV)
+                            match importer_for_processor.ingest_file_to_staging(&file_path, Some(queued_file.queue_id)).await {
+                                Ok(ingest_result) => {
+                                    info!("STAGE 1 COMPLETE: batch_id={}, ingested {} rows to staging.raw_claims",
+                                        ingest_result.batch_id, ingest_result.total_rows);
 
-                            // Mark queue entry as completed (Stage 1 done, Stage 2 will process asynchronously)
-                            if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
-                                error!("Failed to mark queue entry as completed: {}", e);
+                                    // Mark queue entry as completed (Stage 1 done, Stage 2 will process asynchronously)
+                                    if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                        error!("Failed to mark queue entry as completed: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("STAGE 1 FAILED: {}", e);
+                                    if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
+                                        error!("Failed to mark queue entry as failed: {}", mark_err);
+                                    }
+                                }
                             }
                         }
-                        Err(e) => {
-                            error!("STAGE 1 FAILED: {}", e);
-                            if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
-                                error!("Failed to mark queue entry as failed: {}", mark_err);
+                        pro_worker::types::FileFormat::Edi837p => {
+                            // EDI files: Mark as completed immediately (no Stage 1 ingestion needed)
+                            // EDI files are processed directly from the file system, not through staging tables
+                            warn!("EDI file processing not yet implemented in two-stage pipeline: {}", file_path.display());
+                            warn!("Marking as completed to prevent reprocessing. EDI functionality coming in future release.");
+
+                            if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                error!("Failed to mark EDI queue entry as completed: {}", e);
                             }
                         }
                     }

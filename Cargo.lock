@@ -4251,6 +4251,7 @@ dependencies = [
  "pro-common",
  "pro-db",
  "pro-parser-csv",
+ "pro-parser-edi",
  "pro-worker",
  "rust_decimal",
  "serde",

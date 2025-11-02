@@ -8,6 +8,7 @@ pro-worker = { path = "../pro-worker" }
 pro-common = { path = "../pro-common" }
 pro-db = { path = "../pro-db" }
 pro-parser-csv = { path = "../pro-parser-csv" }
+pro-parser-edi = { path = "../pro-parser-edi" }
 
 # Async runtime
 tokio = { workspace = true }

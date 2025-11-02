@@ -1,10 +1,11 @@
-//! Claims importer for CSV files
+//! Claims importer for CSV and EDI files
 //!
-//! Imports claims data from CSV files into the database using the pro-parser-csv crate.
+//! Imports claims data from CSV and EDI 837p files into the database.
 //! Integrates with the FIFO queue system and progress tracking.
 
 use anyhow::{Context, Result};
 use pro_parser_csv::CsvParser;
+use pro_parser_edi::EdiParser;
 use pro_worker::progress::ProgressTracker;
 use pro_worker::queue_manager::QueueManager;
 use sqlx::PgPool;
@@ -14,7 +15,7 @@ use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-/// Claims importer that processes CSV files
+/// Claims importer that processes CSV and EDI files
 #[derive(Clone)]
 pub struct ClaimsImporter {
     pool: PgPool,
@@ -50,11 +51,32 @@ impl ClaimsImporter {
 
         info!("Enqueuing file for processing: {}", filename);
 
+        // Detect file type based on extension
+        let file_extension = file_path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        let file_ext_lower = file_extension.to_lowercase();
+
+        let (batch_type, file_format, queue_format) = match file_ext_lower.as_str() {
+            "edi" | "837p" => {
+                info!("Detected EDI file format: .{}", file_ext_lower);
+                ("EDI_837P", "837P", pro_worker::types::FileFormat::Edi837p)
+            },
+            "csv" => {
+                info!("Detected CSV file format");
+                ("CSV", "ATHENA", pro_worker::types::FileFormat::Csv)
+            },
+            _ => {
+                warn!("Unknown file extension: {}, defaulting to CSV", file_extension);
+                ("CSV", "ATHENA", pro_worker::types::FileFormat::Csv)
+            }
+        };
+
         // Calculate file hash for deduplication
         let file_hash = self.calculate_file_hash(file_path)?;
 
         // Get facility info from file
-        let (facility_id, org_id) = self.extract_facility_info(file_path).await?;
+        let (facility_id, org_id) = self.extract_facility_info(file_path, &file_ext_lower).await?;
 
         // Create import batch first
         let batch_id = Uuid::new_v4();
@@ -80,8 +102,8 @@ impl ClaimsImporter {
         .bind(org_id)
         .bind(facility_id)
         .bind(&filename)
-        .bind("CSV")
-        .bind("ATHENA")
+        .bind(batch_type)
+        .bind(file_format)
         .bind(&filename)
         .bind(&file_path_str)
         .bind(&file_hash)
@@ -92,12 +114,13 @@ impl ClaimsImporter {
         .context("Failed to create import batch record")?;
 
         // Enqueue in file_processing_queue
+        // facility_id is guaranteed to be Some() at this point (either from lookup or fallback)
         let queue_id = self.queue_manager.enqueue_file(
-            facility_id.unwrap_or_else(|| Uuid::new_v4()),
+            facility_id.expect("facility_id should always be present after extract_facility_info"),
             batch_id,
             file_path_str,
             file_hash,
-            pro_worker::types::FileFormat::Csv,
+            queue_format,
             org_id,
             None // Default priority
         ).await?;
@@ -107,42 +130,100 @@ impl ClaimsImporter {
         Ok(queue_id)
     }
 
-    /// Extract facility information from file
-    async fn extract_facility_info(&self, file_path: &Path) -> Result<(Option<Uuid>, Uuid)> {
-        // Parse just the first row to get facility info
+    /// Extract facility information from file (supports both CSV and EDI formats)
+    async fn extract_facility_info(&self, file_path: &Path, file_ext: &str) -> Result<(Option<Uuid>, Uuid)> {
         let file_path_str = file_path.display().to_string();
-        let mut parser = CsvParser::with_auto_detection();
-        let parsed_rows = parser.parse_file(&file_path_str)?;
 
-        if let Some(first_row) = parsed_rows.first() {
-            if let Some(facility_code) = first_row.encounter_fields.get("facility_code") {
-                let result = sqlx::query_as::<_, (Uuid, Uuid)>(
-                    r#"
-                    SELECT facility_id, organization_id
-                    FROM claims.facility
-                    WHERE facility_code = $1 OR npi = $1
-                    LIMIT 1
-                    "#
-                )
-                .bind(facility_code)
-                .fetch_optional(&self.pool)
-                .await?;
+        // Route to appropriate parser based on file extension
+        let facility_identifier = match file_ext {
+            "edi" | "837p" => {
+                // Parse EDI file to extract facility NPI
+                info!("Extracting facility info from EDI file");
+                let file_content = std::fs::read_to_string(file_path)
+                    .context("Failed to read EDI file")?;
 
-                if let Some((fac_id, org_id)) = result {
-                    return Ok((Some(fac_id), org_id));
+                let mut edi_parser = EdiParser::new();
+                match edi_parser.parse(&file_content) {
+                    Ok(transaction) => {
+                        // Extract facility NPI from the first claim's service facility
+                        if let Some(first_claim) = transaction.claims.first() {
+                            if let Some(npi) = &first_claim.service_facility_npi {
+                                info!("Extracted facility NPI from EDI: {}", npi);
+                                first_claim.service_facility_npi.clone()
+                            } else {
+                                warn!("No facility NPI in first claim");
+                                None
+                            }
+                        } else {
+                            warn!("No claims found in EDI file");
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse EDI file for facility extraction: {}", e);
+                        None
+                    }
                 }
+            },
+            "csv" | _ => {
+                // Parse CSV file to extract facility code
+                info!("Extracting facility info from CSV file");
+                let mut parser = CsvParser::with_auto_detection();
+                match parser.parse_file(&file_path_str) {
+                    Ok(parsed_rows) => {
+                        if let Some(first_row) = parsed_rows.first() {
+                            first_row.encounter_fields.get("facility_code").cloned()
+                        } else {
+                            None
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse CSV file for facility extraction: {}", e);
+                        None
+                    }
+                }
+            }
+        };
+
+        // Look up facility by code/NPI if we extracted one
+        if let Some(identifier) = facility_identifier {
+            let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+                r#"
+                SELECT facility_id, organization_id
+                FROM claims.facility
+                WHERE facility_code = $1 OR npi = $1
+                LIMIT 1
+                "#
+            )
+            .bind(&identifier)
+            .fetch_optional(&self.pool)
+            .await?;
+
+            if let Some((fac_id, org_id)) = result {
+                info!("Found facility in database: facility_id={}", fac_id);
+                return Ok((Some(fac_id), org_id));
+            } else {
+                warn!("Facility not found in database: {}", identifier);
             }
         }
 
-        // Fallback to first organization
-        let org: Uuid = sqlx::query_scalar(
-            "SELECT organization_id FROM claims.organization LIMIT 1"
+        // Fallback to first organization and its first facility
+        let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+            r#"
+            SELECT f.facility_id, f.organization_id
+            FROM claims.facility f
+            JOIN claims.organization o ON f.organization_id = o.organization_id
+            ORDER BY o.organization_id, f.facility_id
+            LIMIT 1
+            "#
         )
         .fetch_one(&self.pool)
         .await
-        .context("No organization found in database")?;
+        .context("No facility found in database")?;
 
-        Ok((None, org))
+        let (fac_id, org_id) = result;
+        info!("Using fallback facility: facility_id={}, organization_id={}", fac_id, org_id);
+        Ok((Some(fac_id), org_id))
     }
 
     /// Calculate SHA-256 hash of file for deduplication

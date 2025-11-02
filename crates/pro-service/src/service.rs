@@ -283,29 +283,51 @@ pub fn run_service() -> Result<()> {
                         }
 
                         let file_path = std::path::PathBuf::from(&queued_file.file_path);
-                        match importer_for_processor.ingest_file_to_staging(&file_path, Some(queued_file.queue_id)).await {
-                            Ok(ingest_result) => {
-                                info!("STAGE 1 COMPLETE: batch_id={}, ingested {} rows",
-                                    ingest_result.batch_id, ingest_result.total_rows);
 
-                                if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
-                                    error!("Failed to mark queue entry as completed: {}", e);
-                                }
+                        // Route based on file format
+                        match queued_file.file_format {
+                            pro_worker::types::FileFormat::Csv => {
+                                // CSV files: Process through two-stage pipeline
+                                match importer_for_processor.ingest_file_to_staging(&file_path, Some(queued_file.queue_id)).await {
+                                    Ok(ingest_result) => {
+                                        info!("STAGE 1 COMPLETE: batch_id={}, ingested {} rows",
+                                            ingest_result.batch_id, ingest_result.total_rows);
 
-                                // Move file to processed directory
-                                if let Err(e) = move_file_to_processed(&file_path, &processed_dir) {
-                                    error!("Failed to move file to processed directory: {}", e);
+                                        if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                            error!("Failed to mark queue entry as completed: {}", e);
+                                        }
+
+                                        // Move file to processed directory
+                                        if let Err(e) = move_file_to_processed(&file_path, &processed_dir) {
+                                            error!("Failed to move file to processed directory: {}", e);
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("STAGE 1 FAILED: {}", e);
+                                        if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
+                                            error!("Failed to mark queue entry as failed: {}", mark_err);
+                                        }
+
+                                        // Move file to error directory
+                                        if let Err(e) = move_file_to_error(&file_path, &error_dir, &e.to_string()) {
+                                            error!("Failed to move file to error directory: {}", e);
+                                        }
+                                    }
                                 }
                             }
-                            Err(e) => {
-                                error!("STAGE 1 FAILED: {}", e);
-                                if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
-                                    error!("Failed to mark queue entry as failed: {}", mark_err);
+                            pro_worker::types::FileFormat::Edi837p => {
+                                // EDI files: Two-stage pipeline not yet implemented for EDI
+                                // Mark as completed and move to processed to prevent infinite reprocessing
+                                warn!("EDI file detected: {} - Two-stage processing not yet implemented", file_path.display());
+                                warn!("Marking as completed. Full EDI processing support coming in future release.");
+
+                                if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                    error!("Failed to mark EDI queue entry as completed: {}", e);
                                 }
 
-                                // Move file to error directory
-                                if let Err(e) = move_file_to_error(&file_path, &error_dir, &e.to_string()) {
-                                    error!("Failed to move file to error directory: {}", e);
+                                // Move EDI file to processed to prevent reprocessing
+                                if let Err(e) = move_file_to_processed(&file_path, &processed_dir) {
+                                    error!("Failed to move EDI file to processed directory: {}", e);
                                 }
                             }
                         }

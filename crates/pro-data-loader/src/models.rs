@@ -35,6 +35,7 @@ pub struct Facility {
     pub region_code: String,
     pub facility_code: String,
     pub facility_name: String,
+    #[serde(alias = "npi")]
     pub facility_npi: Option<String>,
     pub tax_id: Option<String>,
     pub address_line1: Option<String>,
