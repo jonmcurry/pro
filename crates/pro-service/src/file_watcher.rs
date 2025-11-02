@@ -1,6 +1,8 @@
-//! File watcher for automatic claims file processing
+//! File watcher for automatic file processing
 //!
-//! Monitors the input directory for new CSV files and processes them automatically.
+//! Monitors the input directory for new CSV and EDI files and processes them automatically.
+//! - CSV files: Master data (organizations, facilities, providers)
+//! - EDI files: 837p claims data (.edi and .837p extensions)
 
 use anyhow::{Context, Result};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -199,7 +201,8 @@ impl FileWatcher {
     fn is_processable_file(&self, path: &Path) -> bool {
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
-            if ext_lower == "csv" {
+            // Process CSV files (master data) and EDI files (837p claims with .edi or .837p extension)
+            if ext_lower == "csv" || ext_lower == "edi" || ext_lower == "837p" {
                 return true;
             }
         }
@@ -272,8 +275,17 @@ mod tests {
         let input_dir = temp_dir.path().join("input");
         let watcher = FileWatcher::new(&input_dir).unwrap();
 
+        // CSV files (master data)
         assert!(watcher.is_processable_file(Path::new("test.csv")));
         assert!(watcher.is_processable_file(Path::new("test.CSV")));
+
+        // EDI files (837p claims - both .edi and .837p extensions)
+        assert!(watcher.is_processable_file(Path::new("claims.edi")));
+        assert!(watcher.is_processable_file(Path::new("claims.EDI")));
+        assert!(watcher.is_processable_file(Path::new("claims.837p")));
+        assert!(watcher.is_processable_file(Path::new("claims.837P")));
+
+        // Not processable
         assert!(!watcher.is_processable_file(Path::new("test.txt")));
         assert!(!watcher.is_processable_file(Path::new("test.xlsx")));
     }
