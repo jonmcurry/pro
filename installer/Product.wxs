@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="1.4.3.0"
+           Version="1.5.0.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -96,8 +96,13 @@
                     Checksum="yes" />
             </Component>
 
-            <!-- pro-data-loader.exe removed (CLI version not needed) -->
-            <!-- pro-data-loader-gui.exe kept (GUI version needed) -->
+            <!-- Data Loader executables: both CLI and GUI -->
+            <Component Id="DataLoaderExecutable" Guid="3A3A3A3A-3B3B-3C3C-3D3D-3E3E3E3E3E3E" Win64="yes">
+              <File Id="ProDataLoaderExe"
+                    Source="$(var.SolutionDir)target\release\pro-data-loader.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
 
             <Component Id="DataLoaderGuiExecutable" Guid="4A4A4A4A-4B4B-4C4C-4D4D-4E4E4E4E4E4E" Win64="yes">
               <File Id="ProDataLoaderGuiExe"
@@ -258,11 +263,18 @@
                       Target="[BinFolder]pro-setup.exe"
                       WorkingDirectory="INSTALLFOLDER" />
 
-            <Shortcut Id="DataLoaderShortcut"
-                      Name="Load Master Data"
-                      Description="Load organizations, facilities, and providers from CSV"
+            <Shortcut Id="DataLoaderGuiShortcut"
+                      Name="Load Master Data (GUI)"
+                      Description="Load organizations, facilities, and providers from CSV - Graphical Interface"
                       Target="[BinFolder]pro-data-loader-gui.exe"
                       WorkingDirectory="INSTALLFOLDER" />
+
+            <Shortcut Id="DataLoaderCliShortcut"
+                      Name="Load Master Data (CLI)"
+                      Description="Load organizations, facilities, and providers from CSV - Command Line"
+                      Target="[SystemFolder]cmd.exe"
+                      Arguments="/k cd /d &quot;[BinFolder]&quot; &amp;&amp; echo Professional SMART Data Loader CLI &amp;&amp; echo. &amp;&amp; echo Usage: pro-data-loader.exe --help &amp;&amp; echo."
+                      WorkingDirectory="BinFolder" />
 
             <Shortcut Id="DocumentationShortcut"
                       Name="Documentation"
@@ -302,7 +314,7 @@
                Absent="disallow">
         <ComponentRef Id="MainExecutable" />
         <ComponentRef Id="SetupExecutable" />
-        <!-- pro-data-loader.exe removed (CLI not needed) -->
+        <ComponentRef Id="DataLoaderExecutable" />
         <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="UpgradeExecutable" />
         <ComponentRef Id="BinDir" />
@@ -541,7 +553,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="1.4.3.0"
+                     Value="1.5.0.0"
                      KeyPath="yes" />
     </Component>
 

@@ -1,0 +1,327 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+    <Product Id="{714A302D-D62F-48CA-A72B-EAEB52A7642A}" Codepage="1252" Language="1033" Manufacturer="Professional SMART Team" Name="Professional SMART" UpgradeCode="{9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E}" Version="1.4.3.0">
+        <Package Comments="Automated claims processing, validation, and flagging system for healthcare providers" Compressed="yes" Description="Professional SMART Claims Processing System" InstallerVersion="500" Languages="1033" Manufacturer="Professional SMART Team" Platform="x64" />
+        <Binary Id="CheckPrerequisitesScript" SourceFile="extracted\Binary\CheckPrerequisitesScript" />
+        <Binary Id="WriteConfigScript" SourceFile="extracted\Binary\WriteConfigScript" />
+        <Binary Id="DetectInstallationScript" SourceFile="extracted\Binary\DetectInstallationScript" />
+        <Binary Id="LoadEnvCredentialsScript" SourceFile="extracted\Binary\LoadEnvCredentialsScript" />
+        <Binary Id="TrimPropertiesScript" SourceFile="extracted\Binary\TrimPropertiesScript" />
+        <Binary Id="CreateDatabaseScript" SourceFile="extracted\Binary\CreateDatabaseScript" />
+        <Binary Id="UpgradeDatabaseScript" SourceFile="extracted\Binary\UpgradeDatabaseScript" />
+        <Binary Id="StopServiceAndWaitScript" SourceFile="extracted\Binary\StopServiceAndWaitScript" />
+        <Binary Id="RemoveProgramDataScript" SourceFile="extracted\Binary\RemoveProgramDataScript" />
+        <CustomAction Id="CheckPrerequisitesAction" BinaryKey="CheckPrerequisitesScript" VBScriptCall="CheckPrerequisites" />
+        <CustomAction Id="LoadEnvCredentialsAction" BinaryKey="LoadEnvCredentialsScript" VBScriptCall="LoadEnvCredentials" />
+        <CustomAction Id="SetWriteConfigData" Property="WriteConfigAction" Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]|[CommonAppDataFolder]" />
+        <CustomAction Id="WriteConfigAction" BinaryKey="WriteConfigScript" VBScriptCall="WriteConfig" Execute="deferred" Impersonate="no" />
+        <CustomAction Id="DetectInstallationAction" BinaryKey="DetectInstallationScript" VBScriptCall="DetectInstallation" Return="ignore" />
+        <CustomAction Id="TrimDatabaseProperties" BinaryKey="TrimPropertiesScript" VBScriptCall="TrimDatabaseProperties" />
+        <CustomAction Id="SetCreateDatabaseData" Property="CreateDatabaseAction" Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]" />
+        <CustomAction Id="CreateDatabaseAction" BinaryKey="CreateDatabaseScript" VBScriptCall="CreateDatabase" Execute="deferred" Impersonate="no" />
+        <CustomAction Id="SetUpgradeDatabaseData" Property="UpgradeDatabaseAction" Value="[DB_HOST]|[DB_PORT]|[DB_NAME]|[DB_USER]|[DB_PASSWORD]|[INSTALLFOLDER]|[CREATE_BACKUP]" />
+        <CustomAction Id="UpgradeDatabaseAction" BinaryKey="UpgradeDatabaseScript" VBScriptCall="UpgradeDatabase" Execute="deferred" Impersonate="no" />
+        <CustomAction Id="StopServiceAndWaitAction" BinaryKey="StopServiceAndWaitScript" VBScriptCall="StopServiceAndWait" Return="ignore" Execute="deferred" Impersonate="no" />
+        <CustomAction Id="SetRemoveProgramDataData" Property="RemoveProgramDataAction" Value="[CommonAppDataFolder]" />
+        <CustomAction Id="RemoveProgramDataAction" BinaryKey="RemoveProgramDataScript" VBScriptCall="RemoveProgramData" Return="ignore" Execute="deferred" Impersonate="no" />
+        <Directory Id="TARGETDIR" Name="SourceDir">
+            <Component Id="VersionRegistryKey" Guid="{7E7E7E7E-7F7F-7A7A-7B7B-7C7C7C7C7C7C}">
+                <RegistryValue Id="reg40F5184FDA42C999787F7F801BC5F8A8" Root="HKLM" Key="SOFTWARE\ProfessionalSMART" Name="Version" Value="1.4.3.0" Type="string" KeyPath="yes" />
+            </Component>
+            <Directory Id="ProgramFiles64Folder">
+                <Directory Id="INSTALLFOLDER" Name="Professional SMART" ShortName="qtazp83g">
+                    <Component Id="InstallFolderComponent" Guid="{FAFAFAFA-FAFB-FAFC-FAFD-FAFAFAFAFABC}" Win64="yes">
+                        <CreateFolder Directory="INSTALLFOLDER" />
+                        <RegistryValue Id="reg12B97A41F2404BD0DF7792DCF005B2C0" Root="HKLM" Key="Software\Professional SMART" Name="InstallPath" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes" />
+                        <RemoveFolder Id="RemoveINSTALLFOLDER" Directory="INSTALLFOLDER" On="uninstall" />
+                    </Component>
+                    <Directory Id="BinFolder" Name="bin">
+                        <Component Id="MainExecutable" Guid="{1A1A1A1A-1B1B-1C1C-1D1D-1E1E1E1E1E1E}" Win64="yes">
+                            <File Id="ProServiceExe" Name="pro-service.exe" KeyPath="yes" ShortName="aonua8i4.exe" Checksum="yes" DiskId="1" Source="extracted\File\ProServiceExe" />
+                            <ServiceControl Id="ServiceControl" Name="ProfessionalSMART" Remove="uninstall" />
+                            <ServiceInstall Id="ServiceInstaller" Name="ProfessionalSMART" DisplayName="Professional SMART Claims Processing Service" Type="ownProcess" Start="auto" ErrorControl="normal" Account="LocalSystem" Arguments="service" Description="Automated claims processing, validation, and flagging system for healthcare providers" />
+                        </Component>
+                        <Component Id="SetupExecutable" Guid="{2B2B2B2B-2C2C-2D2D-2E2E-2F2F2F2F2F2F}" Win64="yes">
+                            <File Id="ProSetupExe" Name="pro-setup.exe" KeyPath="yes" ShortName="ibmmnfwd.exe" Checksum="yes" DiskId="1" Source="extracted\File\ProSetupExe" />
+                        </Component>
+                        <Component Id="DataLoaderExecutable" Guid="{3A3A3A3A-3B3B-3C3C-3D3D-3E3E3E3E3E3E}" Win64="yes">
+                            <File Id="ProDataLoaderExe" Name="pro-data-loader.exe" KeyPath="yes" ShortName="aglgkesh.exe" Checksum="yes" DiskId="1" Source="extracted\File\ProDataLoaderExe" />
+                        </Component>
+                        <Component Id="DataLoaderGuiExecutable" Guid="{4A4A4A4A-4B4B-4C4C-4D4D-4E4E4E4E4E4E}" Win64="yes">
+                            <File Id="ProDataLoaderGuiExe" Name="pro-data-loader-gui.exe" KeyPath="yes" ShortName="cdikzxrn.exe" Checksum="yes" DiskId="1" Source="extracted\File\ProDataLoaderGuiExe" />
+                        </Component>
+                        <Component Id="UpgradeExecutable" Guid="{5A5A5A5A-5B5B-5C5C-5D5D-5E5E5E5E5E5E}" Win64="yes">
+                            <File Id="ProUpgradeExe" Name="pro-upgrade.exe" KeyPath="yes" ShortName="okkr6t6r.exe" Checksum="yes" DiskId="1" Source="extracted\File\ProUpgradeExe" />
+                        </Component>
+                        <Component Id="BinDir" Guid="{BABABABA-BABB-BABC-BABD-BABABABABABC}" Win64="yes">
+                            <CreateFolder Directory="BinFolder" />
+                            <RegistryValue Id="reg0FC5D918D5C77D75F046B11B49A1FCF5" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="BinDir" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFile Id="RemoveAllBinFiles" Directory="BinFolder" Name="*.*" On="uninstall" />
+                            <RemoveFolder Id="RemoveBinFolder" Directory="BinFolder" On="uninstall" />
+                        </Component>
+                    </Directory>
+                    <Directory Id="DocsFolder" Name="docs">
+                        <Component Id="Documentation" Guid="{3C3C3C3C-3D3D-3E3E-3F3F-4A4A4A4A4A4A}" Win64="yes">
+                            <File Id="InstallationDoc" Name="INSTALLATION.md" KeyPath="yes" ShortName="wwps10rp.md" DiskId="1" Source="extracted\File\InstallationDoc" />
+                            <File Id="ConfigurationDoc" Name="CONFIGURATION.md" ShortName="ug8f24a2.md" DiskId="1" Source="extracted\File\ConfigurationDoc" />
+                            <File Id="DatabaseSetupDoc" Name="DATABASE_SETUP.md" ShortName="7xnpuegx.md" DiskId="1" Source="extracted\File\DatabaseSetupDoc" />
+                            <File Id="PerformanceTuningDoc" Name="PERFORMANCE_TUNING.md" ShortName="nzjpqeun.md" DiskId="1" Source="extracted\File\PerformanceTuningDoc" />
+                            <File Id="LicenseFile" Name="LICENSE" DiskId="1" Source="extracted\File\LicenseFile" />
+                        </Component>
+                    </Directory>
+                    <Directory Id="ConfigFolder" Name="config">
+                        <Component Id="ConfigTemplates" Guid="{4B4B4B4B-4C4C-4D4D-4E4E-4F4F4F4F4F4F}" Win64="yes">
+                            <File Id="EnvTemplate" Name=".env.template" KeyPath="yes" ShortName="vbvx1ook.tem" DiskId="1" Source="extracted\File\EnvTemplate" />
+                        </Component>
+                    </Directory>
+                    <Directory Id="DataFolder" Name="data">
+                        <Component Id="DataDir" Guid="{DADADADA-DADB-DADC-DADD-DADADADADADB}" Win64="yes">
+                            <CreateFolder Directory="DataFolder" />
+                            <RegistryValue Id="reg219FD8355276C77988A0FA634275D29C" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="DataDir" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFolder Id="RemoveDataFolder" Directory="DataFolder" On="uninstall" />
+                        </Component>
+                        <Directory Id="InputFolder" Name="input">
+                            <Component Id="InputDir" Guid="{5C5C5C5C-5D5D-5E5E-5F5F-6A6A6A6A6A6A}" Win64="yes">
+                                <CreateFolder Directory="InputFolder" />
+                                <RegistryValue Id="regFCFDD4EEEEE7BD16EB407E7E22CF679E" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="InputDir" Value="1" Type="integer" KeyPath="yes" />
+                                <RemoveFile Id="RemoveInputFiles" Directory="InputFolder" Name="*.*" On="uninstall" />
+                                <RemoveFolder Id="RemoveInputFolder" Directory="InputFolder" On="uninstall" />
+                            </Component>
+                        </Directory>
+                        <Directory Id="ProcessedFolder" Name="processed" ShortName="e5j3uzzs">
+                            <Component Id="ProcessedDir" Guid="{6B6B6B6B-6C6C-6D6D-6E6E-6F6F6F6F6F6F}" Win64="yes">
+                                <CreateFolder Directory="ProcessedFolder" />
+                                <RegistryValue Id="reg7DB41E4DA6E07E1C71F69F815AC93127" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="ProcessedDir" Value="1" Type="integer" KeyPath="yes" />
+                                <RemoveFile Id="RemoveProcessedFiles" Directory="ProcessedFolder" Name="*.*" On="uninstall" />
+                                <RemoveFolder Id="RemoveProcessedFolder" Directory="ProcessedFolder" On="uninstall" />
+                            </Component>
+                        </Directory>
+                        <Directory Id="ErrorFolder" Name="error">
+                            <Component Id="ErrorDir" Guid="{7C7C7C7C-7D7D-7E7E-7F7F-8A8A8A8A8A8A}" Win64="yes">
+                                <CreateFolder Directory="ErrorFolder" />
+                                <RegistryValue Id="reg0476762366EA8A8F3A57D2852E9BE435" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="ErrorDir" Value="1" Type="integer" KeyPath="yes" />
+                                <RemoveFile Id="RemoveErrorFiles" Directory="ErrorFolder" Name="*.*" On="uninstall" />
+                                <RemoveFolder Id="RemoveErrorFolder" Directory="ErrorFolder" On="uninstall" />
+                            </Component>
+                        </Directory>
+                    </Directory>
+                    <Directory Id="LogsFolder" Name="logs">
+                        <Component Id="LogsDir" Guid="{8B8B8B8B-8C8C-8D8D-8E8E-8F8F8F8F8F8F}" Win64="yes">
+                            <CreateFolder Directory="LogsFolder" />
+                            <RegistryValue Id="regD1B7CF387BBA33D1F195BDC84B014F96" Root="HKCU" Key="Software\ProfessionalSMART\Folders" Name="LogsDir" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFile Id="RemoveLogFiles" Directory="LogsFolder" Name="*.*" On="uninstall" />
+                            <RemoveFolder Id="RemoveLogsFolder" Directory="LogsFolder" On="uninstall" />
+                        </Component>
+                    </Directory>
+                </Directory>
+            </Directory>
+            <Directory Id="CommonAppDataFolder">
+                <Directory Id="ProgramDataFolder" Name="Professional SMART" ShortName="brswv6ni">
+                    <Component Id="ProgramDataRoot" Guid="{CFCFCFCF-D0D0-D1D1-D2D2-D3D3D3D3D3D3}">
+                        <CreateFolder Directory="ProgramDataFolder">
+                            <Permission User="Users" GenericAll="yes" />
+                        </CreateFolder>
+                        <RegistryValue Id="reg7F57AE697F55B5ABA4AA32FAFB8F164E" Root="HKCU" Key="Software\ProfessionalSMART" Name="ProgramDataRoot" Value="1" Type="integer" KeyPath="yes" />
+                        <RemoveFolder Id="RemoveProgramDataRoot" Directory="ProgramDataFolder" On="uninstall" />
+                    </Component>
+                    <Directory Id="ProgramDataConfigFolder" Name="config">
+                        <Component Id="ProgramDataConfig" Guid="{9C9C9C9C-9D9D-9E9E-9F9F-AAAAAAAAAAAA}">
+                            <CreateFolder Directory="ProgramDataConfigFolder">
+                                <Permission User="Users" GenericAll="yes" />
+                            </CreateFolder>
+                            <RegistryValue Id="reg6BA360535EF56BE85E3A25F35B76A72F" Root="HKCU" Key="Software\ProfessionalSMART" Name="ConfigFolder" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFolder Id="RemoveProgramDataConfig" Directory="ProgramDataConfigFolder" On="uninstall" />
+                        </Component>
+                    </Directory>
+                    <Directory Id="ProgramDataLogsFolder" Name="logs">
+                        <Component Id="ProgramDataLogs" Guid="{ABABABAB-ACAC-ADAD-AEAE-AFAFAFAFAFAF}">
+                            <CreateFolder Directory="ProgramDataLogsFolder">
+                                <Permission User="Users" GenericAll="yes" />
+                            </CreateFolder>
+                            <RegistryValue Id="reg9BEF4F17166ADDC42BBD203A1BE7F326" Root="HKCU" Key="Software\ProfessionalSMART" Name="LogsFolder" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFolder Id="RemoveProgramDataLogs" Directory="ProgramDataLogsFolder" On="uninstall" />
+                        </Component>
+                    </Directory>
+                    <Directory Id="ProgramDataBackupsFolder" Name="backups">
+                        <Component Id="ProgramDataBackups" Guid="{6F6F6F6F-6A6A-6B6B-6C6C-6D6D6D6D6D6D}">
+                            <CreateFolder Directory="ProgramDataBackupsFolder">
+                                <Permission User="Users" GenericAll="yes" />
+                            </CreateFolder>
+                            <RegistryValue Id="reg8BB7D281632929D99F613674EFB75609" Root="HKCU" Key="Software\ProfessionalSMART" Name="BackupsFolder" Value="1" Type="integer" KeyPath="yes" />
+                            <RemoveFolder Id="RemoveProgramDataBackups" Directory="ProgramDataBackupsFolder" On="uninstall" />
+                        </Component>
+                    </Directory>
+                </Directory>
+            </Directory>
+            <Directory Id="ProgramMenuFolder">
+                <Directory Id="ApplicationProgramsFolder" Name="Professional SMART" ShortName="l_ioi_si">
+                    <Component Id="ApplicationShortcuts" Guid="{BCBCBCBC-BDBD-BEBE-BFBF-CCCCCCCCCCCC}">
+                        <RegistryValue Id="regD17E362D4ED3EE3A13F79D47E323BB47" Root="HKCU" Key="Software\ProfessionalSMART" Name="installed" Value="1" Type="integer" KeyPath="yes" />
+                        <RemoveFolder Id="ApplicationProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+                        <Shortcut Id="ConfigWizardShortcut" Directory="ApplicationProgramsFolder" Name="Configuration Wizard" ShortName="jlofbamy" Description="Configure Professional SMART settings" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+                        <Shortcut Id="DataLoaderGuiShortcut" Directory="ApplicationProgramsFolder" Name="Load Master Data (GUI)" ShortName="hq6xlyxl" Description="Load organizations, facilities, and providers from CSV - Graphical Interface" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+                        <Shortcut Id="DataLoaderCliShortcut" Directory="ApplicationProgramsFolder" Name="Load Master Data (CLI)" ShortName="hqprkhyx" Description="Load organizations, facilities, and providers from CSV - Command Line" Arguments="/k cd /d &quot;[BinFolder]&quot; &amp;&amp; echo Professional SMART Data Loader CLI &amp;&amp; echo. &amp;&amp; echo Usage: pro-data-loader.exe --help &amp;&amp; echo." WorkingDirectory="BinFolder" Advertise="yes" />
+                        <Shortcut Id="DocumentationShortcut" Directory="ApplicationProgramsFolder" Name="Documentation" ShortName="akyuu5gf" Target="[DocsFolder]" Description="Professional SMART documentation" />
+                        <Shortcut Id="UninstallShortcut" Directory="ApplicationProgramsFolder" Name="Uninstall Professional SMART" ShortName="ykvgirmq" Description="Uninstall Professional SMART" Arguments="/x [ProductCode]" Advertise="yes" />
+                    </Component>
+                </Directory>
+            </Directory>
+        </Directory>
+        <Feature Id="Complete" ConfigurableDirectory="INSTALLFOLDER" Description="Complete installation of Professional SMART claims processing system" Display="expand" Level="1" Title="Professional SMART">
+            <Feature Id="MainApplication" Absent="disallow" Description="Main application binaries and service" Level="1" Title="Core Application">
+                <ComponentRef Id="MainExecutable" />
+                <ComponentRef Id="SetupExecutable" />
+                <ComponentRef Id="DataLoaderExecutable" />
+                <ComponentRef Id="DataLoaderGuiExecutable" />
+                <ComponentRef Id="UpgradeExecutable" />
+                <ComponentRef Id="BinDir" />
+                <ComponentRef Id="InputDir" />
+                <ComponentRef Id="ProcessedDir" />
+                <ComponentRef Id="ErrorDir" />
+                <ComponentRef Id="DataDir" />
+                <ComponentRef Id="LogsDir" />
+                <ComponentRef Id="InstallFolderComponent" />
+                <ComponentRef Id="ProgramDataRoot" />
+                <ComponentRef Id="ProgramDataConfig" />
+                <ComponentRef Id="ProgramDataLogs" />
+                <ComponentRef Id="ProgramDataBackups" />
+                <ComponentRef Id="VersionRegistryKey" />
+            </Feature>
+            <Feature Id="Documentation" Description="Installation guides, configuration reference, and troubleshooting" Level="1" Title="Documentation">
+                <ComponentRef Id="Documentation" />
+            </Feature>
+            <Feature Id="ConfigTemplates" Description="Example configuration files" Level="1" Title="Configuration Templates">
+                <ComponentRef Id="ConfigTemplates" />
+            </Feature>
+            <Feature Id="StartMenuShortcuts" Description="Shortcuts in the Start Menu" Level="1" Title="Start Menu Shortcuts">
+                <ComponentRef Id="ApplicationShortcuts" />
+            </Feature>
+        </Feature>
+        <MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version of Professional SMART is already installed." Schedule="afterInstallFinalize" />
+        <Media Id="1" Cabinet="cab1.cab" EmbedCab="yes" />
+        <Property Id="DB_HOST" Value="localhost" />
+        <Property Id="DB_PORT" Value="5432" />
+        <Property Id="DB_NAME" Value="professional_smart" />
+        <Property Id="DB_USER" Value="postgres" />
+        <Property Id="ALLUSERS" Value="1" />
+        <Property Id="PREREQ_PSQL_STATUS" Value="CHECKING" />
+        <Property Id="PREREQ_PGSERVICE_STATUS" Value="CHECKING" />
+        <Property Id="PREREQ_DISK_STATUS" Value="CHECKING" />
+        <Property Id="ARPURLINFOABOUT" Value="https://github.com/professional-smart" />
+        <Property Id="ARPCONTACT" Value="support@professional-smart.com" />
+        <Property Id="ARPCOMMENTS" Value="Healthcare claims processing system with comprehensive rules engine and RVU-based payment calculations" />
+        <Property Id="INSTALLMODE" Value="FRESH" />
+        <Property Id="CREATE_BACKUP" Value="1" />
+        <Property Id="ENV_CREDENTIALS_LOADED" Value="0" />
+        <Property Id="MSIRESTARTMANAGERCONTROL" Value="Disable" />
+        <Property Id="REBOOT" Value="ReallySuppress" />
+        <Property Id="PREREQ_MESSAGE" Value="Checking prerequisites..." />
+        <Property Id="WIX_DOWNGRADE_DETECTED" Secure="yes" />
+        <Property Id="WIX_UPGRADE_DETECTED" Secure="yes" />
+        <Property Id="DB_PASSWORD" Hidden="yes" />
+        <UI>
+            <Dialog Id="PrerequisiteDlg" X="50" Y="50" Width="370" Height="270" Title="[ProductName] - Prerequisites Check">
+                <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" TabSkip="no" Disabled="yes" />
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&amp;Back" TabSkip="no">
+                    <Publish Event="NewDialog" Value="WelcomeDlg">1</Publish>
+                </Control>
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Text="&amp;Next" TabSkip="no" Default="yes">
+                    <Publish Event="NewDialog" Value="CustomizeDlg">1</Publish>
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Text="Cancel" TabSkip="no" Cancel="yes">
+                    <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+                </Control>
+                <Control Id="Description" Type="Text" X="25" Y="23" Width="340" Height="15" Text="Checking system requirements for Professional SMART" TabSkip="yes" Transparent="yes" NoPrefix="yes" />
+                <Control Id="Title" Type="Text" X="15" Y="6" Width="340" Height="15" Text="{\WixUI_Font_Title}Prerequisites Check" TabSkip="yes" Transparent="yes" NoPrefix="yes" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" TabSkip="yes" Disabled="yes" />
+                <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" TabSkip="yes" Disabled="yes" />
+                <Control Id="PostgreSQLLabel" Type="Text" X="25" Y="60" Width="250" Height="15" Text="PostgreSQL (psql command):" TabSkip="yes" />
+                <Control Id="PostgreSQLStatus" Type="Text" X="280" Y="60" Width="70" Height="15" Text="[PREREQ_PSQL_STATUS]" TabSkip="yes">
+                    <Condition Action="show">PREREQ_PSQL_STATUS</Condition>
+                </Control>
+                <Control Id="PostgreSQLServiceLabel" Type="Text" X="25" Y="80" Width="250" Height="15" Text="PostgreSQL Service:" TabSkip="yes" />
+                <Control Id="PostgreSQLServiceStatus" Type="Text" X="280" Y="80" Width="70" Height="15" Text="[PREREQ_PGSERVICE_STATUS]" TabSkip="yes">
+                    <Condition Action="show">PREREQ_PGSERVICE_STATUS</Condition>
+                </Control>
+                <Control Id="DiskSpaceLabel" Type="Text" X="25" Y="100" Width="250" Height="15" Text="Disk Space (500 MB required):" TabSkip="yes" />
+                <Control Id="DiskSpaceStatus" Type="Text" X="280" Y="100" Width="70" Height="15" Text="[PREREQ_DISK_STATUS]" TabSkip="yes">
+                    <Condition Action="show">PREREQ_DISK_STATUS</Condition>
+                </Control>
+                <Control Id="StatusMessage" Type="Text" X="25" Y="130" Width="320" Height="40" Text="[PREREQ_MESSAGE]" TabSkip="yes" />
+                <Control Id="WarningText" Type="Text" X="25" Y="180" Width="320" Height="30" Text="Note: PostgreSQL must be installed and running for database creation to succeed. The installer will continue, but you may need to create the database manually if PostgreSQL is not available." TabSkip="yes" />
+            </Dialog>
+            <Dialog Id="DatabaseConfigDlg" X="50" Y="50" Width="370" Height="270" Title="[ProductName] - Database Configuration">
+                <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" Text="WixUI_Bmp_Banner" TabSkip="no" Disabled="yes" />
+                <Control Id="HostEdit" Type="Edit" X="130" Y="58" Width="220" Height="18" Property="DB_HOST" TabSkip="no" />
+                <Control Id="PortEdit" Type="Edit" X="130" Y="83" Width="220" Height="18" Property="DB_PORT" TabSkip="no" />
+                <Control Id="NameEdit" Type="Edit" X="130" Y="108" Width="220" Height="18" Property="DB_NAME" TabSkip="no" />
+                <Control Id="UserEdit" Type="Edit" X="130" Y="133" Width="220" Height="18" Property="DB_USER" TabSkip="no" />
+                <Control Id="PasswordEdit" Type="Edit" X="130" Y="158" Width="220" Height="18" Property="DB_PASSWORD" TabSkip="no" Password="yes" />
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="&amp;Back" TabSkip="no">
+                    <Publish Event="NewDialog" Value="CustomizeDlg">1</Publish>
+                </Control>
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Text="&amp;Next" TabSkip="no" Default="yes">
+                    <Publish Event="NewDialog" Value="VerifyReadyDlg">1</Publish>
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Text="Cancel" TabSkip="no" Cancel="yes">
+                    <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+                </Control>
+                <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Text="Please enter your PostgreSQL database connection details." TabSkip="yes" Transparent="yes" NoPrefix="yes" />
+                <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Text="{\WixUI_Font_Title}Database Configuration" TabSkip="yes" Transparent="yes" NoPrefix="yes" />
+                <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" TabSkip="yes" Disabled="yes" />
+                <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" TabSkip="yes" Disabled="yes" />
+                <Control Id="HostLabel" Type="Text" X="20" Y="60" Width="100" Height="15" Text="Database Host:" TabSkip="yes" />
+                <Control Id="PortLabel" Type="Text" X="20" Y="85" Width="100" Height="15" Text="Database Port:" TabSkip="yes" />
+                <Control Id="NameLabel" Type="Text" X="20" Y="110" Width="100" Height="15" Text="Database Name:" TabSkip="yes" />
+                <Control Id="UserLabel" Type="Text" X="20" Y="135" Width="100" Height="15" Text="Database User:" TabSkip="yes" />
+                <Control Id="PasswordLabel" Type="Text" X="20" Y="160" Width="100" Height="15" Text="Database Password:" TabSkip="yes" />
+                <Control Id="HelpText" Type="Text" X="20" Y="190" Width="330" Height="35" Text="These settings will be saved to the configuration file. Database schemas will be created automatically during setup." TabSkip="yes" />
+            </Dialog>
+        </UI>
+        <UIRef Id="WixUI_FeatureTree" />
+        <InstallExecuteSequence>
+            <Custom Action="DetectInstallationAction" Sequence="1001">1</Custom>
+            <Custom Action="TrimDatabaseProperties" Sequence="1002">NOT REMOVE="ALL"</Custom>
+            <Custom Action="StopServiceAndWaitAction" Sequence="1502">WIX_UPGRADE_DETECTED OR (Installed AND REMOVE="ALL")</Custom>
+            <Custom Action="SetRemoveProgramDataData" Sequence="3501">Installed AND REMOVE="ALL"</Custom>
+            <Custom Action="RemoveProgramDataAction" Sequence="3502">Installed AND REMOVE="ALL"</Custom>
+            <Custom Action="SetUpgradeDatabaseData" Sequence="4001">WIX_UPGRADE_DETECTED</Custom>
+            <Custom Action="UpgradeDatabaseAction" Sequence="4002">WIX_UPGRADE_DETECTED</Custom>
+            <Custom Action="SetWriteConfigData" Sequence="4003">NOT REMOVE="ALL"</Custom>
+            <Custom Action="WriteConfigAction" Sequence="4004">NOT REMOVE="ALL"</Custom>
+            <Custom Action="SetCreateDatabaseData" Sequence="4005">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
+            <Custom Action="CreateDatabaseAction" Sequence="4006">NOT Installed AND NOT WIX_UPGRADE_DETECTED</Custom>
+            <LaunchConditions Sequence="100" />
+            <FindRelatedProducts Sequence="25" />
+            <ValidateProductID Sequence="700" />
+            <CostInitialize Sequence="800" />
+            <FileCost Sequence="900" />
+            <CostFinalize Sequence="1000" />
+            <MigrateFeatureStates Sequence="1200" />
+            <InstallValidate Sequence="1400" />
+            <InstallInitialize Sequence="1500" />
+            <ProcessComponents Sequence="1600" />
+            <UnpublishFeatures Sequence="1800" />
+            <StopServices Sequence="1900">VersionNT</StopServices>
+            <DeleteServices Sequence="2000">VersionNT</DeleteServices>
+            <RemoveRegistryValues Sequence="2600" />
+            <RemoveShortcuts Sequence="3200" />
+            <RemoveFiles Sequence="3500" />
+            <RemoveFolders Sequence="3600" />
+            <CreateFolders Sequence="3700" />
+            <InstallFiles Sequence="4000" />
+            <CreateShortcuts Sequence="4500" />
+            <WriteRegistryValues Sequence="5000" />
+            <InstallServices Sequence="5800">VersionNT</InstallServices>
+            <StartServices Sequence="5900">VersionNT</StartServices>
+            <RegisterUser Sequence="6000" />
+            <RegisterProduct Sequence="6100" />
+            <PublishFeatures Sequence="6300" />
+            <PublishProduct Sequence="6400" />
+            <InstallFinalize Sequence="6600" />
+        </InstallExecuteSequence>
+        <InstallUISequence>
+            <Custom Action="DetectInstallationAction" After="CostFinalize">1</Custom>
+        </InstallUISequence>
+    </Product>
+</Wix>

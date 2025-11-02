@@ -147,9 +147,35 @@ The log automatically scrolls to show the latest entries and keeps the last 100 
 
 ## Troubleshooting
 
-### Application Won't Start
+### Application Won't Start on Windows Server
+
+**IMPORTANT**: If the GUI doesn't open on Windows Server, this is usually due to missing dependencies.
+
+**Quick Fix** (Run as Administrator):
+```powershell
+# Navigate to scripts directory
+cd "C:\Program Files\Professional SMART\scripts"
+
+# Run diagnostic and fix script
+.\fix-gui-dependencies.ps1
+```
+
+**Common causes:**
+1. **Missing Visual C++ Redistributables** - Install from: https://aka.ms/vs/17/release/vc_redist.x64.exe
+2. **Server Core edition** - GUI requires Desktop Experience
+3. **Missing graphics drivers** - Ensure OpenGL support is available
+
+**Alternative**: Use the CLI version which has no graphics dependencies:
+```powershell
+pro-data-loader.exe --org-file "orgs.csv" --region-file "regions.csv" --facility-file "facilities.csv"
+```
+
+See [GUI_TROUBLESHOOTING_WINDOWS_SERVER.md](../../docs/GUI_TROUBLESHOOTING_WINDOWS_SERVER.md) for detailed troubleshooting steps.
+
+### Application Won't Start (General)
 - Check if all required DLLs are present
 - Try running from command line to see error messages
+- Run the diagnostic script: `scripts\fix-gui-dependencies.ps1`
 
 ### Files Won't Load
 - Verify CSV files are not open in Excel or another program
