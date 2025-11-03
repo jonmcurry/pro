@@ -206,7 +206,11 @@ impl DmgSegment {
         }
 
         let birth_date = if let Some(date_str) = segment.get_optional(1) {
-            Some(parse_edi_date(&date_str)?)
+            if date_str.is_empty() {
+                None  // Empty date field - treat as missing
+            } else {
+                Some(parse_edi_date(&date_str)?)
+            }
         } else {
             None
         };

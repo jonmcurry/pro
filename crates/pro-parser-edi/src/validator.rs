@@ -233,6 +233,12 @@ pub fn validate_claim(claim: &ParsedClaim) -> Result<()> {
         validate_pos(pos)?;
     }
 
+    // Validate date of service exists (not the default 1900-01-01)
+    let default_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+    if claim.date_of_service_from == default_date {
+        return Err(Error::Validation("Date of service is required (DTP*472 segment missing or empty)".to_string()));
+    }
+
     // Validate date of service
     if claim.date_of_service_from > chrono::Utc::now().naive_utc().date() {
         return Err(Error::Validation("Date of service cannot be in the future".to_string()));
@@ -322,6 +328,12 @@ fn validate_service_line(service_line: &crate::types::ServiceLine) -> Result<()>
             "Service unit count exceeds maximum: {}",
             service_line.service_unit_count
         )));
+    }
+
+    // Validate service date exists (not the default 1900-01-01)
+    let default_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+    if service_line.service_date_from == default_date {
+        return Err(Error::Validation("Service date is required (DTP*472 segment missing or empty at service line level)".to_string()));
     }
 
     // Validate service dates

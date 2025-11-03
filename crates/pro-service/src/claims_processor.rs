@@ -407,7 +407,9 @@ impl ClaimsProcessor {
         let subscriber_id = encounter_fields.get("subscriber_id")
             .context("Missing subscriber_id")?;
         let subscriber_birth_date_str = encounter_fields.get("subscriber_birth_date")
-            .context("Missing subscriber_birth_date")?;
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or("1900-01-01"); // Default to 1900-01-01 if missing or empty
 
         // Optional fields
         let submitter_id = encounter_fields.get("submitter_id").unwrap_or(facility_code);
@@ -432,7 +434,7 @@ impl ClaimsProcessor {
         let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
         let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-            .context("Invalid date format for subscriber_birth_date")?;
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()); // Fallback to 1900-01-01
 
         // Optional fields
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
@@ -560,7 +562,9 @@ impl ClaimsProcessor {
         let subscriber_id = encounter_fields.get("subscriber_id")
             .context("Missing subscriber_id")?;
         let subscriber_birth_date_str = encounter_fields.get("subscriber_birth_date")
-            .context("Missing subscriber_birth_date")?;
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str())
+            .unwrap_or("1900-01-01"); // Default to 1900-01-01 if missing or empty
 
         // Optional fields with defaults
         let submitter_id = encounter_fields.get("submitter_id")
@@ -583,15 +587,130 @@ impl ClaimsProcessor {
         let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
         let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-            .context("Invalid date format for subscriber_birth_date")?;
+            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()); // Fallback to 1900-01-01
 
-        // Optional fields
+        // Optional fields - subscriber demographics
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
         let payer_name = encounter_fields.get("payer_name").map(|s| s.as_str());
         let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
         let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
-        // Insert encounter
+        let subscriber_middle_name = encounter_fields.get("subscriber_middle_name").map(|s| s.as_str());
+        let subscriber_name_suffix = encounter_fields.get("subscriber_name_suffix").map(|s| s.as_str());
+        let subscriber_gender = encounter_fields.get("subscriber_gender").map(|s| s.as_str());
+        let subscriber_address_line1 = encounter_fields.get("subscriber_address_line1").map(|s| s.as_str());
+        let subscriber_address_line2 = encounter_fields.get("subscriber_address_line2").map(|s| s.as_str());
+        let subscriber_city = encounter_fields.get("subscriber_city").map(|s| s.as_str());
+        let subscriber_state = encounter_fields.get("subscriber_state").map(|s| s.as_str());
+        let subscriber_postal_code = encounter_fields.get("subscriber_postal_code").map(|s| s.as_str());
+        let subscriber_country = encounter_fields.get("subscriber_country").map(|s| s.as_str());
+
+        // Provider information
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str());
+        let rendering_provider_name = encounter_fields.get("rendering_provider_name").map(|s| s.as_str());
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str());
+        let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str());
+        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str());
+        let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str());
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str());
+        let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str());
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str());
+        let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str());
+        let billing_provider_tax_id = encounter_fields.get("billing_provider_tax_id").map(|s| s.as_str());
+        let billing_provider_address_line1 = encounter_fields.get("billing_provider_address_line1").map(|s| s.as_str());
+        let billing_provider_city = encounter_fields.get("billing_provider_city").map(|s| s.as_str());
+        let billing_provider_state = encounter_fields.get("billing_provider_state").map(|s| s.as_str());
+        let billing_provider_postal_code = encounter_fields.get("billing_provider_postal_code").map(|s| s.as_str());
+
+        // Phase 2: Payer address information
+        let payer_address_line1 = encounter_fields.get("payer_address_line1").map(|s| s.as_str());
+        let payer_address_line2 = encounter_fields.get("payer_address_line2").map(|s| s.as_str());
+        let payer_city = encounter_fields.get("payer_city").map(|s| s.as_str());
+        let payer_state = encounter_fields.get("payer_state").map(|s| s.as_str());
+        let payer_postal_code = encounter_fields.get("payer_postal_code").map(|s| s.as_str());
+
+        // Phase 2: Claim supplemental information
+        let transaction_set_control_number = encounter_fields.get("transaction_set_control_number").map(|s| s.as_str());
+        let submitter_name = encounter_fields.get("submitter_name").map(|s| s.as_str());
+        let claim_filing_indicator = encounter_fields.get("claim_filing_indicator_code").map(|s| s.as_str());
+        let claim_frequency_code = encounter_fields.get("claim_frequency_code").map(|s| s.as_str());
+        let signature_indicator = encounter_fields.get("signature_indicator").map(|s| s.as_str());
+        let assignment_indicator = encounter_fields.get("assignment_indicator").map(|s| s.as_str());
+        let benefits_assignment_indicator = encounter_fields.get("benefits_assignment_indicator").map(|s| s.as_str());
+        let release_of_information_code = encounter_fields.get("release_of_information_code").map(|s| s.as_str());
+        let patient_signature_code = encounter_fields.get("patient_signature_code").map(|s| s.as_str());
+        let delay_reason_code = encounter_fields.get("delay_reason_code").map(|s| s.as_str());
+        let special_program_code = encounter_fields.get("special_program_code").map(|s| s.as_str());
+
+        // Parse patient_amount_paid if present
+        let patient_amount_paid = encounter_fields.get("patient_amount_paid")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        let service_authorization_code = encounter_fields.get("service_authorization_code").map(|s| s.as_str());
+
+        // Phase 2: Basic COB fields
+        let other_payer_paid_amount = encounter_fields.get("other_payer_paid_amount")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        let other_payer_id = encounter_fields.get("other_payer_id").map(|s| s.as_str());
+        let other_payer_name = encounter_fields.get("other_payer_name").map(|s| s.as_str());
+        let other_payer_claim_number = encounter_fields.get("other_payer_claim_number").map(|s| s.as_str());
+        let other_payer_claim_filing_indicator = encounter_fields.get("other_payer_claim_filing_indicator").map(|s| s.as_str());
+
+        // Phase 3: Advanced segments
+        // Phase 3.1: Reference numbers (REF segments) - stored as JSONB
+        let reference_numbers = encounter_fields.get("reference_numbers").map(|s| s.as_str());
+
+        // Phase 3.2: Provider taxonomy codes (PRV segments)
+        let rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy").map(|s| s.as_str());
+        let referring_provider_taxonomy = encounter_fields.get("referring_provider_taxonomy").map(|s| s.as_str());
+        let supervising_provider_taxonomy = encounter_fields.get("supervising_provider_taxonomy").map(|s| s.as_str());
+
+        // Phase 3.4: Condition codes (CRC segments) - stored as JSONB
+        let condition_codes = encounter_fields.get("condition_codes").map(|s| s.as_str());
+
+        // Phase 3.5: Supplemental amounts (AMT segments)
+        let non_covered_charges = encounter_fields.get("non_covered_charges")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        let patient_responsibility_amount = encounter_fields.get("patient_responsibility_amount")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Parse date_of_service_to if available
+        let dos_to = encounter_fields.get("date_of_service_to")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
+        // Parse clinical dates (16 date types from DTP segments)
+        let onset_of_illness_date = encounter_fields.get("onset_of_illness_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let initial_treatment_date = encounter_fields.get("initial_treatment_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let last_seen_date = encounter_fields.get("last_seen_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let acute_manifestation_date = encounter_fields.get("acute_manifestation_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let accident_date = encounter_fields.get("accident_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let last_menstrual_period_date = encounter_fields.get("last_menstrual_period_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let last_xray_date = encounter_fields.get("last_xray_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let disability_from_date = encounter_fields.get("disability_from_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let disability_to_date = encounter_fields.get("disability_to_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let last_worked_date = encounter_fields.get("last_worked_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let authorized_return_to_work_date = encounter_fields.get("authorized_return_to_work_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let admission_date = encounter_fields.get("admission_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let discharge_date = encounter_fields.get("discharge_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let assumed_care_date = encounter_fields.get("assumed_care_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let relinquished_care_date = encounter_fields.get("relinquished_care_date")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
+        // Insert encounter with all available fields
         sqlx::query(
             r#"
             INSERT INTO claims.encounter (
@@ -604,17 +723,87 @@ impl ClaimsProcessor {
                 subscriber_id,
                 subscriber_last_name,
                 subscriber_first_name,
+                subscriber_middle_name,
+                subscriber_name_suffix,
+                subscriber_gender,
                 subscriber_birth_date,
+                subscriber_address_line1,
+                subscriber_address_line2,
+                subscriber_city,
+                subscriber_state,
+                subscriber_postal_code,
+                subscriber_country,
                 payer_responsibility_code,
                 payer_id,
                 payer_name,
+                payer_address_line1,
+                payer_address_line2,
+                payer_city,
+                payer_state,
+                payer_postal_code,
+                billing_provider_npi,
+                billing_provider_tax_id,
+                billing_provider_name,
+                billing_provider_address_line1,
+                billing_provider_city,
+                billing_provider_state,
+                billing_provider_postal_code,
+                rendering_provider_npi,
+                rendering_provider_name,
+                referring_provider_npi,
+                referring_provider_name,
+                service_facility_npi,
+                service_facility_name,
+                supervising_provider_npi,
+                supervising_provider_name,
                 total_claim_charge_amount,
                 place_of_service_code,
                 date_of_service_from,
+                date_of_service_to,
+                onset_of_illness_date,
+                initial_treatment_date,
+                last_seen_date,
+                acute_manifestation_date,
+                accident_date,
+                last_menstrual_period_date,
+                last_xray_date,
+                disability_from_date,
+                disability_to_date,
+                last_worked_date,
+                authorized_return_to_work_date,
+                admission_date,
+                discharge_date,
+                assumed_care_date,
+                relinquished_care_date,
+                transaction_set_control_number,
+                submitter_name,
+                claim_filing_indicator,
+                claim_frequency_code,
+                signature_indicator,
+                assignment_indicator,
+                benefits_assignment_indicator,
+                release_of_information_code,
+                patient_signature_code,
+                delay_reason_code,
+                special_program_code,
+                patient_amount_paid,
+                service_authorization_code,
+                other_payer_paid_amount,
+                other_payer_id,
+                other_payer_name,
+                other_payer_claim_number,
+                other_payer_claim_filing_indicator,
+                reference_numbers,
+                rendering_provider_taxonomy,
+                referring_provider_taxonomy,
+                supervising_provider_taxonomy,
+                condition_codes,
+                non_covered_charges,
+                patient_responsibility_amount,
                 medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91)
             "#
         )
         .bind(encounter_id)
@@ -626,13 +815,83 @@ impl ClaimsProcessor {
         .bind(subscriber_id)
         .bind(subscriber_last_name)
         .bind(subscriber_first_name)
+        .bind(subscriber_middle_name)
+        .bind(subscriber_name_suffix)
+        .bind(subscriber_gender)
         .bind(subscriber_dob)
+        .bind(subscriber_address_line1)
+        .bind(subscriber_address_line2)
+        .bind(subscriber_city)
+        .bind(subscriber_state)
+        .bind(subscriber_postal_code)
+        .bind(subscriber_country)
         .bind(payer_responsibility_code)
         .bind(payer_id)
         .bind(payer_name)
+        .bind(payer_address_line1)
+        .bind(payer_address_line2)
+        .bind(payer_city)
+        .bind(payer_state)
+        .bind(payer_postal_code)
+        .bind(billing_provider_npi)
+        .bind(billing_provider_tax_id)
+        .bind(billing_provider_name)
+        .bind(billing_provider_address_line1)
+        .bind(billing_provider_city)
+        .bind(billing_provider_state)
+        .bind(billing_provider_postal_code)
+        .bind(rendering_provider_npi)
+        .bind(rendering_provider_name)
+        .bind(referring_provider_npi)
+        .bind(referring_provider_name)
+        .bind(service_facility_npi)
+        .bind(service_facility_name)
+        .bind(supervising_provider_npi)
+        .bind(supervising_provider_name)
         .bind(total_claim_charge)
         .bind(place_of_service)
         .bind(dos_from)
+        .bind(dos_to)
+        .bind(onset_of_illness_date)
+        .bind(initial_treatment_date)
+        .bind(last_seen_date)
+        .bind(acute_manifestation_date)
+        .bind(accident_date)
+        .bind(last_menstrual_period_date)
+        .bind(last_xray_date)
+        .bind(disability_from_date)
+        .bind(disability_to_date)
+        .bind(last_worked_date)
+        .bind(authorized_return_to_work_date)
+        .bind(admission_date)
+        .bind(discharge_date)
+        .bind(assumed_care_date)
+        .bind(relinquished_care_date)
+        .bind(transaction_set_control_number)
+        .bind(submitter_name)
+        .bind(claim_filing_indicator)
+        .bind(claim_frequency_code)
+        .bind(signature_indicator)
+        .bind(assignment_indicator)
+        .bind(benefits_assignment_indicator)
+        .bind(release_of_information_code)
+        .bind(patient_signature_code)
+        .bind(delay_reason_code)
+        .bind(special_program_code)
+        .bind(patient_amount_paid)
+        .bind(service_authorization_code)
+        .bind(other_payer_paid_amount)
+        .bind(other_payer_id)
+        .bind(other_payer_name)
+        .bind(other_payer_claim_number)
+        .bind(other_payer_claim_filing_indicator)
+        .bind(reference_numbers)
+        .bind(rendering_provider_taxonomy)
+        .bind(referring_provider_taxonomy)
+        .bind(supervising_provider_taxonomy)
+        .bind(condition_codes)
+        .bind(non_covered_charges)
+        .bind(patient_responsibility_amount)
         .bind(medical_record_number)
         .bind("IMPORTED")
         .execute(&mut **tx)
@@ -692,29 +951,109 @@ impl ClaimsProcessor {
         let service_date = chrono::NaiveDate::parse_from_str(service_date_str, "%Y-%m-%d")
             .context("Invalid date format for service_date_from")?;
 
-        // Insert service line
+        // Extract diagnosis pointers (CRITICAL for medical necessity validation)
+        let pointer_1 = service_line_fields.get("diagnosis_code_pointer_1")
+            .and_then(|s| s.parse::<i16>().ok());
+        let pointer_2 = service_line_fields.get("diagnosis_code_pointer_2")
+            .and_then(|s| s.parse::<i16>().ok());
+        let pointer_3 = service_line_fields.get("diagnosis_code_pointer_3")
+            .and_then(|s| s.parse::<i16>().ok());
+        let pointer_4 = service_line_fields.get("diagnosis_code_pointer_4")
+            .and_then(|s| s.parse::<i16>().ok());
+
+        // Extract procedure modifiers
+        let modifier_1 = service_line_fields.get("procedure_modifier_1").map(|s| s.as_str());
+        let modifier_2 = service_line_fields.get("procedure_modifier_2").map(|s| s.as_str());
+        let modifier_3 = service_line_fields.get("procedure_modifier_3").map(|s| s.as_str());
+        let modifier_4 = service_line_fields.get("procedure_modifier_4").map(|s| s.as_str());
+
+        // Extract additional service line fields
+        let product_service_id_qualifier = service_line_fields.get("product_service_id_qualifier")
+            .map(|s| s.as_str())
+            .unwrap_or("HC"); // Default to HCPCS
+        let unit_basis_measurement_code = service_line_fields.get("unit_basis_measurement_code")
+            .map(|s| s.as_str());
+        let service_date_to = service_line_fields.get("service_date_to")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let place_of_service_code = service_line_fields.get("place_of_service_code")
+            .map(|s| s.as_str());
+        let emergency_indicator = service_line_fields.get("emergency_indicator")
+            .map(|s| s.as_str());
+        let epsdt_indicator = service_line_fields.get("epsdt_indicator")
+            .map(|s| s.as_str());
+        let family_planning_indicator = service_line_fields.get("family_planning_indicator")
+            .map(|s| s.as_str());
+
+        // Phase 3: Service line level fields
+        // Phase 3.2: Rendering provider taxonomy at service line level
+        let sl_rendering_provider_taxonomy = service_line_fields.get("rendering_provider_taxonomy")
+            .map(|s| s.as_str());
+
+        // Phase 3.5: Supplemental amounts at service line level
+        let sl_approved_amount = service_line_fields.get("approved_amount")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        let sl_non_covered_charges = service_line_fields.get("non_covered_charges")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Insert service line with all critical fields
         sqlx::query(
             r#"
             INSERT INTO claims.service_line (
                 service_line_id,
                 encounter_id,
                 line_number,
+                product_service_id_qualifier,
                 procedure_code,
+                procedure_modifier_1,
+                procedure_modifier_2,
+                procedure_modifier_3,
+                procedure_modifier_4,
                 line_item_charge_amount,
+                unit_basis_measurement_code,
                 service_unit_count,
                 service_date_from,
+                service_date_to,
+                place_of_service_code,
+                emergency_indicator,
+                epsdt_indicator,
+                family_planning_indicator,
+                diagnosis_code_pointer_1,
+                diagnosis_code_pointer_2,
+                diagnosis_code_pointer_3,
+                diagnosis_code_pointer_4,
+                rendering_provider_taxonomy,
+                approved_amount,
+                non_covered_charges,
                 line_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
             "#
         )
         .bind(service_line_id)
         .bind(encounter_id)
         .bind(line_number)
+        .bind(product_service_id_qualifier)
         .bind(procedure_code)
+        .bind(modifier_1)
+        .bind(modifier_2)
+        .bind(modifier_3)
+        .bind(modifier_4)
         .bind(charge_amount)
+        .bind(unit_basis_measurement_code)
         .bind(unit_count)
         .bind(service_date)
+        .bind(service_date_to)
+        .bind(place_of_service_code)
+        .bind(emergency_indicator)
+        .bind(epsdt_indicator)
+        .bind(family_planning_indicator)
+        .bind(pointer_1)
+        .bind(pointer_2)
+        .bind(pointer_3)
+        .bind(pointer_4)
+        .bind(sl_rendering_provider_taxonomy)
+        .bind(sl_approved_amount)
+        .bind(sl_non_covered_charges)
         .bind("IMPORTED")
         .execute(&mut **tx)
         .await
