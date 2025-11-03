@@ -350,13 +350,23 @@ async fn run_console_mode() -> Result<()> {
                             }
                         }
                         pro_worker::types::FileFormat::Edi837p => {
-                            // EDI files: Mark as completed immediately (no Stage 1 ingestion needed)
-                            // EDI files are processed directly from the file system, not through staging tables
-                            warn!("EDI file processing not yet implemented in two-stage pipeline: {}", file_path.display());
-                            warn!("Marking as completed to prevent reprocessing. EDI functionality coming in future release.");
+                            // STAGE 1: Process EDI 837p file through two-stage pipeline
+                            match importer_for_processor.ingest_edi_to_staging(&file_path, Some(queued_file.queue_id)).await {
+                                Ok(ingest_result) => {
+                                    info!("STAGE 1 COMPLETE (EDI): batch_id={}, ingested {} claims to staging.raw_claims",
+                                        ingest_result.batch_id, ingest_result.total_rows);
 
-                            if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
-                                error!("Failed to mark EDI queue entry as completed: {}", e);
+                                    // Mark queue entry as completed (Stage 1 done, Stage 2 will process asynchronously)
+                                    if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
+                                        error!("Failed to mark queue entry as completed: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("STAGE 1 FAILED (EDI): {}", e);
+                                    if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
+                                        error!("Failed to mark queue entry as failed: {}", mark_err);
+                                    }
+                                }
                             }
                         }
                     }
