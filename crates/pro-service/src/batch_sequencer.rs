@@ -103,7 +103,7 @@ impl SequencedBatchAcquirer {
                     info!("SequencedBatchAcquirer shutting down");
                     break;
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(1)) => {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
                     // Try to acquire next batch
                     match self.acquire_next_batch().await {
                         Ok(Some(batch)) => {
@@ -118,8 +118,9 @@ impl SequencedBatchAcquirer {
                             }
                         }
                         Ok(None) => {
-                            // No pending claims, wait briefly
+                            // No pending claims, wait briefly before retrying
                             debug!("No pending claims available");
+                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         }
                         Err(e) => {
                             error!("Failed to acquire batch: {}", e);
@@ -140,8 +141,8 @@ impl SequencedBatchAcquirer {
             .context("Failed to begin transaction")?;
 
         // Get next batch of PENDING claims with encounter grouping fields
-        // Query more claims than batch_size to ensure we can group by encounter
-        // Use FOR UPDATE to lock the claims (prevents other acquirers from getting same batch)
+        // Query 2x batch_size to ensure we get complete encounters (avg ~10 service lines per encounter)
+        // Use FOR UPDATE SKIP LOCKED for fast lock acquisition (single acquirer, so safe to skip locked rows)
         let raw_claims: Vec<(Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
             SELECT
@@ -155,10 +156,10 @@ impl SequencedBatchAcquirer {
             AND batch_sequence_number IS NULL
             ORDER BY ingested_at ASC, raw_claim_id ASC
             LIMIT $1
-            FOR UPDATE
+            FOR UPDATE SKIP LOCKED
             "#
         )
-        .bind((self.batch_size + 100) as i64)  // Buffer to ensure complete encounter groups
+        .bind((self.batch_size * 2) as i64)  // 2x to ensure complete encounter groups
         .fetch_all(&mut *tx)
         .await
         .context("Failed to fetch pending claims")?;
@@ -197,10 +198,10 @@ impl SequencedBatchAcquirer {
                 .push(claim_id);
         }
 
-        // Accumulate complete encounter groups until we reach batch_size
+        // Accumulate complete encounter groups until we have enough for a batch
+        // By fetching 2x batch_size initially, we should have complete encounters
         let mut claim_ids: Vec<Uuid> = Vec::new();
         let mut total_count = 0;
-        let mut encounters_to_complete: Vec<(String, String)> = Vec::new();
 
         for encounter_key in encounter_order {
             if let Some(encounter_claim_ids) = encounter_groups.get(&encounter_key) {
@@ -212,40 +213,6 @@ impl SequencedBatchAcquirer {
                 // Add complete encounter group
                 claim_ids.extend(encounter_claim_ids.clone());
                 total_count += encounter_claim_ids.len();
-
-                // Track encounter for completion check
-                encounters_to_complete.push(encounter_key.clone());
-            }
-        }
-
-        // CRITICAL: Fetch any remaining service lines for the encounters we've selected
-        // This ensures we never split an encounter across batches
-        if !encounters_to_complete.is_empty() {
-            for (patient_control_number, date_of_service) in encounters_to_complete {
-                let additional_claims: Vec<Uuid> = sqlx::query_scalar(
-                    r#"
-                    SELECT raw_claim_id
-                    FROM staging.raw_claims
-                    WHERE processing_status = 'PENDING'
-                    AND batch_sequence_number IS NULL
-                    AND encounter_fields->>'patient_control_number' = $1
-                    AND encounter_fields->>'date_of_service_from' = $2
-                    AND raw_claim_id != ALL($3)
-                    FOR UPDATE
-                    "#
-                )
-                .bind(&patient_control_number)
-                .bind(&date_of_service)
-                .bind(&claim_ids)
-                .fetch_all(&mut *tx)
-                .await
-                .context("Failed to fetch remaining claims for encounter")?;
-
-                if !additional_claims.is_empty() {
-                    debug!("Found {} additional claims for encounter {}/{}",
-                        additional_claims.len(), patient_control_number, date_of_service);
-                    claim_ids.extend(additional_claims);
-                }
             }
         }
 
@@ -362,7 +329,7 @@ impl SequentialCompletionManager {
                         error!("Failed to handle batch result: {}", e);
                     }
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
                     // Periodically check for stuck sequences
                     if let Err(e) = self.check_stuck_sequences().await {
                         error!("Failed to check stuck sequences: {}", e);

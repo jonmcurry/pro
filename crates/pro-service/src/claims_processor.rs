@@ -1045,12 +1045,37 @@ impl ClaimsProcessor {
         tx.commit().await
             .context("Failed to commit sequenced batch transaction")?;
 
-        let processing_time = (chrono::Utc::now() - batch_start).num_milliseconds() as f64 / 1000.0;
+        let batch_end = chrono::Utc::now();
+        let processing_time = (batch_end - batch_start).num_milliseconds() as f64 / 1000.0;
 
         info!(
             "Worker {} completed batch {} in {:.2}s ({} success, {} failed)",
             worker_id, sequence_number, processing_time, success_count, failure_count
         );
+
+        // Log processing metrics
+        let total_records = (success_count + failure_count) as i32;
+        let details = serde_json::json!({
+            "worker_id": worker_id,
+            "sequence_number": sequence_number,
+            "batch_size": claim_ids.len(),
+            "processing_time_seconds": processing_time
+        });
+
+        if let Err(e) = self.log_processing_metric(
+            batch_id,
+            "batch_processing",
+            "sequenced_batch_stage2",
+            batch_start,
+            batch_end,
+            total_records,
+            success_count as i32,
+            failure_count as i32,
+            Some(details),
+            "STAGE2"
+        ).await {
+            warn!("Failed to log processing metric for batch {}: {}", sequence_number, e);
+        }
 
         Ok(crate::batch_sequencer::BatchResult {
             sequence_number,

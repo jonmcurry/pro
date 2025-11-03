@@ -17,7 +17,11 @@
       "Bash(git commit:*)",
       "Bash(crates/pro-parser-edi/src/loops.rs.new)",
       "Bash(msiexec /i ProfessionalSMART.msi /l*v upgrade_v1.5.15.log /quiet /qn)",
-      "Bash(sc start:*)"
+      "Bash(sc start:*)",
+      "Bash(wc:*)",
+      "Bash(Select-String \"completed batch|Starting STAGE 2|SequencedBatch\")",
+      "Bash(net stop ProfessionalSMART)",
+      "Bash(net start ProfessionalSMART)"
     ],
     "deny": [],
     "ask": []

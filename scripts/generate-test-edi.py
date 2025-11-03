@@ -207,8 +207,8 @@ def main():
             print(f"Warning: No providers found for {facility['facility_code']}, skipping")
             continue
 
-        # Generate 5-10 claims per facility
-        num_claims = random.randint(5, 10)
+        # Generate 10,000 claims per facility
+        num_claims = 10000
 
         output_path = output_dir / f"claims_{facility['facility_code']}.edi"
         generate_edi_file(facility, facility_providers, num_claims, output_path)
