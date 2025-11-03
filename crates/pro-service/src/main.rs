@@ -271,8 +271,18 @@ async fn run_console_mode() -> Result<()> {
         .trim()
         .to_string();
 
+    // Set up processed and error directories
+    let processed_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("processed");
+    let error_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("error");
+
+    // Create directories if they don't exist
+    std::fs::create_dir_all(&processed_dir)?;
+    std::fs::create_dir_all(&error_dir)?;
+
     info!("Initializing claims processing...");
     info!("Input directory: '{}'", input_dir);
+    info!("Processed directory: '{}'", processed_dir.display());
+    info!("Error directory: '{}'", error_dir.display());
 
     let mut file_watcher = file_watcher::FileWatcher::new(&input_dir)
         .map_err(|e| anyhow::anyhow!("Failed to create file watcher: {}", e))?;
@@ -307,6 +317,8 @@ async fn run_console_mode() -> Result<()> {
     // Spawn queue processor to process enqueued files (STAGE 1: File Ingestion)
     let importer_for_processor = importer.clone();
     let db_pool_for_processor = db_pool.clone();
+    let processed_dir_for_processor = processed_dir.clone();
+    let error_dir_for_processor = error_dir.clone();
     let processor_handle = tokio::spawn(async move {
         use pro_worker::queue_manager::QueueManager;
 
@@ -340,11 +352,21 @@ async fn run_console_mode() -> Result<()> {
                                     if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
                                         error!("Failed to mark queue entry as completed: {}", e);
                                     }
+
+                                    // Move file to processed directory
+                                    if let Err(e) = move_file_to_processed(&file_path, &processed_dir_for_processor) {
+                                        error!("Failed to move file to processed directory: {}", e);
+                                    }
                                 }
                                 Err(e) => {
                                     error!("STAGE 1 FAILED: {}", e);
                                     if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
                                         error!("Failed to mark queue entry as failed: {}", mark_err);
+                                    }
+
+                                    // Move file to error directory
+                                    if let Err(e) = move_file_to_error(&file_path, &error_dir_for_processor, &e.to_string()) {
+                                        error!("Failed to move file to error directory: {}", e);
                                     }
                                 }
                             }
@@ -360,11 +382,21 @@ async fn run_console_mode() -> Result<()> {
                                     if let Err(e) = queue_manager.mark_completed(queued_file.queue_id).await {
                                         error!("Failed to mark queue entry as completed: {}", e);
                                     }
+
+                                    // Move file to processed directory
+                                    if let Err(e) = move_file_to_processed(&file_path, &processed_dir_for_processor) {
+                                        error!("Failed to move EDI file to processed directory: {}", e);
+                                    }
                                 }
                                 Err(e) => {
                                     error!("STAGE 1 FAILED (EDI): {}", e);
                                     if let Err(mark_err) = queue_manager.mark_failed(queued_file.queue_id, &e.to_string()).await {
                                         error!("Failed to mark queue entry as failed: {}", mark_err);
+                                    }
+
+                                    // Move file to error directory
+                                    if let Err(e) = move_file_to_error(&file_path, &error_dir_for_processor, &e.to_string()) {
+                                        error!("Failed to move EDI file to error directory: {}", e);
                                     }
                                 }
                             }
@@ -522,6 +554,50 @@ async fn run_console_mode() -> Result<()> {
     db_pool.close().await;
 
     info!("Professional SMART service shutdown complete");
+
+    Ok(())
+}
+
+/// Move a successfully processed file to the processed directory
+fn move_file_to_processed(file_path: &std::path::Path, processed_dir: &std::path::Path) -> Result<()> {
+    use anyhow::Context;
+
+    let filename = file_path.file_name()
+        .context("Failed to get filename")?;
+
+    let dest = processed_dir.join(filename);
+
+    info!("Moving file to processed: {} -> {}", file_path.display(), dest.display());
+
+    std::fs::rename(file_path, &dest)
+        .context("Failed to move file to processed directory")?;
+
+    info!("File moved to processed directory: {}", dest.display());
+
+    Ok(())
+}
+
+/// Move a failed file to the error directory with error details
+fn move_file_to_error(file_path: &std::path::Path, error_dir: &std::path::Path, error_message: &str) -> Result<()> {
+    use anyhow::Context;
+
+    let filename = file_path.file_name()
+        .context("Failed to get filename")?;
+
+    let dest = error_dir.join(filename);
+
+    warn!("Moving failed file to error: {} -> {}", file_path.display(), dest.display());
+
+    std::fs::rename(file_path, &dest)
+        .context("Failed to move file to error directory")?;
+
+    // Write error message to companion .error file
+    let error_file = dest.with_extension("error");
+    std::fs::write(&error_file, error_message)
+        .context("Failed to write error file")?;
+
+    error!("File moved to error directory: {}", dest.display());
+    error!("Error details written to: {}", error_file.display());
 
     Ok(())
 }
