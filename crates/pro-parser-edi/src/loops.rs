@@ -419,12 +419,27 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 // If we're currently parsing a service line, it's the service date
                 // Otherwise, it's the claim date
                 if dtp.date_time_qualifier == "472" {
-                    if let Some(ref mut line) = current_service_line {
-                        // Service line date
-                        line.service_date_from = dtp.parse_date()?;
-                    } else {
-                        // Claim date (no active service line)
-                        claim.date_of_service_from = dtp.parse_date()?;
+                    // Check date format: D8 (single date) or RD8 (date range)
+                    if dtp.date_time_period_format_qualifier == "D8" {
+                        if let Some(ref mut line) = current_service_line {
+                            // Service line date
+                            line.service_date_from = dtp.parse_date()?;
+                        } else {
+                            // Claim date (no active service line)
+                            claim.date_of_service_from = dtp.parse_date()?;
+                        }
+                    } else if dtp.date_time_period_format_qualifier == "RD8" {
+                        // Date range format: CCYYMMDD-CCYYMMDD
+                        let (from, to) = dtp.parse_date_range()?;
+                        if let Some(ref mut line) = current_service_line {
+                            // Service line date range
+                            line.service_date_from = from;
+                            line.service_date_to = Some(to);
+                        } else {
+                            // Claim date range
+                            claim.date_of_service_from = from;
+                            claim.date_of_service_to = Some(to);
+                        }
                     }
                 } else {
                     // Other date types are claim-level only

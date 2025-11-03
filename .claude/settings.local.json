@@ -13,7 +13,9 @@
       "Bash(awk:*)",
       "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/candle.exe\" -ext WixUtilExtension -dSolutionDir=\"c:/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
       "Bash(\"/c/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(crates/pro-parser-edi/src/loops.rs.new)"
     ],
     "deny": [],
     "ask": []
