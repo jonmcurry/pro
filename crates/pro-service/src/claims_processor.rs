@@ -958,35 +958,48 @@ impl ClaimsProcessor {
                 Ok(encounter_id) => {
                     success_count += service_lines.len();
 
-                    // Mark all raw_claims in this encounter as COMPLETED
-                    for service_line in &service_lines {
-                        sqlx::query(
-                            r#"
-                            UPDATE staging.raw_claims
-                            SET processing_status = 'COMPLETED',
-                                processed_at = CURRENT_TIMESTAMP
-                            WHERE raw_claim_id = $1
-                            "#
-                        )
-                        .bind(service_line.raw_claim_id)
-                        .execute(&mut *tx)
-                        .await?;
-                    }
+                    // Mark all raw_claims in this encounter as COMPLETED (bulk update)
+                    let claim_ids: Vec<Uuid> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+                    sqlx::query(
+                        r#"
+                        UPDATE staging.raw_claims
+                        SET processing_status = 'COMPLETED',
+                            processed_at = CURRENT_TIMESTAMP
+                        WHERE raw_claim_id = ANY($1)
+                        "#
+                    )
+                    .bind(&claim_ids)
+                    .execute(&mut *tx)
+                    .await?;
 
-                    debug!("Successfully processed encounter: {} on {} -> encounter_id {}",
-                        patient_control_number, date_of_service, encounter_id);
+                    debug!("Successfully processed encounter: {} on {} -> encounter_id {} ({} service lines)",
+                        patient_control_number, date_of_service, encounter_id, service_lines.len());
                 }
                 Err(e) => {
                     failure_count += service_lines.len();
-                    error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, e);
+                    let error_str = e.to_string();
+                    error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, error_str);
 
-                    // Mark all raw_claims in this encounter as FAILED
+                    // Collect error logs and claim IDs for bulk operations
+                    let mut error_log_inserts = Vec::new();
+                    let claim_ids: Vec<Uuid> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+
                     for service_line in &service_lines {
-                        let error_message = format!("Row {}: {}", service_line.row_number, e);
+                        let error_message = format!("Row {}: {}", service_line.row_number, error_str);
                         errors.push(error_message.clone());
 
-                        // Log error
-                        let error_log_id = Uuid::new_v4();
+                        // Prepare error log insert
+                        error_log_inserts.push((
+                            Uuid::new_v4(),
+                            service_line.batch_id,
+                            service_line.row_number,
+                            error_message,
+                            serde_json::to_string(&service_line.encounter_fields).ok(),
+                        ));
+                    }
+
+                    // Bulk insert error logs
+                    for (error_log_id, batch_id, record_number, error_message, raw_data) in error_log_inserts {
                         sqlx::query(
                             r#"
                             INSERT INTO staging.import_error_log (
@@ -998,34 +1011,32 @@ impl ClaimsProcessor {
                                 error_message,
                                 raw_data
                             )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            VALUES ($1, $2, $3, 'VALIDATION', 'ERROR', $4, $5)
                             "#
                         )
                         .bind(error_log_id)
-                        .bind(service_line.batch_id)
-                        .bind(service_line.row_number)
-                        .bind("VALIDATION")
-                        .bind("ERROR")
+                        .bind(batch_id)
+                        .bind(record_number)
                         .bind(&error_message)
-                        .bind(serde_json::to_string(&service_line.encounter_fields).ok())
-                        .execute(&mut *tx)
-                        .await?;
-
-                        // Mark claim as FAILED
-                        sqlx::query(
-                            r#"
-                            UPDATE staging.raw_claims
-                            SET processing_status = 'FAILED',
-                                processed_at = CURRENT_TIMESTAMP,
-                                error_message = $1
-                            WHERE raw_claim_id = $2
-                            "#
-                        )
-                        .bind(&error_message)
-                        .bind(service_line.raw_claim_id)
+                        .bind(raw_data)
                         .execute(&mut *tx)
                         .await?;
                     }
+
+                    // Bulk update claims as FAILED
+                    sqlx::query(
+                        r#"
+                        UPDATE staging.raw_claims
+                        SET processing_status = 'FAILED',
+                            processed_at = CURRENT_TIMESTAMP,
+                            error_message = $1
+                        WHERE raw_claim_id = ANY($2)
+                        "#
+                    )
+                    .bind(&error_str)
+                    .bind(&claim_ids)
+                    .execute(&mut *tx)
+                    .await?;
                 }
             }
         }
