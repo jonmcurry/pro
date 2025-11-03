@@ -285,6 +285,9 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         diagnoses: Vec::new(),
     };
 
+    let mut last_nm1_entity: Option<String> = None;
+    let mut current_service_line: Option<ServiceLine> = None;
+
     for segment in segments {
         match segment.segment_id.as_str() {
             "CLM" => {
@@ -298,24 +301,149 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 claim.benefits_assignment_indicator = clm.benefits_assignment_indicator;
                 claim.release_of_information_code = clm.release_information_code;
             }
+            "NM1" => {
+                let nm1 = Nm1Segment::parse(segment)?;
+                last_nm1_entity = Some(nm1.entity_identifier_code.clone());
+
+                match nm1.entity_identifier_code.as_str() {
+                    "IL" => {
+                        claim.subscriber_entity_identifier = nm1.entity_identifier_code;
+                        claim.subscriber_entity_type = nm1.entity_type_qualifier;
+                        claim.subscriber_last_name = nm1.last_name_or_org.clone().unwrap_or_default();
+                        claim.subscriber_first_name = nm1.first_name.clone().unwrap_or_default();
+                        claim.subscriber_middle_name = nm1.middle_name.clone();
+                        claim.subscriber_name_suffix = nm1.name_suffix.clone();
+                        if nm1.identification_code_qualifier.as_deref() == Some("MI") {
+                            claim.subscriber_id_code_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
+                            claim.subscriber_id = nm1.identification_code.clone().unwrap_or_default();
+                        }
+                    }
+                    "PR" => {
+                        claim.payer_entity_identifier = nm1.entity_identifier_code;
+                        claim.payer_entity_type = nm1.entity_type_qualifier;
+                        claim.payer_name = nm1.last_name_or_org.clone().unwrap_or_default();
+                        claim.payer_id_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
+                        claim.payer_id = nm1.identification_code.clone().unwrap_or_default();
+                    }
+                    "82" => {
+                        claim.rendering_provider_qualifier = nm1.identification_code_qualifier.clone();
+                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                            claim.rendering_provider_npi = nm1.identification_code.clone();
+                        }
+                        claim.rendering_provider_last_name = nm1.last_name_or_org.clone();
+                        claim.rendering_provider_first_name = nm1.first_name.clone();
+                    }
+                    "77" => {
+                        claim.service_facility_qualifier = nm1.identification_code_qualifier.clone();
+                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                            claim.service_facility_npi = nm1.identification_code.clone();
+                        }
+                        claim.service_facility_name = nm1.last_name_or_org.clone();
+                    }
+                    "DN" => {
+                        claim.referring_provider_qualifier = nm1.identification_code_qualifier.clone();
+                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                            claim.referring_provider_npi = nm1.identification_code.clone();
+                        }
+                        claim.referring_provider_last_name = nm1.last_name_or_org.clone();
+                        claim.referring_provider_first_name = nm1.first_name.clone();
+                    }
+                    "DQ" => {
+                        claim.supervising_provider_qualifier = nm1.identification_code_qualifier.clone();
+                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                            claim.supervising_provider_npi = nm1.identification_code.clone();
+                        }
+                        claim.supervising_provider_last_name = nm1.last_name_or_org.clone();
+                        claim.supervising_provider_first_name = nm1.first_name.clone();
+                    }
+                    _ => {}
+                }
+            }
+            "N3" => {
+                let n3 = N3Segment::parse(segment)?;
+                if let Some(entity) = &last_nm1_entity {
+                    match entity.as_str() {
+                        "IL" => {
+                            claim.subscriber_address_line1 = Some(n3.address_line1.clone());
+                            claim.subscriber_address_line2 = n3.address_line2.clone();
+                        }
+                        "PR" => {
+                            claim.payer_address_line1 = Some(n3.address_line1.clone());
+                            claim.payer_address_line2 = n3.address_line2.clone();
+                        }
+                        "77" => {
+                            claim.service_facility_address_line1 = Some(n3.address_line1.clone());
+                            claim.service_facility_address_line2 = n3.address_line2.clone();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "N4" => {
+                let n4 = N4Segment::parse(segment)?;
+                if let Some(entity) = &last_nm1_entity {
+                    match entity.as_str() {
+                        "IL" => {
+                            claim.subscriber_city = Some(n4.city.clone());
+                            claim.subscriber_state = n4.state_code.clone();
+                            claim.subscriber_postal_code = n4.postal_code.clone();
+                            claim.subscriber_country = n4.country_code.clone();
+                        }
+                        "PR" => {
+                            claim.payer_city = Some(n4.city.clone());
+                            claim.payer_state = n4.state_code.clone();
+                            claim.payer_postal_code = n4.postal_code.clone();
+                        }
+                        "77" => {
+                            claim.service_facility_city = Some(n4.city.clone());
+                            claim.service_facility_state = n4.state_code.clone();
+                            claim.service_facility_postal_code = n4.postal_code.clone();
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "SBR" => {
+                let sbr = SbrSegment::parse(segment)?;
+                claim.subscriber_relationship_code = sbr.individual_relationship_code;
+            }
+            "DMG" => {
+                let dmg = DmgSegment::parse(segment)?;
+                claim.subscriber_date_of_birth = dmg.date_of_birth;
+                claim.subscriber_gender = dmg.gender_code;
+            }
             "DTP" => {
                 let dtp = DtpSegment::parse(segment)?;
-                match dtp.date_time_qualifier.as_str() {
-                    "472" => claim.date_of_service_from = dtp.parse_date()?,
-                    "433" => claim.onset_of_illness_date = Some(dtp.parse_date()?),
-                    "454" => claim.initial_treatment_date = Some(dtp.parse_date()?),
-                    "304" => claim.last_seen_date = Some(dtp.parse_date()?),
-                    "453" => claim.acute_manifestation_date = Some(dtp.parse_date()?),
-                    "439" => claim.accident_date = Some(dtp.parse_date()?),
-                    "484" => claim.last_menstrual_period_date = Some(dtp.parse_date()?),
-                    "455" => claim.last_xray_date = Some(dtp.parse_date()?),
-                    "360" => claim.disability_from_date = Some(dtp.parse_date()?),
-                    "361" => claim.disability_to_date = Some(dtp.parse_date()?),
-                    "297" => claim.last_worked_date = Some(dtp.parse_date()?),
-                    "296" => claim.authorized_return_to_work_date = Some(dtp.parse_date()?),
-                    "435" => claim.admission_date = Some(dtp.parse_date()?),
-                    "096" => claim.discharge_date = Some(dtp.parse_date()?),
-                    _ => {}
+
+                // DTP*472 can appear at both claim level and service line level
+                // If we're currently parsing a service line, it's the service date
+                // Otherwise, it's the claim date
+                if dtp.date_time_qualifier == "472" {
+                    if let Some(ref mut line) = current_service_line {
+                        // Service line date
+                        line.service_date_from = dtp.parse_date()?;
+                    } else {
+                        // Claim date (no active service line)
+                        claim.date_of_service_from = dtp.parse_date()?;
+                    }
+                } else {
+                    // Other date types are claim-level only
+                    match dtp.date_time_qualifier.as_str() {
+                        "433" => claim.onset_of_illness_date = Some(dtp.parse_date()?),
+                        "454" => claim.initial_treatment_date = Some(dtp.parse_date()?),
+                        "304" => claim.last_seen_date = Some(dtp.parse_date()?),
+                        "453" => claim.acute_manifestation_date = Some(dtp.parse_date()?),
+                        "439" => claim.accident_date = Some(dtp.parse_date()?),
+                        "484" => claim.last_menstrual_period_date = Some(dtp.parse_date()?),
+                        "455" => claim.last_xray_date = Some(dtp.parse_date()?),
+                        "360" => claim.disability_from_date = Some(dtp.parse_date()?),
+                        "361" => claim.disability_to_date = Some(dtp.parse_date()?),
+                        "297" => claim.last_worked_date = Some(dtp.parse_date()?),
+                        "296" => claim.authorized_return_to_work_date = Some(dtp.parse_date()?),
+                        "435" => claim.admission_date = Some(dtp.parse_date()?),
+                        "096" => claim.discharge_date = Some(dtp.parse_date()?),
+                        _ => {}
+                    }
                 }
             }
             "HI" => {
@@ -336,8 +464,89 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     _ => {}
                 }
             }
+            "LX" => {
+                // Save previous service line if any
+                if let Some(line) = current_service_line.take() {
+                    claim.service_lines.push(line);
+                }
+
+                // Start new service line
+                let lx = LxSegment::parse(segment)?;
+                current_service_line = Some(ServiceLine {
+                    line_number: lx.line_number,
+                    product_service_id_qualifier: String::new(),
+                    procedure_code: String::new(),
+                    procedure_modifier_1: None,
+                    procedure_modifier_2: None,
+                    procedure_modifier_3: None,
+                    procedure_modifier_4: None,
+                    line_item_charge_amount: rust_decimal::Decimal::ZERO,
+                    unit_basis_measurement_code: String::new(),
+                    service_unit_count: rust_decimal::Decimal::ZERO,
+                    service_date_from: chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+                    service_date_to: None,
+                    place_of_service_code: None,
+                    emergency_indicator: None,
+                    epsdt_indicator: None,
+                    family_planning_indicator: None,
+                    diagnosis_code_pointer_1: None,
+                    diagnosis_code_pointer_2: None,
+                    diagnosis_code_pointer_3: None,
+                    diagnosis_code_pointer_4: None,
+                    rendering_provider_npi: None,
+                    rendering_provider_last_name: None,
+                    rendering_provider_first_name: None,
+                    supervising_provider_npi: None,
+                    ordering_provider_npi: None,
+                    ordering_provider_last_name: None,
+                    ordering_provider_first_name: None,
+                    referring_provider_npi: None,
+                    ndc_code: None,
+                    ndc_unit_count: None,
+                    ndc_measurement_unit: None,
+                    prior_authorization_number: None,
+                    referral_number: None,
+                    line_note: None,
+                    revenue_code: None,
+                    other_payer_line_paid_amount: None,
+                });
+            }
+            "SV1" => {
+                if let Some(ref mut line) = current_service_line {
+                    let sv1 = Sv1Segment::parse(segment)?;
+                    line.product_service_id_qualifier = sv1.product_service_id_qualifier;
+                    line.procedure_code = sv1.procedure_code;
+                    line.procedure_modifier_1 = sv1.procedure_modifier_1;
+                    line.procedure_modifier_2 = sv1.procedure_modifier_2;
+                    line.procedure_modifier_3 = sv1.procedure_modifier_3;
+                    line.procedure_modifier_4 = sv1.procedure_modifier_4;
+                    line.line_item_charge_amount = sv1.line_item_charge_amount;
+                    line.unit_basis_measurement_code = sv1.unit_basis_measurement_code;
+                    line.service_unit_count = sv1.service_unit_count;
+                    line.place_of_service_code = sv1.place_of_service_code;
+
+                    // Diagnosis pointers - SV1 returns Vec<i16>, need to map to individual fields
+                    if let Some(&p1) = sv1.diagnosis_code_pointer.get(0) {
+                        line.diagnosis_code_pointer_1 = Some(p1);
+                    }
+                    if let Some(&p2) = sv1.diagnosis_code_pointer.get(1) {
+                        line.diagnosis_code_pointer_2 = Some(p2);
+                    }
+                    if let Some(&p3) = sv1.diagnosis_code_pointer.get(2) {
+                        line.diagnosis_code_pointer_3 = Some(p3);
+                    }
+                    if let Some(&p4) = sv1.diagnosis_code_pointer.get(3) {
+                        line.diagnosis_code_pointer_4 = Some(p4);
+                    }
+                }
+            }
             _ => {}
         }
+    }
+
+    // Don't forget to push the last service line
+    if let Some(line) = current_service_line {
+        claim.service_lines.push(line);
     }
 
     Ok(claim)

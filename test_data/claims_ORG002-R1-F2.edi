@@ -22,7 +22,7 @@ DTP*472*D8*20251004~
 REF*D9*ORG002-R1-F2-000002~
 HI*ABK:F41.9~
 NM1*82*1*Allen*Charles****XX*9655591066~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~
@@ -40,7 +40,7 @@ DTP*472*D8*20250821~
 REF*D9*ORG002-R1-F2-000003~
 HI*ABK:M79.3~
 NM1*82*1*Cruz*Melissa****XX*2919665984~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~
@@ -58,7 +58,7 @@ DTP*472*D8*20250620~
 REF*D9*ORG002-R1-F2-000004~
 HI*ABK:E11.9~
 NM1*82*1*Diaz*Deborah****XX*3860020630~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~
@@ -76,7 +76,7 @@ DTP*472*D8*20250701~
 REF*D9*ORG002-R1-F2-000005~
 HI*ABK:M79.3~
 NM1*82*1*Smith*Lisa****XX*3883507851~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~
@@ -94,7 +94,7 @@ DTP*472*D8*20251005~
 REF*D9*ORG002-R1-F2-000006~
 HI*ABK:E78.5~
 NM1*82*1*Moore*Christopher****XX*3138771147~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~
@@ -112,7 +112,7 @@ DTP*472*D8*20250628~
 REF*D9*ORG002-R1-F2-000007~
 HI*ABK:F41.9~
 NM1*82*1*Allen*Charles****XX*9655591066~
-NM1*77*2*North Region Clinic****XX*7531225741~
+NM1*77*2*North Region Clinic*****XX*7531225741~
 N3*110 Healthcare Drive~
 N4*Chicago*TX*49214~
 LX*1~

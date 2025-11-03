@@ -22,7 +22,7 @@ DTP*472*D8*20250626~
 REF*D9*ORG001-R2-F2-000002~
 HI*ABK:E11.9~
 NM1*82*1*Carter*Anna****XX*2271542503~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -40,7 +40,7 @@ DTP*472*D8*20251029~
 REF*D9*ORG001-R2-F2-000003~
 HI*ABK:K21.9~
 NM1*82*1*Williams*Ronald****XX*1903200814~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -58,7 +58,7 @@ DTP*472*D8*20250609~
 REF*D9*ORG001-R2-F2-000004~
 HI*ABK:E11.9~
 NM1*82*1*Hernandez*Susan****XX*2734334093~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -76,7 +76,7 @@ DTP*472*D8*20250712~
 REF*D9*ORG001-R2-F2-000005~
 HI*ABK:I10~
 NM1*82*1*Reyes*Amy****XX*3848481782~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -94,7 +94,7 @@ DTP*472*D8*20250713~
 REF*D9*ORG001-R2-F2-000006~
 HI*ABK:F41.9~
 NM1*82*1*Morris*Amanda****XX*1921768641~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -112,7 +112,7 @@ DTP*472*D8*20250604~
 REF*D9*ORG001-R2-F2-000007~
 HI*ABK:Z23~
 NM1*82*1*Carter*Anna****XX*2271542503~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~
@@ -130,7 +130,7 @@ DTP*472*D8*20250819~
 REF*D9*ORG001-R2-F2-000008~
 HI*ABK:R10.9~
 NM1*82*1*Williams*Ronald****XX*1903200814~
-NM1*77*2*South Region Clinic****XX*1292573024~
+NM1*77*2*South Region Clinic*****XX*1292573024~
 N3*9798 Healthcare Drive~
 N4*Chicago*CA*12626~
 LX*1~

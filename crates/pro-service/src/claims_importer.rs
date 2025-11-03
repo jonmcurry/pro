@@ -600,6 +600,265 @@ impl ClaimsImporter {
         })
     }
 
+    /// STAGE 1: Ingest EDI 837p file to staging.raw_claims (two-stage pipeline)
+    /// Similar to CSV ingestion but uses EDI parser
+    pub async fn ingest_edi_to_staging(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<IngestResult> {
+        let file_path_str = file_path.display().to_string();
+        let filename = file_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        info!("====== STAGE 1: Starting EDI file ingestion to staging: {} ======", file_path_str);
+
+        // Get batch_id from queue (it was created during enqueue_file)
+        let batch_id: Uuid = sqlx::query_scalar(
+            "SELECT import_batch_id FROM staging.file_processing_queue WHERE queue_id = $1"
+        )
+        .bind(queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?)
+        .fetch_one(&self.pool)
+        .await
+        .context("Failed to get batch_id from queue")?;
+
+        info!("Parsing EDI 837p file...");
+        let parse_start = chrono::Utc::now();
+
+        use pro_parser_edi::EdiParser;
+        let mut parser = EdiParser::new();
+
+        let transaction = match parser.parse_file(&file_path_str) {
+            Ok(txn) => {
+                info!("Successfully parsed EDI 837p file: {} claims", txn.claims.len());
+                txn
+            }
+            Err(e) => {
+                error!("Failed to parse EDI 837p file: {}", e);
+                return Err(anyhow::anyhow!("Failed to parse EDI 837p file: {}", e));
+            }
+        };
+        let parse_end = chrono::Utc::now();
+
+        info!("Parsed {} claims from EDI file", transaction.claims.len());
+
+        // Log PARSE metric
+        if let Err(e) = self.log_processing_metric_with_stage(
+            queue_id.unwrap(),
+            "FILE_PROCESSING",
+            "PARSE",
+            parse_start,
+            parse_end,
+            transaction.claims.len() as i32,
+            transaction.claims.len() as i32,
+            0,
+            Some(serde_json::json!({
+                "filename": filename,
+                "format": "EDI_837P"
+            })),
+            "INGEST"
+        ).await {
+            warn!("Failed to log PARSE metric: {}", e);
+        }
+
+        // Begin transaction for batch insertion to staging.raw_claims
+        let mut tx = self.pool.begin().await
+            .context("Failed to begin database transaction")?;
+
+        let ingest_start = chrono::Utc::now();
+
+        const BATCH_SIZE: usize = 1000;
+        let mut batch_count = 0;
+        let mut ingested_count = 0;
+
+        // Insert each claim into staging.raw_claims as JSONB
+        for (idx, claim) in transaction.claims.iter().enumerate() {
+            let row_number = (idx + 1) as i32;
+
+            // DEBUG: Log the parsed claim to see what we got from the parser
+            info!("Claim {}: subscriber_name='{}  {}', payer_name='{}', patient_control='{}', date_of_service={}",
+                idx + 1,
+                claim.subscriber_first_name,
+                claim.subscriber_last_name,
+                claim.payer_name,
+                claim.patient_control_number,
+                claim.date_of_service_from
+            );
+
+            // Transform EDI ParsedClaim to match CSV database structure:
+            // - encounter_fields: Main claim/subscriber/payer data (JSONB)
+            // - service_line_fields: Service lines (JSONB HashMap)
+            // - diagnosis_fields: Diagnosis codes (JSONB HashMap)
+            use serde_json::Map;
+
+            // ENCOUNTER FIELDS - Main claim data
+            let mut encounter_fields = Map::new();
+
+            // Subscriber information
+            encounter_fields.insert("subscriber_last_name".to_string(), serde_json::json!(claim.subscriber_last_name));
+            encounter_fields.insert("subscriber_first_name".to_string(), serde_json::json!(claim.subscriber_first_name));
+            encounter_fields.insert("subscriber_middle_name".to_string(), serde_json::json!(claim.subscriber_middle_name.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_name_suffix".to_string(), serde_json::json!(claim.subscriber_name_suffix.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_id".to_string(), serde_json::json!(claim.subscriber_id));
+            // Use subscriber_birth_date to match claims_processor expectation
+            encounter_fields.insert("subscriber_birth_date".to_string(), serde_json::json!(claim.subscriber_date_of_birth.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("subscriber_gender".to_string(), serde_json::json!(claim.subscriber_gender.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_address_line1".to_string(), serde_json::json!(claim.subscriber_address_line1.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_address_line2".to_string(), serde_json::json!(claim.subscriber_address_line2.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_city".to_string(), serde_json::json!(claim.subscriber_city.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_state".to_string(), serde_json::json!(claim.subscriber_state.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_postal_code".to_string(), serde_json::json!(claim.subscriber_postal_code.clone().unwrap_or_default()));
+            encounter_fields.insert("subscriber_country".to_string(), serde_json::json!(claim.subscriber_country.clone().unwrap_or_default()));
+            encounter_fields.insert("medical_record_number".to_string(), serde_json::json!(claim.medical_record_number.clone().unwrap_or_default()));
+
+            // Payer information
+            encounter_fields.insert("payer_name".to_string(), serde_json::json!(claim.payer_name));
+            encounter_fields.insert("payer_id".to_string(), serde_json::json!(claim.payer_id));
+            encounter_fields.insert("payer_address_line1".to_string(), serde_json::json!(claim.payer_address_line1.clone().unwrap_or_default()));
+            encounter_fields.insert("payer_address_line2".to_string(), serde_json::json!(claim.payer_address_line2.clone().unwrap_or_default()));
+            encounter_fields.insert("payer_city".to_string(), serde_json::json!(claim.payer_city.clone().unwrap_or_default()));
+            encounter_fields.insert("payer_state".to_string(), serde_json::json!(claim.payer_state.clone().unwrap_or_default()));
+            encounter_fields.insert("payer_postal_code".to_string(), serde_json::json!(claim.payer_postal_code.clone().unwrap_or_default()));
+
+            // Claim information
+            encounter_fields.insert("patient_control_number".to_string(), serde_json::json!(claim.patient_control_number));
+            encounter_fields.insert("total_claim_charge_amount".to_string(), serde_json::json!(claim.total_claim_charge_amount.to_string()));
+            encounter_fields.insert("place_of_service_code".to_string(), serde_json::json!(claim.place_of_service_code.clone().unwrap_or_default()));
+            encounter_fields.insert("date_of_service_from".to_string(), serde_json::json!(claim.date_of_service_from.format("%Y-%m-%d").to_string()));
+            encounter_fields.insert("date_of_service_to".to_string(), serde_json::json!(claim.date_of_service_to.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+
+            // Provider NPIs
+            encounter_fields.insert("rendering_provider_npi".to_string(), serde_json::json!(claim.rendering_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("referring_provider_npi".to_string(), serde_json::json!(claim.referring_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("supervising_provider_npi".to_string(), serde_json::json!(claim.supervising_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
+
+            // CRITICAL: facility_npi for Stage 2 facility resolution
+            encounter_fields.insert("facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
+
+            let encounter_fields_json = serde_json::Value::Object(encounter_fields);
+
+            // DIAGNOSIS FIELDS - Separate JSONB column as HashMap<String, Vec<String>>
+            let mut diagnosis_map: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+            for (i, diagnosis) in claim.diagnoses.iter().enumerate() {
+                let field_name = format!("diagnosis_code_{}", i + 1);
+                diagnosis_map.insert(field_name, vec![diagnosis.diagnosis_code.clone()]);
+            }
+            let diagnosis_fields_json = serde_json::to_value(&diagnosis_map)
+                .context("Failed to serialize diagnosis fields")?;
+
+            // SERVICE LINE FIELDS - Separate JSONB column as HashMap<String, String>
+            // Process ALL service lines (not just first 3)
+            let mut service_line_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+            for (i, line) in claim.service_lines.iter().enumerate() {
+                let prefix = format!("service_line_{}", i + 1);
+                service_line_map.insert(format!("{}_date_from", prefix), line.service_date_from.format("%Y-%m-%d").to_string());
+                service_line_map.insert(format!("{}_date_to", prefix), line.service_date_to.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default());
+                service_line_map.insert(format!("{}_procedure_code", prefix), line.procedure_code.clone());
+                service_line_map.insert(format!("{}_modifier_1", prefix), line.procedure_modifier_1.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_modifier_2", prefix), line.procedure_modifier_2.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_modifier_3", prefix), line.procedure_modifier_3.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_modifier_4", prefix), line.procedure_modifier_4.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_charge_amount", prefix), line.line_item_charge_amount.to_string());
+                service_line_map.insert(format!("{}_units", prefix), line.service_unit_count.to_string());
+
+                // Diagnosis pointers
+                let mut pointers = Vec::new();
+                if let Some(p1) = line.diagnosis_code_pointer_1 {
+                    pointers.push(p1.to_string());
+                }
+                if let Some(p2) = line.diagnosis_code_pointer_2 {
+                    pointers.push(p2.to_string());
+                }
+                if let Some(p3) = line.diagnosis_code_pointer_3 {
+                    pointers.push(p3.to_string());
+                }
+                if let Some(p4) = line.diagnosis_code_pointer_4 {
+                    pointers.push(p4.to_string());
+                }
+                service_line_map.insert(format!("{}_diagnosis_pointers", prefix), pointers.join(","));
+            }
+            let service_line_fields_json = serde_json::to_value(&service_line_map)
+                .context("Failed to serialize service line fields")?;
+
+            // Insert into staging.raw_claims with all 3 JSONB columns
+            sqlx::query(
+                r#"
+                INSERT INTO staging.raw_claims (
+                    batch_id,
+                    queue_id,
+                    encounter_fields,
+                    service_line_fields,
+                    diagnosis_fields,
+                    row_number,
+                    processing_status,
+                    date_of_service_from
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7)
+                "#
+            )
+            .bind(batch_id)
+            .bind(queue_id.unwrap())
+            .bind(&encounter_fields_json)
+            .bind(&service_line_fields_json)
+            .bind(&diagnosis_fields_json)
+            .bind(row_number)
+            .bind(claim.date_of_service_from)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to insert claim into staging.raw_claims")?;
+
+            ingested_count += 1;
+            batch_count += 1;
+
+            // Commit in batches
+            if batch_count >= BATCH_SIZE {
+                tx.commit().await
+                    .context("Failed to commit batch transaction")?;
+                info!("Committed batch of {} claims to staging.raw_claims", batch_count);
+
+                // Start new transaction
+                tx = self.pool.begin().await
+                    .context("Failed to begin new transaction")?;
+                batch_count = 0;
+            }
+        }
+
+        // Commit remaining rows
+        if batch_count > 0 {
+            tx.commit().await
+                .context("Failed to commit final transaction")?;
+            info!("Committed final batch of {} claims to staging.raw_claims", batch_count);
+        }
+
+        let ingest_end = chrono::Utc::now();
+
+        // Log INGEST metric
+        if let Err(e) = self.log_processing_metric_with_stage(
+            queue_id.unwrap(),
+            "FILE_PROCESSING",
+            "INGEST",
+            ingest_start,
+            ingest_end,
+            ingested_count as i32,
+            ingested_count as i32,
+            0,
+            Some(serde_json::json!({
+                "filename": filename,
+                "format": "EDI_837P"
+            })),
+            "INGEST"
+        ).await {
+            warn!("Failed to log INGEST metric: {}", e);
+        }
+
+        info!("====== STAGE 1 COMPLETE: {} EDI claims ingested to staging ======", ingested_count);
+
+        Ok(IngestResult {
+            batch_id,
+            total_rows: ingested_count,
+            ingested_at: ingest_end,
+        })
+    }
+
     /// Log a processing metric with processing_stage column (for two-stage pipeline)
     async fn log_processing_metric_with_stage(
         &self,

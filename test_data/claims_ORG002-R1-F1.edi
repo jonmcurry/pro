@@ -22,7 +22,7 @@ DTP*472*D8*20250717~
 REF*D9*ORG002-R1-F1-000002~
 HI*ABK:K21.9~
 NM1*82*1*Walker*Margaret****XX*2867407456~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -40,7 +40,7 @@ DTP*472*D8*20250828~
 REF*D9*ORG002-R1-F1-000003~
 HI*ABK:R10.9~
 NM1*82*1*Flores*Shirley****XX*6313519861~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -58,7 +58,7 @@ DTP*472*D8*20250525~
 REF*D9*ORG002-R1-F1-000004~
 HI*ABK:J06.9~
 NM1*82*1*Clark*Jacob****XX*4021618083~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -76,7 +76,7 @@ DTP*472*D8*20250521~
 REF*D9*ORG002-R1-F1-000005~
 HI*ABK:J06.9~
 NM1*82*1*Rogers*Jessica****XX*6430542477~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -94,7 +94,7 @@ DTP*472*D8*20250808~
 REF*D9*ORG002-R1-F1-000006~
 HI*ABK:M54.5~
 NM1*82*1*Campbell*Richard****XX*8865601012~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -112,7 +112,7 @@ DTP*472*D8*20250518~
 REF*D9*ORG002-R1-F1-000007~
 HI*ABK:K21.9~
 NM1*82*1*Walker*Margaret****XX*2867407456~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -130,7 +130,7 @@ DTP*472*D8*20250713~
 REF*D9*ORG002-R1-F1-000008~
 HI*ABK:R10.9~
 NM1*82*1*Flores*Shirley****XX*6313519861~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -148,7 +148,7 @@ DTP*472*D8*20250727~
 REF*D9*ORG002-R1-F1-000009~
 HI*ABK:E11.9~
 NM1*82*1*Clark*Jacob****XX*4021618083~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~
@@ -166,7 +166,7 @@ DTP*472*D8*20250803~
 REF*D9*ORG002-R1-F1-000010~
 HI*ABK:E78.5~
 NM1*82*1*Rogers*Jessica****XX*6430542477~
-NM1*77*2*North Region Medical Center****XX*1997033985~
+NM1*77*2*North Region Medical Center*****XX*1997033985~
 N3*1930 Healthcare Drive~
 N4*Chicago*TX*54658~
 LX*1~

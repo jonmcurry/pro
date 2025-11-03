@@ -22,7 +22,7 @@ DTP*472*D8*20251005~
 REF*D9*ORG002-R2-F1-000002~
 HI*ABK:J06.9~
 NM1*82*1*Davis*Lisa****XX*3509292758~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -40,7 +40,7 @@ DTP*472*D8*20250520~
 REF*D9*ORG002-R2-F1-000003~
 HI*ABK:R10.9~
 NM1*82*1*Diaz*Lisa****XX*5971739209~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -58,7 +58,7 @@ DTP*472*D8*20250718~
 REF*D9*ORG002-R2-F1-000004~
 HI*ABK:I10~
 NM1*82*1*Rodriguez*Jeffrey****XX*9765385744~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -76,7 +76,7 @@ DTP*472*D8*20250608~
 REF*D9*ORG002-R2-F1-000005~
 HI*ABK:M54.5~
 NM1*82*1*Diaz*Michelle****XX*8490325730~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -94,7 +94,7 @@ DTP*472*D8*20250901~
 REF*D9*ORG002-R2-F1-000006~
 HI*ABK:M79.3~
 NM1*82*1*Nelson*Edward****XX*1247593958~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -112,7 +112,7 @@ DTP*472*D8*20250530~
 REF*D9*ORG002-R2-F1-000007~
 HI*ABK:F41.9~
 NM1*82*1*Davis*Lisa****XX*3509292758~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -130,7 +130,7 @@ DTP*472*D8*20250706~
 REF*D9*ORG002-R2-F1-000008~
 HI*ABK:I10~
 NM1*82*1*Diaz*Lisa****XX*5971739209~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~
@@ -148,7 +148,7 @@ DTP*472*D8*20250805~
 REF*D9*ORG002-R2-F1-000009~
 HI*ABK:M54.5~
 NM1*82*1*Rodriguez*Jeffrey****XX*9765385744~
-NM1*77*2*South Region Medical Center****XX*9782808653~
+NM1*77*2*South Region Medical Center*****XX*9782808653~
 N3*1034 Healthcare Drive~
 N4*Chicago*TX*49548~
 LX*1~

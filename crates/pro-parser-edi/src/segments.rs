@@ -219,6 +219,40 @@ impl DmgSegment {
     }
 }
 
+/// Parse SBR segment (Subscriber Information)
+/// Format: SBR*payer_responsibility*individual_relationship*group_policy_number*group_name*insurance_type*...
+pub struct SbrSegment {
+    pub payer_responsibility_sequence: String,
+    pub individual_relationship_code: String,
+    pub group_policy_number: Option<String>,
+    pub group_name: Option<String>,
+    pub insurance_type_code: Option<String>,
+    pub coordination_of_benefits_code: Option<String>,
+    pub yes_no_condition_response_code: Option<String>,
+    pub employment_status_code: Option<String>,
+    pub claim_filing_indicator_code: Option<String>,
+}
+
+impl SbrSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "SBR" {
+            return Err(Error::Parse(format!("Expected SBR segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            payer_responsibility_sequence: segment.get_or_empty(0).to_string(),
+            individual_relationship_code: segment.get_or_empty(1).to_string(),
+            group_policy_number: segment.get_optional(2),
+            group_name: segment.get_optional(3),
+            insurance_type_code: segment.get_optional(4),
+            coordination_of_benefits_code: segment.get_optional(5),
+            yes_no_condition_response_code: segment.get_optional(6),
+            employment_status_code: segment.get_optional(7),
+            claim_filing_indicator_code: segment.get_optional(8),
+        })
+    }
+}
+
 /// Parse CLM segment (Claim Information)
 /// Format: CLM*patient_control_number*charge_amount*claim_filing_indicator*place_of_service*...
 pub struct ClmSegment {

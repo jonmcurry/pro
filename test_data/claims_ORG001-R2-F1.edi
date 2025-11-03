@@ -22,7 +22,7 @@ DTP*472*D8*20250627~
 REF*D9*ORG001-R2-F1-000002~
 HI*ABK:R10.9~
 NM1*82*1*Taylor*Patricia****XX*5526595257~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -40,7 +40,7 @@ DTP*472*D8*20250529~
 REF*D9*ORG001-R2-F1-000003~
 HI*ABK:M54.5~
 NM1*82*1*Sanchez*Paul****XX*1718155342~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -58,7 +58,7 @@ DTP*472*D8*20250718~
 REF*D9*ORG001-R2-F1-000004~
 HI*ABK:M79.3~
 NM1*82*1*Hall*Joseph****XX*9372877177~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -76,7 +76,7 @@ DTP*472*D8*20250813~
 REF*D9*ORG001-R2-F1-000005~
 HI*ABK:Z23~
 NM1*82*1*Wright*Timothy****XX*9533188270~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -94,7 +94,7 @@ DTP*472*D8*20250921~
 REF*D9*ORG001-R2-F1-000006~
 HI*ABK:F41.9~
 NM1*82*1*Collins*Jennifer****XX*3530897321~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -112,7 +112,7 @@ DTP*472*D8*20250513~
 REF*D9*ORG001-R2-F1-000007~
 HI*ABK:K21.9~
 NM1*82*1*Taylor*Patricia****XX*5526595257~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -130,7 +130,7 @@ DTP*472*D8*20250724~
 REF*D9*ORG001-R2-F1-000008~
 HI*ABK:R10.9~
 NM1*82*1*Sanchez*Paul****XX*1718155342~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -148,7 +148,7 @@ DTP*472*D8*20250922~
 REF*D9*ORG001-R2-F1-000009~
 HI*ABK:M54.5~
 NM1*82*1*Hall*Joseph****XX*9372877177~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -166,7 +166,7 @@ DTP*472*D8*20251006~
 REF*D9*ORG001-R2-F1-000010~
 HI*ABK:M54.5~
 NM1*82*1*Wright*Timothy****XX*9533188270~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
@@ -184,7 +184,7 @@ DTP*472*D8*20250624~
 REF*D9*ORG001-R2-F1-000011~
 HI*ABK:E78.5~
 NM1*82*1*Collins*Jennifer****XX*3530897321~
-NM1*77*2*South Region Medical Center****XX*9057397983~
+NM1*77*2*South Region Medical Center*****XX*9057397983~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 LX*1~
