@@ -191,5 +191,25 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_medical_record_number",
             sql: include_str!("../../../migrations/035_add_medical_record_number.sql"),
         },
+        EmbeddedMigration {
+            version: "036",
+            name: "phase3_advanced_segments",
+            sql: include_str!("../../../migrations/036_phase3_advanced_segments.sql"),
+        },
+        EmbeddedMigration {
+            version: "037",
+            name: "phase4_advanced_cob",
+            sql: include_str!("../../../migrations/037_phase4_advanced_cob.sql"),
+        },
+        EmbeddedMigration {
+            version: "038",
+            name: "phase5_specialized_claims",
+            sql: include_str!("../../../migrations/038_phase5_specialized_claims.sql"),
+        },
+        EmbeddedMigration {
+            version: "039",
+            name: "phase6_additional_loops",
+            sql: include_str!("../../../migrations/039_phase6_additional_loops.sql"),
+        },
     ]
 }
