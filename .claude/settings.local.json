@@ -16,7 +16,8 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(crates/pro-parser-edi/src/loops.rs.new)",
-      "Bash(msiexec /i ProfessionalSMART.msi /l*v upgrade_v1.5.15.log /quiet /qn)"
+      "Bash(msiexec /i ProfessionalSMART.msi /l*v upgrade_v1.5.15.log /quiet /qn)",
+      "Bash(sc start:*)"
     ],
     "deny": [],
     "ask": []
