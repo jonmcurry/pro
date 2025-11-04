@@ -927,17 +927,20 @@ impl ClaimsProcessor {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        // Extract required service line fields
-        let procedure_code = service_line_fields.get("procedure_code")
+        // Build field name prefix using line_number (e.g., "service_line_1_")
+        let prefix = format!("service_line_{}_", line_number);
+
+        // Extract required service line fields using line number prefix
+        let procedure_code = service_line_fields.get(&format!("{}procedure_code", prefix))
             .context("Missing procedure_code")?;
-        let line_item_charge_amount = service_line_fields.get("line_item_charge_amount")
+        let line_item_charge_amount = service_line_fields.get(&format!("{}charge_amount", prefix))
             .context("Missing line_item_charge_amount")?;
         let default_unit_count = "1".to_string();
-        let service_unit_count = service_line_fields.get("service_unit_count")
+        let service_unit_count = service_line_fields.get(&format!("{}units", prefix))
             .unwrap_or(&default_unit_count);
 
         // Get service date - use service_date_from if available, otherwise fall back to encounter DOS
-        let service_date_str = service_line_fields.get("service_date_from")
+        let service_date_str = service_line_fields.get(&format!("{}date_from", prefix))
             .or_else(|| encounter_fields.get("date_of_service_from"))
             .context("Missing service_date_from and date_of_service_from")?;
 
@@ -952,20 +955,29 @@ impl ClaimsProcessor {
             .context("Invalid date format for service_date_from")?;
 
         // Extract diagnosis pointers (CRITICAL for medical necessity validation)
-        let pointer_1 = service_line_fields.get("diagnosis_code_pointer_1")
-            .and_then(|s| s.parse::<i16>().ok());
-        let pointer_2 = service_line_fields.get("diagnosis_code_pointer_2")
-            .and_then(|s| s.parse::<i16>().ok());
-        let pointer_3 = service_line_fields.get("diagnosis_code_pointer_3")
-            .and_then(|s| s.parse::<i16>().ok());
-        let pointer_4 = service_line_fields.get("diagnosis_code_pointer_4")
-            .and_then(|s| s.parse::<i16>().ok());
+        // NOTE: diagnosis_pointers field contains comma-separated values like "1,2,3"
+        let diagnosis_pointers = service_line_fields.get(&format!("{}diagnosis_pointers", prefix))
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let pointers: Vec<&str> = diagnosis_pointers.split(',').filter(|s| !s.is_empty()).collect();
+        let pointer_1 = pointers.get(0).and_then(|s| s.trim().parse::<i16>().ok());
+        let pointer_2 = pointers.get(1).and_then(|s| s.trim().parse::<i16>().ok());
+        let pointer_3 = pointers.get(2).and_then(|s| s.trim().parse::<i16>().ok());
+        let pointer_4 = pointers.get(3).and_then(|s| s.trim().parse::<i16>().ok());
 
-        // Extract procedure modifiers
-        let modifier_1 = service_line_fields.get("procedure_modifier_1").map(|s| s.as_str());
-        let modifier_2 = service_line_fields.get("procedure_modifier_2").map(|s| s.as_str());
-        let modifier_3 = service_line_fields.get("procedure_modifier_3").map(|s| s.as_str());
-        let modifier_4 = service_line_fields.get("procedure_modifier_4").map(|s| s.as_str());
+        // Extract procedure modifiers (filter out empty strings)
+        let modifier_1 = service_line_fields.get(&format!("{}modifier_1", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let modifier_2 = service_line_fields.get(&format!("{}modifier_2", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let modifier_3 = service_line_fields.get(&format!("{}modifier_3", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let modifier_4 = service_line_fields.get(&format!("{}modifier_4", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
 
         // Extract additional service line fields
         let product_service_id_qualifier = service_line_fields.get("product_service_id_qualifier")
@@ -977,12 +989,17 @@ impl ClaimsProcessor {
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
         let place_of_service_code = service_line_fields.get("place_of_service_code")
             .map(|s| s.as_str());
+
+        // Convert EDI Y/N indicators to boolean values
         let emergency_indicator = service_line_fields.get("emergency_indicator")
-            .map(|s| s.as_str());
+            .map(|s| s.trim().eq_ignore_ascii_case("Y"))
+            .unwrap_or(false);
         let epsdt_indicator = service_line_fields.get("epsdt_indicator")
-            .map(|s| s.as_str());
+            .map(|s| s.trim().eq_ignore_ascii_case("Y"))
+            .unwrap_or(false);
         let family_planning_indicator = service_line_fields.get("family_planning_indicator")
-            .map(|s| s.as_str());
+            .map(|s| s.trim().eq_ignore_ascii_case("Y"))
+            .unwrap_or(false);
 
         // Phase 3: Service line level fields
         // Phase 3.2: Rendering provider taxonomy at service line level
@@ -1057,7 +1074,15 @@ impl ClaimsProcessor {
         .bind("IMPORTED")
         .execute(&mut **tx)
         .await
-        .context("Failed to insert service line")?;
+        .map_err(|e| {
+            error!("DATABASE ERROR inserting service line: {:?}", e);
+            error!("  procedure_code: {}", procedure_code);
+            error!("  charge_amount: {}", charge_amount);
+            error!("  unit_count: {}", unit_count);
+            error!("  service_date: {}", service_date);
+            error!("  diagnosis_pointers: {:?},{:?},{:?},{:?}", pointer_1, pointer_2, pointer_3, pointer_4);
+            anyhow::anyhow!("Failed to insert service line: {}", e)
+        })?;
 
         debug!("Inserted service line {} for encounter {}", service_line_id, encounter_id);
 

@@ -639,6 +639,10 @@ impl ClaimsImporter {
         let parse_end = chrono::Utc::now();
 
         info!("Parsed {} claims from EDI file", transaction.claims.len());
+        info!("Submitter info: org_name={:?}, id_qualifier={:?}, id_code={:?}",
+            transaction.submitter.submitter_organization_name,
+            transaction.submitter.identification_code_qualifier,
+            transaction.submitter.identification_code);
 
         // Log PARSE metric
         if let Err(e) = self.log_processing_metric_with_stage(
@@ -733,6 +737,16 @@ impl ClaimsImporter {
 
             // CRITICAL: facility_npi for Stage 2 facility resolution
             encounter_fields.insert("facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
+
+            // CRITICAL: facility_code from submitter (Loop 1000A NM1*41) for facility lookup
+            // The submitter identification_code often contains the facility code (e.g., ORG001-R1-F1)
+            // This is used as a fallback when service_facility_npi is not available
+            if let Some(submitter_id) = &transaction.submitter.identification_code {
+                info!("Claim {}: Adding facility_code from submitter: {}", idx + 1, submitter_id);
+                encounter_fields.insert("facility_code".to_string(), serde_json::json!(submitter_id));
+            } else {
+                warn!("Claim {}: No submitter identification_code found!", idx + 1);
+            }
 
             let encounter_fields_json = serde_json::Value::Object(encounter_fields);
 

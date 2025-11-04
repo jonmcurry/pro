@@ -25,7 +25,18 @@
       "Bash(psql:*)",
       "Bash(sc query:*)",
       "Bash(Get-Content \"C:\\ProgramData\\Professional SMART\\logs\\service.log\" -Tail 50)",
-      "Bash(Get-Content \"C:\\ProgramData\\Professional SMART\\logs\\upgrade.log\" -Tail 50 -ErrorAction SilentlyContinue)"
+      "Bash(Get-Content \"C:\\ProgramData\\Professional SMART\\logs\\upgrade.log\" -Tail 50 -ErrorAction SilentlyContinue)",
+      "Bash(find:*)",
+      "Bash(cargo build:*)",
+      "Bash(Get-Process -Name \"pro-service\")",
+      "Bash(Select-Object -Property Path, StartTime)",
+      "Bash(Format-List)",
+      "Bash(cargo test:*)",
+      "Bash(Select-String \"Failed to insert|Failed to process encounter|ERROR\")",
+      "Bash(Get-Content \"C:\\ProgramData\\Professional SMART\\logs\\service.log\" -Tail 100)",
+      "Bash(Get-Content \"C:\\ProgramData\\Professional SMART\\logs\\service.log.2025-11-04\")",
+      "Bash(Select-String \"DATABASE ERROR\")",
+      "Bash(Select-Object -First 20)"
     ],
     "deny": [],
     "ask": []
