@@ -230,14 +230,35 @@ impl ClaimsImporter {
     fn calculate_file_hash(&self, file_path: &Path) -> Result<String> {
         use sha2::{Sha256, Digest};
 
-        let mut file = std::fs::File::open(file_path)
-            .context("Failed to open file for hashing")?;
-        let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher)
-            .context("Failed to read file for hashing")?;
+        // Retry logic for file access (handles cases where file is still being written or locked)
+        let mut last_error = None;
+        for attempt in 1..=5 {
+            match std::fs::File::open(file_path) {
+                Ok(mut file) => {
+                    let mut hasher = Sha256::new();
+                    std::io::copy(&mut file, &mut hasher)
+                        .with_context(|| format!("Failed to read file for hashing: {}", file_path.display()))?;
+                    let hash = hasher.finalize();
+                    if attempt > 1 {
+                        info!("Successfully opened file on attempt {}: {}", attempt, file_path.display());
+                    }
+                    return Ok(format!("{:x}", hash));
+                }
+                Err(e) => {
+                    warn!("Failed to open file (attempt {}): {} - Error: {}", attempt, file_path.display(), e);
+                    last_error = Some(e);
+                    if attempt < 5 {
+                        std::thread::sleep(std::time::Duration::from_millis(1000 * attempt));
+                    }
+                }
+            }
+        }
 
-        let hash = hasher.finalize();
-        Ok(format!("{:x}", hash))
+        Err(anyhow::anyhow!(
+            "Failed to open file for hashing after 5 attempts: {} - Last error: {:?}",
+            file_path.display(),
+            last_error
+        ))
     }
 
     /// Log a processing metric to staging.processing_metrics
@@ -738,15 +759,37 @@ impl ClaimsImporter {
             // CRITICAL: facility_npi for Stage 2 facility resolution
             encounter_fields.insert("facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
 
-            // CRITICAL: facility_code from submitter (Loop 1000A NM1*41) for facility lookup
-            // The submitter identification_code often contains the facility code (e.g., ORG001-R1-F1)
-            // This is used as a fallback when service_facility_npi is not available
-            if let Some(submitter_id) = &transaction.submitter.identification_code {
-                info!("Claim {}: Adding facility_code from submitter: {}", idx + 1, submitter_id);
-                encounter_fields.insert("facility_code".to_string(), serde_json::json!(submitter_id));
+            // CRITICAL: facility_code extraction - ALWAYS from NM1*85 (Billing Provider) ONLY
+            // Check qualifier 46 first, then REF segments (G2/1C/1J), then default to NPI from NM1*85
+            info!("Claim {}: BillingProvider values - npi='{}' (len={}), facility_id={:?}, provider_number={:?}, org_name={:?}",
+                idx + 1,
+                transaction.billing_provider.npi,
+                transaction.billing_provider.npi.len(),
+                transaction.billing_provider.facility_id,
+                transaction.billing_provider.provider_number,
+                transaction.billing_provider.organization_name
+            );
+
+            let facility_code = if let Some(facility_id) = &transaction.billing_provider.facility_id {
+                info!("Claim {}: Using facility_code from NM1*85 qualifier 46: {}", idx + 1, facility_id);
+                facility_id.clone()
+            } else if let Some(provider_number) = &transaction.billing_provider.provider_number {
+                info!("Claim {}: Using facility_code from NM1*85 REF (G2/1C/1J): {}", idx + 1, provider_number);
+                provider_number.clone()
+            } else if !transaction.billing_provider.npi.is_empty() {
+                info!("Claim {}: Using facility_code from NM1*85 NPI: {}", idx + 1, transaction.billing_provider.npi);
+                transaction.billing_provider.npi.clone()
             } else {
-                warn!("Claim {}: No submitter identification_code found!", idx + 1);
-            }
+                error!("Claim {}: NM1*85 billing provider has no identifier - npi='{}', facility_id={:?}, provider_number={:?}",
+                    idx + 1,
+                    transaction.billing_provider.npi,
+                    transaction.billing_provider.facility_id,
+                    transaction.billing_provider.provider_number
+                );
+                return Err(anyhow::anyhow!("Claim {}: NM1*85 billing provider has no identifier (no qualifier 46, REF, or NPI)", idx + 1));
+            };
+
+            encounter_fields.insert("facility_code".to_string(), serde_json::json!(facility_code));
 
             let encounter_fields_json = serde_json::Value::Object(encounter_fields);
 

@@ -96,6 +96,8 @@ pub struct BillingProvider {
     pub last_name: Option<String>,
     pub first_name: Option<String>,
     pub npi: String,
+    pub facility_id: Option<String>, // NM1 Qualifier 46 - Electronic Transmitter Identification Number
+    pub provider_number: Option<String>, // REF*G2 - Provider Commercial Number / Facility ID
     pub tax_id_type: Option<String>,
     pub tax_id: Option<String>,
     pub address_line1: Option<String>,

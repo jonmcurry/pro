@@ -193,41 +193,49 @@ impl EdiParser {
 
     /// Identify loop boundaries in the segment list
     fn identify_loops(&self, segments: &[EdiSegment]) -> Result<HashMap<String, Vec<EdiSegment>>> {
+        use tracing::info;
+
         let mut loop_map: HashMap<String, Vec<EdiSegment>> = HashMap::new();
         let mut current_loop: Option<String> = None;
         let mut loop_segments: Vec<EdiSegment> = Vec::new();
 
+        info!("[LOOP_DEBUG] Starting loop identification for {} segments", segments.len());
+
         for segment in segments {
             match segment.segment_id.as_str() {
                 "NM1" => {
-                    // Determine loop based on entity identifier
-                    if let Some(entity_id) = segment.get(0) {
-                        let new_loop = match entity_id {
-                            "41" => Some("1000A".to_string()), // Submitter
-                            "40" => Some("1000B".to_string()), // Receiver
-                            "85" => Some("2010AA".to_string()), // Billing Provider
-                            "IL" => Some("2010BA".to_string()), // Subscriber
-                            "PR" => Some("2010BB".to_string()), // Payer
-                            "DN" => Some("2310A".to_string()), // Referring Provider
-                            "82" => Some("2310B".to_string()), // Rendering Provider
-                            "77" => Some("2310C".to_string()), // Service Facility
-                            "DQ" => Some("2310D".to_string()), // Supervising Provider
-                            _ => None,
-                        };
+                    // Only process NM1 as loop starter if we're NOT inside a hierarchical loop (2000A/2000B/2000C)
+                    // NM1*41 and NM1*40 appear BEFORE any HL segments
+                    // NM1*85 and others should stay within their parent hierarchical loop
+                    let in_hierarchical_loop = current_loop.as_ref()
+                        .map(|l| l.starts_with("2000") || l.starts_with("2010") || l.starts_with("2310"))
+                        .unwrap_or(false);
 
-                        if let Some(loop_name) = new_loop {
-                            // Save previous loop if any
-                            if let Some(prev_loop) = current_loop.take() {
-                                loop_map.insert(prev_loop, loop_segments.clone());
-                                loop_segments.clear();
+                    if !in_hierarchical_loop {
+                        if let Some(entity_id) = segment.get(0) {
+                            let new_loop = match entity_id {
+                                "41" => Some("1000A".to_string()), // Submitter
+                                "40" => Some("1000B".to_string()), // Receiver
+                                _ => None,
+                            };
+
+                            if let Some(loop_name) = new_loop {
+                                // Save previous loop if any
+                                if let Some(prev_loop) = current_loop.take() {
+                                    loop_map.insert(prev_loop, loop_segments.clone());
+                                    loop_segments.clear();
+                                }
+                                current_loop = Some(loop_name);
                             }
-                            current_loop = Some(loop_name);
                         }
                     }
+                    // NM1*85, *IL, *PR, etc. will be included in the current hierarchical loop's segments
                 }
                 "HL" => {
                     // Hierarchical level indicates new loop
+                    info!("[LOOP_DEBUG] Found HL segment with {} elements: {:?}", segment.elements.len(), segment.elements);
                     if let Some(level_code) = segment.get(2) {
+                        info!("[LOOP_DEBUG] HL level_code = '{}'", level_code);
                         let new_loop = match level_code {
                             "20" => Some("2000A".to_string()), // Billing Provider Level
                             "22" => Some("2000B".to_string()), // Subscriber Level
@@ -236,11 +244,15 @@ impl EdiParser {
                         };
 
                         if let Some(loop_name) = new_loop {
+                            info!("[LOOP_DEBUG] Starting loop: {}", loop_name);
                             if let Some(prev_loop) = current_loop.take() {
+                                info!("[LOOP_DEBUG] Saving previous loop: {} with {} segments", prev_loop, loop_segments.len());
                                 loop_map.insert(prev_loop, loop_segments.clone());
                                 loop_segments.clear();
                             }
                             current_loop = Some(loop_name);
+                        } else {
+                            info!("[LOOP_DEBUG] HL level_code '{}' does not match any known loop", level_code);
                         }
                     }
                 }
@@ -254,7 +266,15 @@ impl EdiParser {
 
         // Save last loop
         if let Some(loop_name) = current_loop {
+            info!("[LOOP_DEBUG] Saving final loop: {} with {} segments", loop_name, loop_segments.len());
             loop_map.insert(loop_name, loop_segments);
+        }
+
+        info!("[LOOP_DEBUG] Loop identification complete. Found loops: {:?}", loop_map.keys().collect::<Vec<_>>());
+
+        // Log if Loop 2000A is missing
+        if !loop_map.contains_key("2000A") {
+            info!("[LOOP_DEBUG] WARNING: Loop 2000A (Billing Provider Level) was NOT found!");
         }
 
         Ok(loop_map)

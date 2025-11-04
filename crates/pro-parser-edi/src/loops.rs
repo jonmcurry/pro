@@ -4,6 +4,39 @@ use crate::segments::*;
 use crate::types::*;
 use pro_common::{Error, Result};
 use uuid::Uuid;
+use std::fs::OpenOptions;
+use std::io::Write;
+
+/// Helper function to write debug output to file
+/// Falls back to using tracing::info! if file write fails
+fn debug_log(message: &str) {
+    use tracing::info;
+
+    let log_path = if cfg!(windows) {
+        r"C:\ProgramData\Professional SMART\logs\nm1_debug.log"
+    } else {
+        "/tmp/nm1_debug.log"
+    };
+
+    // Try to write to file first
+    let file_written = if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    {
+        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+        writeln!(file, "[{}] {}", timestamp, message).is_ok()
+    } else {
+        false
+    };
+
+    // Always also log via tracing so it appears in service.log
+    info!("[NM1_DEBUG] {}", message);
+
+    if !file_written {
+        info!("[NM1_DEBUG] Warning: Could not write to {}", log_path);
+    }
+}
 
 /// Parse Loop 1000A - Submitter Name
 pub fn parse_submitter(segments: &[EdiSegment]) -> Result<Submitter> {
@@ -107,6 +140,8 @@ pub fn parse_billing_provider(segments: &[EdiSegment]) -> Result<BillingProvider
         last_name: None,
         first_name: None,
         npi: String::new(),
+        facility_id: None,
+        provider_number: None,
         tax_id_type: None,
         tax_id: None,
         address_line1: None,
@@ -126,20 +161,54 @@ pub fn parse_billing_provider(segments: &[EdiSegment]) -> Result<BillingProvider
                 provider.hierarchical_id_number = hl.hierarchical_id_number;
             }
             "NM1" => {
+                // Log RAW segment elements BEFORE parsing
+                debug_log(&format!("RAW NM1 segment - elements count: {}, elements: {:?}",
+                    segment.elements.len(),
+                    segment.elements
+                ));
+
                 let nm1 = Nm1Segment::parse(segment)?;
-                provider.entity_identifier_code = nm1.entity_identifier_code;
-                let entity_type = nm1.entity_type_qualifier.clone();
-                provider.entity_type_qualifier = nm1.entity_type_qualifier;
 
-                if entity_type == "1" {
-                    provider.last_name = nm1.last_name_or_org;
-                    provider.first_name = nm1.first_name;
+                // Log PARSED NM1 segment
+                debug_log(&format!("PARSED entity_id='{}', entity_type='{}', org/name={:?}, qualifier={:?}, code={:?}",
+                    nm1.entity_identifier_code,
+                    nm1.entity_type_qualifier,
+                    nm1.last_name_or_org,
+                    nm1.identification_code_qualifier,
+                    nm1.identification_code
+                ));
+
+                // ONLY process NM1*85 (Billing Provider) - ignore other NM1 segments in this loop
+                if nm1.entity_identifier_code == "85" {
+                    debug_log("[NM1_DEBUG] Found NM1*85! Setting billing provider values");
+                    provider.entity_identifier_code = nm1.entity_identifier_code.clone();
+                    let entity_type = nm1.entity_type_qualifier.clone();
+                    provider.entity_type_qualifier = nm1.entity_type_qualifier;
+
+                    if entity_type == "1" {
+                        provider.last_name = nm1.last_name_or_org;
+                        provider.first_name = nm1.first_name;
+                    } else {
+                        provider.organization_name = nm1.last_name_or_org;
+                    }
+
+                    // Extract NPI (qualifier XX) or Facility ID (qualifier 46)
+                    match nm1.identification_code_qualifier.as_deref() {
+                        Some("XX") => {
+                            let npi_value = nm1.identification_code.clone().unwrap_or_default();
+                            debug_log(&format!("[NM1_DEBUG] Setting provider.npi = '{}'", npi_value));
+                            provider.npi = npi_value;
+                        }
+                        Some("46") => {
+                            debug_log(&format!("[NM1_DEBUG] Setting provider.facility_id = {:?}", nm1.identification_code));
+                            provider.facility_id = nm1.identification_code;
+                        }
+                        _ => {
+                            debug_log("[NM1_DEBUG] No XX or 46 qualifier found");
+                        }
+                    }
                 } else {
-                    provider.organization_name = nm1.last_name_or_org;
-                }
-
-                if nm1.identification_code_qualifier.as_deref() == Some("XX") {
-                    provider.npi = nm1.identification_code.unwrap_or_default();
+                    debug_log(&format!("[NM1_DEBUG] Skipping NM1*{} (not 85)", nm1.entity_identifier_code));
                 }
             }
             "N3" => {
@@ -156,10 +225,20 @@ pub fn parse_billing_provider(segments: &[EdiSegment]) -> Result<BillingProvider
             }
             "REF" => {
                 let ref_seg = RefSegment::parse(segment)?;
-                if ref_seg.reference_identification_qualifier == "EI" {
-                    // Tax ID
-                    provider.tax_id_type = Some("EI".to_string());
-                    provider.tax_id = ref_seg.reference_identification;
+                match ref_seg.reference_identification_qualifier.as_str() {
+                    "EI" => {
+                        // Tax ID
+                        provider.tax_id_type = Some("EI".to_string());
+                        provider.tax_id = ref_seg.reference_identification;
+                    }
+                    "G2" | "1C" | "1J" => {
+                        // Provider Commercial Number / Facility ID
+                        // G2 = Provider Commercial Number
+                        // 1C = Medicare Provider Number
+                        // 1J = Facility ID Number
+                        provider.provider_number = ref_seg.reference_identification;
+                    }
+                    _ => {}
                 }
             }
             "PER" => {

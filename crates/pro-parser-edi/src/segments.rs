@@ -87,8 +87,8 @@ impl Nm1Segment {
             middle_name: segment.get_optional(4),
             name_prefix: segment.get_optional(5),
             name_suffix: segment.get_optional(6),
-            identification_code_qualifier: segment.get_optional(6),
-            identification_code: segment.get_optional(7),
+            identification_code_qualifier: segment.get_optional(7),
+            identification_code: segment.get_optional(8),
         })
     }
 }

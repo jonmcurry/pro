@@ -129,10 +129,16 @@ Function WriteConfig()
     configFile.WriteLine "LOG_LEVEL=info"
     configFile.WriteLine "RUST_LOG=info"
     configFile.WriteLine ""
+    ' File paths - use forward slashes and quote paths to avoid parsing issues
+    Dim inputDir, processedDir, errorDir
+    inputDir = Replace(installFolder & "data\input", "\", "/")
+    processedDir = Replace(installFolder & "data\processed", "\", "/")
+    errorDir = Replace(installFolder & "data\error", "\", "/")
+
     configFile.WriteLine "# File Processing"
-    configFile.WriteLine "INPUT_DIR=" & installFolder & "data\input"
-    configFile.WriteLine "PROCESSED_DIR=" & installFolder & "data\processed"
-    configFile.WriteLine "ERROR_DIR=" & installFolder & "data\error"
+    configFile.WriteLine "INPUT_DIR=""" & inputDir & """"
+    configFile.WriteLine "PROCESSED_DIR=""" & processedDir & """"
+    configFile.WriteLine "ERROR_DIR=""" & errorDir & """"
     configFile.WriteLine ""
     configFile.WriteLine "# WebSocket Configuration"
     configFile.WriteLine "STREAMING_ENABLE_WEBSOCKET=true"
