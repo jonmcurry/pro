@@ -1,7 +1,7 @@
 -- Test migration to verify upgrade functionality
 
 CREATE TABLE IF NOT EXISTS staging.upgrade_test (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     upgrade_version VARCHAR(20) NOT NULL,
     upgraded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     notes TEXT

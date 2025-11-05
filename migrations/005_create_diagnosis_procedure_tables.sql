@@ -4,8 +4,8 @@
 
 -- Diagnosis codes for encounter (Loop 2300 HI)
 CREATE TABLE claims.encounter_diagnosis (
-    diagnosis_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    diagnosis_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
     sequence_number SMALLINT NOT NULL, -- 1-12 for principal and secondary diagnoses
     diagnosis_code_qualifier VARCHAR(3) DEFAULT 'ABK', -- ABK for ICD-10-CM
     diagnosis_code VARCHAR(30) NOT NULL,
@@ -34,8 +34,8 @@ COMMENT ON TABLE claims.encounter_diagnosis IS 'Diagnosis codes associated with 
 
 -- Service lines / procedures for encounter (Loop 2400)
 CREATE TABLE claims.service_line (
-    service_line_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
     line_number SMALLINT NOT NULL, -- Service line number
 
     -- Service information (Loop 2400 SV1)
@@ -67,23 +67,23 @@ CREATE TABLE claims.service_line (
     family_planning_indicator BOOLEAN DEFAULT false,
 
     -- Rendering provider at line level (Loop 2420A)
-    rendering_provider_id UUID REFERENCES claims.provider(provider_id),
+    rendering_provider_id BIGINT REFERENCES claims.provider(provider_id),
     rendering_provider_npi VARCHAR(10),
 
     -- Supervising provider at line level (Loop 2420D)
-    supervising_provider_id UUID REFERENCES claims.provider(provider_id),
+    supervising_provider_id BIGINT REFERENCES claims.provider(provider_id),
     supervising_provider_npi VARCHAR(10),
 
     -- Ordering provider at line level (Loop 2420E)
-    ordering_provider_id UUID REFERENCES claims.provider(provider_id),
+    ordering_provider_id BIGINT REFERENCES claims.provider(provider_id),
     ordering_provider_npi VARCHAR(10),
 
     -- Referring provider at line level (Loop 2420F)
-    referring_provider_id UUID REFERENCES claims.provider(provider_id),
+    referring_provider_id BIGINT REFERENCES claims.provider(provider_id),
     referring_provider_npi VARCHAR(10),
 
     -- Service facility at line level (Loop 2420C)
-    service_facility_id UUID REFERENCES claims.facility(facility_id),
+    service_facility_id BIGINT REFERENCES claims.facility(facility_id),
     service_facility_npi VARCHAR(10),
 
     -- Prior authorization
@@ -173,8 +173,8 @@ CREATE TRIGGER update_service_line_updated_at BEFORE UPDATE ON claims.service_li
 
 -- Line item adjustments from other payers (Loop 2430 CAS)
 CREATE TABLE claims.service_line_adjustment (
-    adjustment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    service_line_id UUID NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    adjustment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    service_line_id BIGINT NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
     claim_adjustment_group_code VARCHAR(2) NOT NULL, -- CO, CR, OA, PI, PR
     adjustment_reason_code VARCHAR(5) NOT NULL,
     adjustment_amount NUMERIC(18,2) NOT NULL,
@@ -189,9 +189,9 @@ COMMENT ON TABLE claims.service_line_adjustment IS 'Line-level claim adjustments
 
 -- Additional diagnosis pointer mappings (if needed for complex scenarios)
 CREATE TABLE claims.service_line_diagnosis_pointer (
-    pointer_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    service_line_id UUID NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
-    diagnosis_id UUID NOT NULL REFERENCES claims.encounter_diagnosis(diagnosis_id) ON DELETE CASCADE,
+    pointer_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    service_line_id BIGINT NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    diagnosis_id BIGINT NOT NULL REFERENCES claims.encounter_diagnosis(diagnosis_id) ON DELETE CASCADE,
     pointer_sequence SMALLINT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 

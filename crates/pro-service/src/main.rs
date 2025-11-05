@@ -265,6 +265,56 @@ async fn run_console_mode() -> Result<()> {
         None
     };
 
+    // Start NPI enrichment worker (background provider enrichment)
+    let enable_npi_enrichment = std::env::var("NPI_ENRICHMENT_ENABLED")
+        .unwrap_or_else(|_| "true".to_string())
+        .parse::<bool>()
+        .unwrap_or(true);
+
+    let npi_enrichment_handle = if enable_npi_enrichment {
+        info!("Starting NPI enrichment worker (background provider enrichment)");
+
+        use pro_npi_enrichment::{EnrichmentWorker, WorkerConfig};
+        use tokio::time::Duration;
+
+        let config = WorkerConfig {
+            batch_size: std::env::var("NPI_BATCH_SIZE")
+                .ok()
+                .and_then(|s| s.parse::<usize>().ok())
+                .unwrap_or(10),
+            poll_interval: Duration::from_secs(
+                std::env::var("NPI_POLL_INTERVAL_SECS")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(30)
+            ),
+            rate_limit_delay: Duration::from_millis(
+                std::env::var("NPI_RATE_LIMIT_MS")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(200)
+            ),
+            enabled: true,
+        };
+
+        let pool_clone = db_pool.clone();
+        Some(tokio::spawn(async move {
+            match EnrichmentWorker::with_config(pool_clone, config) {
+                Ok(worker) => {
+                    if let Err(e) = worker.run().await {
+                        error!("NPI enrichment worker error: {}", e);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to create NPI enrichment worker: {}", e);
+                }
+            }
+        }))
+    } else {
+        info!("NPI enrichment worker disabled");
+        None
+    };
+
     // Initialize file watcher and claims importer
     let input_dir = std::env::var("INPUT_DIR")
         .unwrap_or_else(|_| "C:\\Program Files\\Professional SMART\\data\\input".to_string())
@@ -546,6 +596,12 @@ async fn run_console_mode() -> Result<()> {
     // PHASE 5: Gracefully shutdown API server
     if let Some(handle) = api_handle {
         info!("Stopping API server...");
+        handle.abort();
+    }
+
+    // Gracefully shutdown NPI enrichment worker
+    if let Some(handle) = npi_enrichment_handle {
+        info!("Stopping NPI enrichment worker...");
         handle.abort();
     }
 

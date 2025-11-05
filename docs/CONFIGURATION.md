@@ -296,6 +296,82 @@ ENABLE_PCN_VALIDATION=true
 ENABLE_SERVICE_LINE_VALIDATION=true
 ```
 
+## NPI Enrichment Configuration
+
+### NPI_ENRICHMENT_ENABLED
+**Description**: Enable/disable background NPI provider enrichment from CMS NPI Registry API
+**Type**: Boolean
+**Default**: true
+**Options**: `true`, `false`
+
+**Example**:
+```env
+NPI_ENRICHMENT_ENABLED=true
+```
+
+**Notes**:
+- When enabled, provider records are automatically enriched with detailed information from the CMS NPI Registry API
+- Runs asynchronously in the background - does NOT block claims processing
+- Provider auto-insertion from claims happens immediately; enrichment happens later
+- Failed enrichments are automatically retried with exponential backoff (1hr, 2hr, 4hr)
+
+### NPI_BATCH_SIZE
+**Description**: Number of providers to process per enrichment batch
+**Type**: Integer
+**Default**: 10
+**Range**: 1-50
+**Recommended**: 10 for balanced performance
+
+**Example**:
+```env
+NPI_BATCH_SIZE=10
+```
+
+**Tuning Guidelines**:
+- Smaller batches (1-5): Lower API load, slower overall enrichment
+- Default (10): Good balance between throughput and API politeness
+- Larger batches (20-50): Faster enrichment but higher API load
+
+### NPI_POLL_INTERVAL_SECS
+**Description**: How long to wait between polls when enrichment queue is empty (in seconds)
+**Type**: Integer
+**Default**: 30
+**Range**: 10-300
+**Recommended**: 30 for normal operations, 60 for low-priority enrichment
+
+**Example**:
+```env
+NPI_POLL_INTERVAL_SECS=30
+```
+
+**Tuning Guidelines**:
+- Shorter interval (10-15): More responsive to new providers, slightly higher overhead
+- Default (30): Good balance for most use cases
+- Longer interval (60-300): Lower overhead, suitable if enrichment is not time-sensitive
+
+### NPI_RATE_LIMIT_MS
+**Description**: Delay between individual NPI API requests in milliseconds (for rate limiting)
+**Type**: Integer
+**Default**: 200
+**Range**: 100-2000
+**Recommended**: 200 (5 requests/second max)
+
+**Example**:
+```env
+NPI_RATE_LIMIT_MS=200
+```
+
+**Tuning Guidelines**:
+- Default (200ms): 5 requests/second - safe and respectful to CMS API
+- More aggressive (100ms): 10 requests/second - use cautiously
+- More conservative (500ms): 2 requests/second - use if experiencing API throttling
+- **Important**: CMS NPI Registry API does not publish official rate limits, so be respectful
+
+**Notes**:
+- The worker automatically handles retry logic with exponential backoff for failed requests
+- API responses are cached in the database for audit trail and debugging
+- Provider specialty is automatically mapped from taxonomy codes via the `claims.provider_taxonomy` table
+
 ## Audit and Logging Configuration
 
 ### ENABLE_AUDIT_TRAIL
@@ -365,6 +441,12 @@ AUTO_PROCESS_FILES=false
 ENABLE_RULES_ENGINE=true
 ENABLE_RVU_CALCULATION=true
 ENABLE_AUTO_CODING_SUGGESTIONS=true
+
+# NPI Enrichment
+NPI_ENRICHMENT_ENABLED=true
+NPI_BATCH_SIZE=5
+NPI_POLL_INTERVAL_SECS=60
+NPI_RATE_LIMIT_MS=500
 ```
 
 ### Production Configuration
@@ -410,6 +492,12 @@ ENABLE_AUDIT_TRAIL=true
 LOG_DIRECTORY=E:\Claims\Logs
 LOG_ROTATION_SIZE_MB=100
 LOG_RETENTION_DAYS=90
+
+# NPI Enrichment
+NPI_ENRICHMENT_ENABLED=true
+NPI_BATCH_SIZE=10
+NPI_POLL_INTERVAL_SECS=30
+NPI_RATE_LIMIT_MS=200
 ```
 
 ## Configuration Validation

@@ -7,7 +7,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
-use uuid::Uuid;
+
 use chrono::NaiveDate;
 use rustc_hash::FxHashMap; // PHASE 4: Faster HashMap for performance
 
@@ -53,12 +53,12 @@ impl RuleResult {
 /// Context for rule execution
 #[derive(Debug, Clone)]
 pub struct RuleExecutionContext {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub encounter_id: Option<Uuid>,
-    pub service_line_id: Option<Uuid>,
-    pub provider_id: Option<Uuid>,
-    pub coder_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub encounter_id: Option<i64>,
+    pub service_line_id: Option<i64>,
+    pub provider_id: Option<i64>,
+    pub coder_id: Option<i64>,
 
     // Service line data
     pub procedure_code: Option<String>,
@@ -86,7 +86,7 @@ pub struct RuleExecutionContext {
 }
 
 impl RuleExecutionContext {
-    pub fn new(organization_id: Uuid) -> Self {
+    pub fn new(organization_id: i64) -> Self {
         Self {
             organization_id,
             facility_id: None,
@@ -139,7 +139,7 @@ pub struct ProviderInfo {
 /// Encounter history information for cache
 #[derive(Debug, Clone)]
 pub struct EncounterInfo {
-    pub encounter_id: Uuid,
+    pub encounter_id: i64,
     pub date_of_service: NaiveDate,
     pub claim_status: String,
 }
@@ -149,10 +149,10 @@ pub struct EncounterInfo {
 #[derive(Debug, Clone)]
 pub struct RuleExecutionCache {
     /// Duplicate service line lookup: (procedure_code, date, provider_id) -> Vec<service_line_id>
-    duplicate_service_lines: FxHashMap<(String, NaiveDate, Option<Uuid>), Vec<Uuid>>,
+    duplicate_service_lines: FxHashMap<(String, NaiveDate, Option<i64>), Vec<i64>>,
 
     /// Provider credentials lookup: provider_id -> ProviderInfo
-    provider_credentials: FxHashMap<Uuid, ProviderInfo>,
+    provider_credentials: FxHashMap<i64, ProviderInfo>,
 
     /// Patient encounter history: subscriber_id -> Vec<EncounterInfo>
     encounter_history: FxHashMap<String, Vec<EncounterInfo>>,
@@ -171,8 +171,8 @@ impl RuleExecutionCache {
     /// PHASE 4: Pre-allocate capacity for better memory performance
     pub async fn populate_for_batch(
         &mut self,
-        service_lines: &[(Uuid, &str, NaiveDate, Option<Uuid>)], // (id, procedure_code, date, provider_id)
-        provider_ids: &[Uuid],
+        service_lines: &[(&str, NaiveDate, Option<i64>)], // (id, procedure_code, date, provider_id)
+        provider_ids: &[i64],
         subscriber_ids: &[String],
         pool: &PgPool,
     ) -> Result<()> {
@@ -202,12 +202,12 @@ impl RuleExecutionCache {
     // PHASE 4: Optimized with single UNNEST query instead of loop
     async fn populate_duplicate_checks(
         &mut self,
-        service_lines: &[(Uuid, &str, NaiveDate, Option<Uuid>)],
+        service_lines: &[(&str, NaiveDate, Option<i64>)],
         pool: &PgPool,
     ) -> Result<()> {
         // Build unique keys to query
-        let mut unique_keys: Vec<(String, NaiveDate, Option<Uuid>)> = service_lines.iter()
-            .map(|(_, proc_code, date, provider_id)| {
+        let mut unique_keys: Vec<(String, NaiveDate, Option<i64>)> = service_lines.iter()
+            .map(|(proc_code, date, provider_id)| {
                 (proc_code.to_string(), *date, *provider_id)
             })
             .collect();
@@ -222,7 +222,7 @@ impl RuleExecutionCache {
         // Separate keys into with-provider and without-provider for efficient querying
         let mut proc_codes: Vec<String> = Vec::with_capacity(unique_keys.len());
         let mut dates: Vec<NaiveDate> = Vec::with_capacity(unique_keys.len());
-        let mut provider_ids: Vec<Option<Uuid>> = Vec::with_capacity(unique_keys.len());
+        let mut provider_ids: Vec<Option<i64>> = Vec::with_capacity(unique_keys.len());
 
         for (proc_code, date, provider_id) in &unique_keys {
             proc_codes.push(proc_code.clone());
@@ -265,8 +265,8 @@ impl RuleExecutionCache {
         for row in rows {
             let proc_code: String = row.get("proc_code");
             let date: NaiveDate = row.get("svc_date");
-            let provider_id: Option<Uuid> = row.get("prov_id");
-            let service_line_id: Option<Uuid> = row.get("service_line_id");
+            let provider_id: Option<i64> = row.get("prov_id");
+            let service_line_id: Option<i64> = row.get("service_line_id");
 
             if let Some(sl_id) = service_line_id {
                 self.duplicate_service_lines
@@ -281,7 +281,7 @@ impl RuleExecutionCache {
 
     async fn populate_provider_info(
         &mut self,
-        provider_ids: &[Uuid],
+        provider_ids: &[i64],
         pool: &PgPool,
     ) -> Result<()> {
         let query = r#"
@@ -297,7 +297,7 @@ impl RuleExecutionCache {
             .map_err(Error::Database)?;
 
         for row in rows {
-            let provider_id: Uuid = row.get("provider_id");
+            let provider_id: i64 = row.get("provider_id");
             self.provider_credentials.insert(provider_id, ProviderInfo {
                 provider_type: row.get("provider_type"),
                 taxonomy_code: row.get("taxonomy_code"),
@@ -329,7 +329,7 @@ impl RuleExecutionCache {
 
         for row in rows {
             let subscriber_id: String = row.get("subscriber_id");
-            let encounter_id: Uuid = row.get("encounter_id");
+            let encounter_id: i64 = row.get("encounter_id");
             let date_of_service: NaiveDate = row.get("date_of_service_from");
             let claim_status: String = row.get("claim_status");
 
@@ -351,13 +351,13 @@ impl RuleExecutionCache {
         &self,
         procedure_code: &str,
         service_date: NaiveDate,
-        provider_id: Option<Uuid>,
-    ) -> Option<&Vec<Uuid>> {
+        provider_id: Option<i64>,
+    ) -> Option<&Vec<i64>> {
         self.duplicate_service_lines.get(&(procedure_code.to_string(), service_date, provider_id))
     }
 
     /// Lookup provider info from cache
-    pub fn get_provider_info(&self, provider_id: Uuid) -> Option<&ProviderInfo> {
+    pub fn get_provider_info(&self, provider_id: i64) -> Option<&ProviderInfo> {
         self.provider_credentials.get(&provider_id)
     }
 
@@ -620,7 +620,7 @@ impl RuleEngine {
     }
 
     /// Persist flag results to database
-    pub async fn persist_flags(&self, results: Vec<RuleResult>) -> Result<Vec<Uuid>> {
+    pub async fn persist_flags(&self, results: Vec<RuleResult>) -> Result<Vec<i64>> {
         let mut flag_ids = Vec::new();
 
         for result in results {
@@ -636,7 +636,7 @@ impl RuleEngine {
         &self,
         results: Vec<RuleResult>,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Vec<Uuid>> {
+    ) -> Result<Vec<i64>> {
         let mut flag_ids = Vec::new();
 
         for result in results {
@@ -648,15 +648,13 @@ impl RuleEngine {
     }
 
     /// Create a single flag in the database
-    async fn create_flag(&self, result: &RuleResult) -> Result<Uuid> {
-        let flag_id = Uuid::new_v4();
+    async fn create_flag(&self, result: &RuleResult) -> Result<i64> {
         let flag_code = result.flag_type.code();
         let flag_category = result.flag_type.category().code();
         let severity = result.severity.as_str();
 
         let query = r#"
             INSERT INTO claims.flag (
-                flag_id,
                 encounter_id,
                 service_line_id,
                 organization_id,
@@ -672,14 +670,13 @@ impl RuleEngine {
                 financial_impact,
                 flag_status,
                 created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', CURRENT_TIMESTAMP)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'OPEN', CURRENT_TIMESTAMP)
             RETURNING flag_id
         "#;
 
         let flag_issue_type = result.flag_type.name();
 
-        let row = sqlx::query_as::<_, (Uuid,)>(query)
-            .bind(flag_id)
+        let row = sqlx::query_as::<_, (i64,)>(query)
             .bind(result.context.encounter_id)
             .bind(result.context.service_line_id)
             .bind(result.context.organization_id)
@@ -705,15 +702,13 @@ impl RuleEngine {
         &self,
         result: &RuleResult,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Uuid> {
-        let flag_id = Uuid::new_v4();
+    ) -> Result<i64> {
         let flag_code = result.flag_type.code();
         let flag_category = result.flag_type.category().code();
         let severity = result.severity.as_str();
 
         let query = r#"
             INSERT INTO claims.flag (
-                flag_id,
                 encounter_id,
                 service_line_id,
                 organization_id,
@@ -729,14 +724,13 @@ impl RuleEngine {
                 financial_impact,
                 flag_status,
                 created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'OPEN', CURRENT_TIMESTAMP)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'OPEN', CURRENT_TIMESTAMP)
             RETURNING flag_id
         "#;
 
         let flag_issue_type = result.flag_type.name();
 
-        let row = sqlx::query_as::<_, (Uuid,)>(query)
-            .bind(flag_id)
+        let row = sqlx::query_as::<_, (i64,)>(query)
             .bind(result.context.encounter_id)
             .bind(result.context.service_line_id)
             .bind(result.context.organization_id)
@@ -769,7 +763,7 @@ mod tests {
 
     #[test]
     fn test_rule_result_creation() {
-        let org_id = Uuid::new_v4();
+        let org_id = 1i64;
         let context = FlagContext::new(org_id);
         let result = RuleResult::new(FlagIssueType::CodUpcoding, context);
 
@@ -780,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_rule_result_builder() {
-        let org_id = Uuid::new_v4();
+        let org_id = 1i64;
         let context = FlagContext::new(org_id);
         let result = RuleResult::new(FlagIssueType::ModMissingRequired, context)
             .with_details("Modifier 25 required for E/M with procedure".to_string())
@@ -794,7 +788,7 @@ mod tests {
 
     #[test]
     fn test_rule_execution_context() {
-        let org_id = Uuid::new_v4();
+        let org_id = 1i64;
         let mut ctx = RuleExecutionContext::new(org_id);
 
         ctx.procedure_code = Some("99213".to_string());

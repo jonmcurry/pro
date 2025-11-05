@@ -3,7 +3,7 @@
 use crate::segments::*;
 use crate::types::*;
 use pro_common::{Error, Result};
-use uuid::Uuid;
+
 use std::fs::OpenOptions;
 use std::io::Write;
 
@@ -258,7 +258,7 @@ pub fn parse_billing_provider(segments: &[EdiSegment]) -> Result<BillingProvider
 /// Parse Loop 2300 - Claim Information
 pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
     let mut claim = ParsedClaim {
-        temp_id: Uuid::new_v4(),
+        temp_id: 0, // Temporary ID, database will generate actual ID
 
         // Initialize all required fields with defaults
         subscriber_hl_number: String::new(),

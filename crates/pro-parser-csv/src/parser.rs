@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
 use std::str::FromStr;
-use uuid::Uuid;
+
 
 /// Parsed CSV row with mapped fields
 #[derive(Debug, Clone)]
@@ -276,9 +276,10 @@ impl CsvParser {
             }
 
             DataType::Uuid => {
-                Uuid::parse_str(value.trim())
+                // Note: UUID type now represents BIGINT IDs in database
+                value.trim().parse::<i64>()
                     .map(|v| v.to_string())
-                    .map_err(|_| Error::Parse(format!("Invalid UUID: {}", value)))
+                    .map_err(|_| Error::Parse(format!("Invalid ID (expected integer): {}", value)))
             }
         }
     }

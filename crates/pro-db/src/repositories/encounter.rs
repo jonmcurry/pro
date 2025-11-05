@@ -3,7 +3,7 @@ use crate::DbPool;
 use chrono::NaiveDate;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as, Row};
-use uuid::Uuid;
+
 
 pub struct EncounterRepository<'a> {
     pool: &'a DbPool,
@@ -15,7 +15,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Get encounter by ID
-    pub async fn get_by_id(&self, id: Uuid) -> Result<Encounter> {
+    pub async fn get_by_id(&self, id: i64) -> Result<Encounter> {
         query_as::<_, Encounter>(
             r#"
             SELECT * FROM claims.encounter
@@ -49,7 +49,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// List encounters by organization
-    pub async fn list_by_organization(&self, organization_id: Uuid, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
+    pub async fn list_by_organization(&self, organization_id: i64, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
         query_as::<_, Encounter>(
             r#"
             SELECT * FROM claims.encounter
@@ -69,7 +69,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// List encounters by facility
-    pub async fn list_by_facility(&self, facility_id: Uuid, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
+    pub async fn list_by_facility(&self, facility_id: i64, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
         query_as::<_, Encounter>(
             r#"
             SELECT * FROM claims.encounter
@@ -91,7 +91,7 @@ impl<'a> EncounterRepository<'a> {
     /// List encounters by date range
     pub async fn list_by_date_range(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         from_date: NaiveDate,
         to_date: NaiveDate,
         limit: i64,
@@ -120,8 +120,8 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Create a new encounter
-    pub async fn create(&self, encounter: &Encounter) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, encounter: &Encounter) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.encounter (
                 facility_id, organization_id, region_id,
@@ -265,7 +265,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Soft delete an encounter
-    pub async fn soft_delete(&self, id: Uuid) -> Result<()> {
+    pub async fn soft_delete(&self, id: i64) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE claims.encounter
@@ -287,7 +287,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Get diagnoses for an encounter
-    pub async fn get_diagnoses(&self, encounter_id: Uuid) -> Result<Vec<EncounterDiagnosis>> {
+    pub async fn get_diagnoses(&self, encounter_id: i64) -> Result<Vec<EncounterDiagnosis>> {
         query_as::<_, EncounterDiagnosis>(
             r#"
             SELECT * FROM claims.encounter_diagnosis
@@ -302,8 +302,8 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Create a diagnosis for an encounter
-    pub async fn create_diagnosis(&self, diagnosis: &EncounterDiagnosis) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create_diagnosis(&self, diagnosis: &EncounterDiagnosis) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.encounter_diagnosis (
                 encounter_id, sequence_number,
@@ -336,7 +336,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Create multiple diagnoses in a single batch operation (PERFORMANCE OPTIMIZATION)
-    pub async fn create_diagnoses_batch(&self, diagnoses: &[EncounterDiagnosis]) -> Result<Vec<Uuid>> {
+    pub async fn create_diagnoses_batch(&self, diagnoses: &[EncounterDiagnosis]) -> Result<Vec<i64>> {
         if diagnoses.is_empty() {
             return Ok(Vec::new());
         }
@@ -393,10 +393,10 @@ impl<'a> EncounterRepository<'a> {
             .await
             .map_err(Error::Database)?;
 
-        // Extract UUIDs from result rows
-        let ids: Result<Vec<Uuid>> = rows
+        // Extract IDs from result rows
+        let ids: Result<Vec<i64>> = rows
             .iter()
-            .map(|row| row.try_get::<Uuid, _>(0).map_err(Error::Database))
+            .map(|row| row.try_get::<i64, _>(0).map_err(Error::Database))
             .collect();
 
         ids
@@ -407,8 +407,8 @@ impl<'a> EncounterRepository<'a> {
         &self,
         encounter: &Encounter,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    ) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.encounter (
                 facility_id, organization_id, region_id,
@@ -521,7 +521,7 @@ impl<'a> EncounterRepository<'a> {
         &self,
         diagnoses: &[EncounterDiagnosis],
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Vec<Uuid>> {
+    ) -> Result<Vec<i64>> {
         if diagnoses.is_empty() {
             return Ok(Vec::new());
         }
@@ -578,10 +578,10 @@ impl<'a> EncounterRepository<'a> {
             .await
             .map_err(Error::Database)?;
 
-        // Extract UUIDs from result rows
-        let ids: Result<Vec<Uuid>> = rows
+        // Extract IDs from result rows
+        let ids: Result<Vec<i64>> = rows
             .iter()
-            .map(|row| row.try_get::<Uuid, _>(0).map_err(Error::Database))
+            .map(|row| row.try_get::<i64, _>(0).map_err(Error::Database))
             .collect();
 
         ids
@@ -604,7 +604,7 @@ impl<'a> EncounterRepository<'a> {
     }
 
     /// Count encounters by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM claims.encounter
@@ -637,7 +637,7 @@ mod tests {
         let repo = EncounterRepository::new(&pool);
 
         // Test count_by_organization with a sample organization ID
-        let sample_org_id = Uuid::new_v4();
+        let sample_org_id = 1i64;
         let count = repo.count_by_organization(sample_org_id).await;
         assert!(count.is_ok());
     }

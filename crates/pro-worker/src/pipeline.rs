@@ -16,7 +16,7 @@ use pro_rules::RuleEngine;
 use pro_rvu::PaymentCalculator;
 use sqlx::PgPool;
 use tracing::{info, warn, error};
-use uuid::Uuid;
+
 use futures::StreamExt; // PHASE 5
 use tokio::sync::broadcast; // PHASE 5
 
@@ -213,19 +213,13 @@ impl IngestionPipeline {
                 // Collect service line information
                 for service_line in &claim.service_lines {
                     service_line_data.push((
-                        Uuid::new_v4(), // Placeholder ID (actual IDs created during processing)
                         service_line.procedure_code.as_str(),
                         service_line.service_date_from,
-                        service_line.rendering_provider_npi.as_ref()
-                            .and_then(|npi| npi.parse().ok()), // Convert NPI to UUID if available
+                        None, // TODO: Provider ID lookup by NPI
                     ));
 
-                    // Collect provider NPIs
-                    if let Some(ref npi) = service_line.rendering_provider_npi {
-                        if let Ok(provider_uuid) = npi.parse::<Uuid>() {
-                            provider_ids.push(provider_uuid);
-                        }
-                    }
+                    // TODO: Collect provider IDs from database lookup by NPI
+                    // Currently disabled - needs provider_id lookup
                 }
 
                 // Collect subscriber IDs
@@ -599,7 +593,7 @@ impl IngestionPipeline {
     fn convert_csv_to_claim(
         &self,
         csv_row: &pro_parser_csv::parser::ParsedRow,
-        _organization_id: Uuid,
+        _organization_id: i64,
     ) -> Result<pro_parser_edi::types::ParsedClaim> {
         use pro_parser_edi::types::ParsedClaim;
         use chrono::NaiveDate;
@@ -640,7 +634,7 @@ impl IngestionPipeline {
         // Build ParsedClaim structure
         let claim = ParsedClaim {
             // Temporary ID for processing
-            temp_id: Uuid::new_v4(),
+            temp_id: 0,
 
             // Subscriber hierarchical level (defaults for CSV)
             subscriber_hl_number: "1".to_string(),
@@ -932,7 +926,7 @@ impl IngestionPipeline {
     async fn process_claim(
         &self,
         claim: &pro_parser_edi::types::ParsedClaim,
-        organization_id: Uuid,
+        organization_id: i64,
         _pcn_validator: &PatientControlNumberValidator,
         _service_line_validator: &ServiceLineValidator,
         _business_validator: &BusinessRuleValidator,
@@ -978,7 +972,7 @@ impl IngestionPipeline {
         // *** PERFORMANCE: Batch insert diagnosis codes (10x faster) ***
         let diagnoses: Vec<EncounterDiagnosis> = claim.diagnoses.iter().enumerate()
             .map(|(idx, parsed_dx)| EncounterDiagnosis {
-                diagnosis_id: Uuid::new_v4(),
+                diagnosis_id: 0,
                 encounter_id,
                 sequence_number: (idx + 1) as i16,
                 diagnosis_code_qualifier: Some(parsed_dx.diagnosis_code_qualifier.clone()),
@@ -1185,7 +1179,7 @@ impl IngestionPipeline {
         &self,
         claim: &pro_parser_edi::types::ParsedClaim,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        organization_id: Uuid,
+        organization_id: i64,
         _pcn_validator: &PatientControlNumberValidator,
         _service_line_validator: &ServiceLineValidator,
         _business_validator: &BusinessRuleValidator,
@@ -1231,7 +1225,7 @@ impl IngestionPipeline {
         // *** PERFORMANCE: Batch insert diagnosis codes (within transaction) ***
         let diagnoses: Vec<EncounterDiagnosis> = claim.diagnoses.iter().enumerate()
             .map(|(idx, parsed_dx)| EncounterDiagnosis {
-                diagnosis_id: Uuid::new_v4(),
+                diagnosis_id: 0,
                 encounter_id,
                 sequence_number: (idx + 1) as i16,
                 diagnosis_code_qualifier: Some(parsed_dx.diagnosis_code_qualifier.clone()),
@@ -1430,7 +1424,7 @@ impl IngestionPipeline {
         &self,
         claim: &pro_parser_edi::types::ParsedClaim,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        organization_id: Uuid,
+        organization_id: i64,
         exec_cache: &pro_rules::RuleExecutionCache,
         result_cache: &pro_rules::RuleResultCache,
         _pcn_validator: &PatientControlNumberValidator,
@@ -1478,7 +1472,7 @@ impl IngestionPipeline {
         // *** PERFORMANCE: Batch insert diagnosis codes (within transaction) ***
         let diagnoses: Vec<EncounterDiagnosis> = claim.diagnoses.iter().enumerate()
             .map(|(idx, parsed_dx)| EncounterDiagnosis {
-                diagnosis_id: Uuid::new_v4(),
+                diagnosis_id: 0,
                 encounter_id,
                 sequence_number: (idx + 1) as i16,
                 diagnosis_code_qualifier: Some(parsed_dx.diagnosis_code_qualifier.clone()),
@@ -1678,11 +1672,11 @@ impl IngestionPipeline {
     fn convert_claim_to_encounter(
         &self,
         claim: &pro_parser_edi::types::ParsedClaim,
-        organization_id: Uuid,
+        organization_id: i64,
     ) -> Result<Encounter> {
         // For now, use hardcoded UUIDs for facility and region
         // In production, these would be looked up from the database
-        let facility_id = Uuid::new_v4(); // TODO: Look up from database
+        let facility_id = 0i64; // TODO: Look up from database
         let region_id = None; // TODO: Look up from database
 
         // Extract submitter info (would come from transaction header in production)
@@ -1691,7 +1685,7 @@ impl IngestionPipeline {
 
         // Build the encounter
         let encounter = Encounter {
-            encounter_id: Uuid::new_v4(),
+            encounter_id: 0,
             facility_id,
             organization_id,
             region_id,
@@ -1784,11 +1778,11 @@ impl IngestionPipeline {
     fn convert_service_line(
         &self,
         parsed_line: &pro_parser_edi::types::ServiceLine,
-        encounter_id: Uuid,
+        encounter_id: i64,
         line_number: i16,
     ) -> ServiceLine {
         ServiceLine {
-            service_line_id: Uuid::new_v4(),
+            service_line_id: 0,
             encounter_id,
             line_number,
 

@@ -4,11 +4,11 @@
 
 -- Create import_headers table in claims schema
 CREATE TABLE claims.import_headers (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Project and facility identification
-    project_id UUID, -- Nullable to support facilities without project assignment
-    facility_id UUID NOT NULL REFERENCES claims.facility(facility_id) ON DELETE CASCADE,
+    project_id BIGINT, -- Nullable to support facilities without project assignment
+    facility_id BIGINT NOT NULL REFERENCES claims.facility(facility_id) ON DELETE CASCADE,
 
     -- File type classification
     file_type VARCHAR(10) NOT NULL CHECK (file_type IN ('hl7', 'csv', 'edi')),

@@ -4,7 +4,7 @@
 
 -- Add project_id column to organization table
 ALTER TABLE claims.organization
-ADD COLUMN project_id UUID;
+ADD COLUMN project_id BIGINT;
 
 -- Add index for project_id lookups
 CREATE INDEX idx_organization_project_id ON claims.organization(project_id);

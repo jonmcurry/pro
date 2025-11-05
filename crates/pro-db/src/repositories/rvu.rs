@@ -3,7 +3,7 @@ use crate::DbPool;
 use chrono::NaiveDate;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct RvuRepository<'a> {
     pool: &'a DbPool,
@@ -19,7 +19,7 @@ impl<'a> RvuRepository<'a> {
     // ========================================================================
 
     /// Get RVU reference by ID
-    pub async fn get_rvu_by_id(&self, rvu_id: Uuid) -> Result<RvuReference> {
+    pub async fn get_rvu_by_id(&self, rvu_id: i64) -> Result<RvuReference> {
         query_as::<_, RvuReference>(
             r#"
             SELECT * FROM claims.rvu_reference
@@ -162,8 +162,8 @@ impl<'a> RvuRepository<'a> {
     }
 
     /// Create RVU reference
-    pub async fn create_rvu(&self, rvu: &RvuReference) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create_rvu(&self, rvu: &RvuReference) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.rvu_reference (
                 rvu_id,
@@ -211,7 +211,7 @@ impl<'a> RvuRepository<'a> {
     }
 
     /// Batch insert RVU references
-    pub async fn create_rvu_batch(&self, rvus: &[RvuReference]) -> Result<Vec<Uuid>> {
+    pub async fn create_rvu_batch(&self, rvus: &[RvuReference]) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
 
         for rvu in rvus {
@@ -276,7 +276,7 @@ impl<'a> RvuRepository<'a> {
     }
 
     /// Delete RVU reference
-    pub async fn delete_rvu(&self, rvu_id: Uuid) -> Result<()> {
+    pub async fn delete_rvu(&self, rvu_id: i64) -> Result<()> {
         let rows_affected = query(
             r#"
             DELETE FROM claims.rvu_reference
@@ -317,7 +317,7 @@ impl<'a> RvuRepository<'a> {
     // ========================================================================
 
     /// Get conversion factor by ID
-    pub async fn get_conversion_factor_by_id(&self, id: Uuid) -> Result<ConversionFactor> {
+    pub async fn get_conversion_factor_by_id(&self, id: i64) -> Result<ConversionFactor> {
         query_as::<_, ConversionFactor>(
             r#"
             SELECT * FROM claims.conversion_factor
@@ -386,8 +386,8 @@ impl<'a> RvuRepository<'a> {
     }
 
     /// Create conversion factor
-    pub async fn create_conversion_factor(&self, cf: &ConversionFactor) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create_conversion_factor(&self, cf: &ConversionFactor) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.conversion_factor (
                 conversion_factor_id,
@@ -455,7 +455,7 @@ impl<'a> RvuRepository<'a> {
     }
 
     /// Delete conversion factor
-    pub async fn delete_conversion_factor(&self, id: Uuid) -> Result<()> {
+    pub async fn delete_conversion_factor(&self, id: i64) -> Result<()> {
         let rows_affected = query(
             r#"
             DELETE FROM claims.conversion_factor

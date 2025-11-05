@@ -2,7 +2,7 @@ use crate::models::Provider;
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct ProviderRepository<'a> {
     pool: &'a DbPool,
@@ -14,7 +14,7 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Get provider by ID
-    pub async fn get_by_id(&self, provider_id: Uuid) -> Result<Provider> {
+    pub async fn get_by_id(&self, provider_id: i64) -> Result<Provider> {
         query_as::<_, Provider>(
             r#"
             SELECT * FROM core.provider
@@ -68,7 +68,7 @@ impl<'a> ProviderRepository<'a> {
     /// List providers by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Provider>> {
@@ -91,7 +91,7 @@ impl<'a> ProviderRepository<'a> {
     /// List active providers by organization
     pub async fn list_active_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Provider>> {
@@ -209,8 +209,8 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Create a new provider
-    pub async fn create(&self, provider: &Provider) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, provider: &Provider) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO core.provider (
                 provider_id,
@@ -335,7 +335,7 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Update provider status (activate/deactivate)
-    pub async fn update_status(&self, provider_id: Uuid, is_active: bool) -> Result<()> {
+    pub async fn update_status(&self, provider_id: i64, is_active: bool) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.provider
@@ -362,8 +362,8 @@ impl<'a> ProviderRepository<'a> {
     /// Update provider organization
     pub async fn update_organization(
         &self,
-        provider_id: Uuid,
-        organization_id: Option<Uuid>,
+        provider_id: i64,
+        organization_id: Option<i64>,
     ) -> Result<()> {
         let rows_affected = query(
             r#"
@@ -389,7 +389,7 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Soft delete provider (deactivate)
-    pub async fn soft_delete(&self, provider_id: Uuid) -> Result<()> {
+    pub async fn soft_delete(&self, provider_id: i64) -> Result<()> {
         self.update_status(provider_id, false).await
     }
 
@@ -410,7 +410,7 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Count providers by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.provider
@@ -426,7 +426,7 @@ impl<'a> ProviderRepository<'a> {
     }
 
     /// Count active providers by organization
-    pub async fn count_active_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_active_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.provider

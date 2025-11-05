@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use pro_common::{InternedString, StringInterner};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
 
 use crate::models::ServiceLine;
 
@@ -19,8 +19,8 @@ use crate::models::ServiceLine;
 /// with repeated procedure codes and modifiers.
 #[derive(Debug, Clone)]
 pub struct ServiceLineInterned {
-    pub service_line_id: Uuid,
-    pub encounter_id: Uuid,
+    pub service_line_id: i64,
+    pub encounter_id: i64,
     pub line_number: i16,
 
     // Interned strings - procedure codes and modifiers
@@ -45,16 +45,16 @@ pub struct ServiceLineInterned {
     pub service_date_to: Option<NaiveDate>,
 
     // Provider information - UUIDs don't need interning
-    pub rendering_provider_id: Option<Uuid>,
+    pub rendering_provider_id: Option<i64>,
     pub rendering_provider_npi: Option<String>,
-    pub supervising_provider_id: Option<Uuid>,
+    pub supervising_provider_id: Option<i64>,
     pub supervising_provider_npi: Option<String>,
-    pub ordering_provider_id: Option<Uuid>,
+    pub ordering_provider_id: Option<i64>,
     pub ordering_provider_npi: Option<String>,
-    pub referring_provider_id: Option<Uuid>,
+    pub referring_provider_id: Option<i64>,
     pub referring_provider_npi: Option<String>,
 
-    pub service_facility_id: Option<Uuid>,
+    pub service_facility_id: Option<i64>,
     pub service_facility_npi: Option<String>,
 
     pub prior_authorization_number: Option<String>,
@@ -265,8 +265,8 @@ mod tests {
 
         // Create a sample service line
         let service_line = ServiceLine {
-            service_line_id: Uuid::new_v4(),
-            encounter_id: Uuid::new_v4(),
+            service_line_id: 1,
+            encounter_id: 1,
             line_number: 1,
             product_service_id_qualifier: Some("HC".to_string()),
             procedure_code: "99213".to_string(),
@@ -338,8 +338,8 @@ mod tests {
 
         for i in 0..1000 {
             let service_line = ServiceLine {
-                service_line_id: Uuid::new_v4(),
-                encounter_id: Uuid::new_v4(),
+                service_line_id: i as i64,
+                encounter_id: 1,
                 line_number: i,
                 product_service_id_qualifier: Some("HC".to_string()),
                 procedure_code: "99213".to_string(), // Same code

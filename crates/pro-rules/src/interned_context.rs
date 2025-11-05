@@ -8,7 +8,7 @@
 use crate::rule_engine::RuleExecutionContext;
 use pro_common::{InternedString, StringInterner};
 use pro_db::models_interned::ServiceLineInterned;
-use uuid::Uuid;
+
 
 /// Extended context with interned string support
 ///
@@ -84,8 +84,8 @@ pub fn batch_intern_service_lines(
 /// Helper to create execution contexts from interned service lines
 pub fn create_contexts_from_interned(
     service_lines: &[ServiceLineInterned],
-    organization_id: Uuid,
-    diagnosis_map: &std::collections::HashMap<Uuid, Vec<String>>,
+    organization_id: i64,
+    diagnosis_map: &std::collections::HashMap<i64, Vec<String>>,
     interner: &StringInterner,
 ) -> Vec<RuleExecutionContext> {
     service_lines.iter()
@@ -121,7 +121,7 @@ mod tests {
     #[test]
     fn test_interned_context_conversion() {
         let interner = StringInterner::new();
-        let org_id = Uuid::new_v4();
+        let org_id = 1i64;
 
         let mut ctx = RuleExecutionContext::new(org_id);
         ctx.procedure_code = Some("99213".to_string());
@@ -151,8 +151,8 @@ mod tests {
         // Create test service lines
         let service_lines = vec![
             ServiceLine {
-                service_line_id: Uuid::new_v4(),
-                encounter_id: Uuid::new_v4(),
+                service_line_id: // TODO: Remove - database generates IDs now,
+                encounter_id: // TODO: Remove - database generates IDs now,
                 line_number: 1,
                 product_service_id_qualifier: Some("HC".to_string()),
                 procedure_code: "99213".to_string(),
@@ -195,8 +195,8 @@ mod tests {
                 updated_by: None,
             },
             ServiceLine {
-                service_line_id: Uuid::new_v4(),
-                encounter_id: Uuid::new_v4(),
+                service_line_id: // TODO: Remove - database generates IDs now,
+                encounter_id: // TODO: Remove - database generates IDs now,
                 line_number: 2,
                 product_service_id_qualifier: Some("HC".to_string()),
                 procedure_code: "99213".to_string(), // Same code - should reuse interned string

@@ -48,7 +48,7 @@ pub trait MLHybridRule: Rule {
     }
 
     /// Get ML prediction score from database
-    async fn get_ml_prediction_score(&self, encounter_id: uuid::Uuid, pool: &PgPool) -> Result<Option<f64>> {
+    async fn get_ml_prediction_score(&self, encounter_id: i64, pool: &PgPool) -> Result<Option<f64>> {
         let query = r#"
             SELECT prediction_score
             FROM ml.model_prediction

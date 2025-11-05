@@ -7,20 +7,20 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use tracing::{info, warn};
-use uuid::Uuid;
+
 
 use crate::types::FileFormat;
 
 /// Queued file ready for processing
 #[derive(Debug, Clone)]
 pub struct QueuedFile {
-    pub queue_id: Uuid,
-    pub facility_id: Uuid,
-    pub import_batch_id: Uuid,
+    pub queue_id: i64,
+    pub facility_id: i64,
+    pub import_batch_id: i64,
     pub file_path: String,
     pub file_hash: String,
     pub file_format: FileFormat,
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub queued_at: DateTime<Utc>,
     pub priority: i32,
 }
@@ -65,14 +65,14 @@ impl QueueManager {
     /// Lower priority numbers are processed first.
     pub async fn enqueue_file(
         &self,
-        facility_id: Uuid,
-        import_batch_id: Uuid,
+        facility_id: i64,
+        import_batch_id: i64,
         file_path: String,
         file_hash: String,
         file_format: FileFormat,
-        organization_id: Uuid,
+        organization_id: i64,
         priority: Option<i32>,
-    ) -> Result<Uuid> {
+    ) -> Result<i64> {
         let priority = priority.unwrap_or(100); // Default priority
 
         // Convert FileFormat to database string format
@@ -81,7 +81,7 @@ impl QueueManager {
             FileFormat::Csv => "CSV",
         };
 
-        let queue_id: Uuid = sqlx::query_scalar(
+        let queue_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO staging.file_processing_queue (
                 facility_id,
@@ -121,7 +121,7 @@ impl QueueManager {
     /// Returns the oldest queued file for the facility, respecting priority.
     pub async fn dequeue_next_for_facility(
         &self,
-        facility_id: Uuid,
+        facility_id: i64,
     ) -> Result<Option<QueuedFile>> {
         let result = sqlx::query_as::<_, QueuedFileRow>(
             r#"
@@ -183,7 +183,7 @@ impl QueueManager {
     }
 
     /// Mark a file as processing
-    pub async fn mark_processing(&self, queue_id: Uuid) -> Result<()> {
+    pub async fn mark_processing(&self, queue_id: i64) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE staging.file_processing_queue
@@ -204,7 +204,7 @@ impl QueueManager {
     }
 
     /// Mark a file as completed
-    pub async fn mark_completed(&self, queue_id: Uuid) -> Result<()> {
+    pub async fn mark_completed(&self, queue_id: i64) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE staging.file_processing_queue
@@ -225,7 +225,7 @@ impl QueueManager {
     }
 
     /// Mark a file as failed
-    pub async fn mark_failed(&self, queue_id: Uuid, error: &str) -> Result<()> {
+    pub async fn mark_failed(&self, queue_id: i64, error: &str) -> Result<()> {
         sqlx::query(
             r#"
             UPDATE staging.file_processing_queue
@@ -248,7 +248,7 @@ impl QueueManager {
     }
 
     /// Requeue a file for retry after failure
-    pub async fn requeue_for_retry(&self, queue_id: Uuid) -> Result<bool> {
+    pub async fn requeue_for_retry(&self, queue_id: i64) -> Result<bool> {
         let rows_affected = sqlx::query(
             r#"
             UPDATE staging.file_processing_queue
@@ -278,7 +278,7 @@ impl QueueManager {
     }
 
     /// Get queue depth for a facility
-    pub async fn get_queue_depth_by_facility(&self, facility_id: Uuid) -> Result<usize> {
+    pub async fn get_queue_depth_by_facility(&self, facility_id: i64) -> Result<usize> {
         let count: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*)
@@ -348,13 +348,13 @@ impl QueueManager {
 /// Database row structure for queued files
 #[derive(Debug, sqlx::FromRow)]
 struct QueuedFileRow {
-    queue_id: Uuid,
-    facility_id: Uuid,
-    import_batch_id: Uuid,
+    queue_id: i64,
+    facility_id: i64,
+    import_batch_id: i64,
     file_path: String,
     file_hash: String,
     file_format: String,
-    organization_id: Uuid,
+    organization_id: i64,
     queued_at: DateTime<Utc>,
     priority: i32,
 }

@@ -4,11 +4,11 @@
 
 -- Denial events from payer remittances
 CREATE TABLE claims.denial_event (
-    denial_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    service_line_id UUID REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    facility_id UUID REFERENCES claims.facility(facility_id),
+    denial_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    facility_id BIGINT REFERENCES claims.facility(facility_id),
 
     -- Denial identification
     denial_type VARCHAR(50) NOT NULL, -- CLAIM_LEVEL, LINE_LEVEL
@@ -51,8 +51,8 @@ CREATE TABLE claims.denial_event (
 
     -- Responsibility
     responsible_party VARCHAR(50), -- PROVIDER, CODER, BILLER, PATIENT, PAYER, OTHER
-    coder_id UUID REFERENCES claims.coder(coder_id),
-    provider_id UUID REFERENCES claims.provider(provider_id),
+    coder_id BIGINT REFERENCES claims.coder(coder_id),
+    provider_id BIGINT REFERENCES claims.provider(provider_id),
 
     -- Preventability
     is_preventable BOOLEAN,
@@ -108,8 +108,8 @@ CREATE TRIGGER update_denial_event_updated_at BEFORE UPDATE ON claims.denial_eve
 
 -- Appeal actions and correspondence
 CREATE TABLE claims.denial_appeal (
-    appeal_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    denial_id UUID NOT NULL REFERENCES claims.denial_event(denial_id) ON DELETE CASCADE,
+    appeal_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    denial_id BIGINT NOT NULL REFERENCES claims.denial_event(denial_id) ON DELETE CASCADE,
 
     -- Appeal details
     appeal_level VARCHAR(20) NOT NULL, -- FIRST, SECOND, THIRD, HEARING, ALJ, FEDERAL
@@ -167,7 +167,7 @@ CREATE TRIGGER update_denial_appeal_updated_at BEFORE UPDATE ON claims.denial_ap
 
 -- Denial reason code reference (CARC/RARC)
 CREATE TABLE claims.denial_reason_code (
-    reason_code_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reason_code_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Code identification
     code_type VARCHAR(10) NOT NULL, -- CARC, RARC
@@ -212,9 +212,9 @@ CREATE TRIGGER update_denial_reason_code_updated_at BEFORE UPDATE ON claims.deni
 
 -- Denial statistics by various dimensions
 CREATE TABLE claims.denial_statistics (
-    statistic_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    facility_id UUID REFERENCES claims.facility(facility_id),
+    statistic_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    facility_id BIGINT REFERENCES claims.facility(facility_id),
 
     -- Dimension
     statistic_dimension VARCHAR(50) NOT NULL, -- PAYER, PROVIDER, CODER, PROCEDURE, DENIAL_REASON, ROOT_CAUSE

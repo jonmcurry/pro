@@ -13,7 +13,7 @@ COMMENT ON SCHEMA claims IS 'Main claims processing schema with encounter, provi
 COMMENT ON SCHEMA ml IS 'Machine learning schema for predictive analytics';
 
 -- Enable required extensions
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
 CREATE EXTENSION IF NOT EXISTS "citext";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";

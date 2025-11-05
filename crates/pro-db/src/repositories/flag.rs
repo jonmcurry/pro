@@ -2,7 +2,7 @@ use crate::models::{EncounterFlag, FlagIssue, ServiceLineFlag};
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct FlagRepository<'a> {
     pool: &'a DbPool,
@@ -18,7 +18,7 @@ impl<'a> FlagRepository<'a> {
     // ========================================================================
 
     /// Get encounter flag by ID
-    pub async fn get_encounter_flag_by_id(&self, flag_id: Uuid) -> Result<EncounterFlag> {
+    pub async fn get_encounter_flag_by_id(&self, flag_id: i64) -> Result<EncounterFlag> {
         query_as::<_, EncounterFlag>(
             r#"
             SELECT * FROM claims.encounter_flag
@@ -35,7 +35,7 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// Get all flags for an encounter
-    pub async fn get_encounter_flags(&self, encounter_id: Uuid) -> Result<Vec<EncounterFlag>> {
+    pub async fn get_encounter_flags(&self, encounter_id: i64) -> Result<Vec<EncounterFlag>> {
         query_as::<_, EncounterFlag>(
             r#"
             SELECT * FROM claims.encounter_flag
@@ -52,7 +52,7 @@ impl<'a> FlagRepository<'a> {
     /// Get encounter flags by status
     pub async fn get_encounter_flags_by_status(
         &self,
-        encounter_id: Uuid,
+        encounter_id: i64,
         status: &str,
     ) -> Result<Vec<EncounterFlag>> {
         query_as::<_, EncounterFlag>(
@@ -73,7 +73,7 @@ impl<'a> FlagRepository<'a> {
     /// Get encounter flags by severity
     pub async fn get_encounter_flags_by_severity(
         &self,
-        encounter_id: Uuid,
+        encounter_id: i64,
         severity: &str,
     ) -> Result<Vec<EncounterFlag>> {
         query_as::<_, EncounterFlag>(
@@ -92,8 +92,8 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// Create an encounter flag
-    pub async fn create_encounter_flag(&self, flag: &EncounterFlag) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create_encounter_flag(&self, flag: &EncounterFlag) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.encounter_flag (
                 encounter_id, issue_id,
@@ -127,7 +127,7 @@ impl<'a> FlagRepository<'a> {
     /// Update encounter flag status
     pub async fn update_encounter_flag_status(
         &self,
-        flag_id: Uuid,
+        flag_id: i64,
         status: &str,
         resolution_note: Option<&str>,
         resolved_by: Option<&str>,
@@ -162,7 +162,7 @@ impl<'a> FlagRepository<'a> {
     /// Count encounter flags by status
     pub async fn count_encounter_flags_by_status(
         &self,
-        encounter_id: Uuid,
+        encounter_id: i64,
         status: &str,
     ) -> Result<i64> {
         let count: (i64,) = query_as(
@@ -186,7 +186,7 @@ impl<'a> FlagRepository<'a> {
     // ========================================================================
 
     /// Get service line flag by ID
-    pub async fn get_service_line_flag_by_id(&self, flag_id: Uuid) -> Result<ServiceLineFlag> {
+    pub async fn get_service_line_flag_by_id(&self, flag_id: i64) -> Result<ServiceLineFlag> {
         query_as::<_, ServiceLineFlag>(
             r#"
             SELECT * FROM claims.service_line_flag
@@ -203,7 +203,7 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// Get all flags for a service line
-    pub async fn get_service_line_flags(&self, service_line_id: Uuid) -> Result<Vec<ServiceLineFlag>> {
+    pub async fn get_service_line_flags(&self, service_line_id: i64) -> Result<Vec<ServiceLineFlag>> {
         query_as::<_, ServiceLineFlag>(
             r#"
             SELECT * FROM claims.service_line_flag
@@ -220,7 +220,7 @@ impl<'a> FlagRepository<'a> {
     /// Get service line flags by status
     pub async fn get_service_line_flags_by_status(
         &self,
-        service_line_id: Uuid,
+        service_line_id: i64,
         status: &str,
     ) -> Result<Vec<ServiceLineFlag>> {
         query_as::<_, ServiceLineFlag>(
@@ -241,7 +241,7 @@ impl<'a> FlagRepository<'a> {
     /// Get service line flags by severity
     pub async fn get_service_line_flags_by_severity(
         &self,
-        service_line_id: Uuid,
+        service_line_id: i64,
         severity: &str,
     ) -> Result<Vec<ServiceLineFlag>> {
         query_as::<_, ServiceLineFlag>(
@@ -260,8 +260,8 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// Create a service line flag
-    pub async fn create_service_line_flag(&self, flag: &ServiceLineFlag) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create_service_line_flag(&self, flag: &ServiceLineFlag) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.service_line_flag (
                 service_line_id, issue_id,
@@ -294,7 +294,7 @@ impl<'a> FlagRepository<'a> {
     /// Update service line flag status
     pub async fn update_service_line_flag_status(
         &self,
-        flag_id: Uuid,
+        flag_id: i64,
         status: &str,
         resolution_note: Option<&str>,
         resolved_by: Option<&str>,
@@ -329,7 +329,7 @@ impl<'a> FlagRepository<'a> {
     /// Count service line flags by status
     pub async fn count_service_line_flags_by_status(
         &self,
-        service_line_id: Uuid,
+        service_line_id: i64,
         status: &str,
     ) -> Result<i64> {
         let count: (i64,) = query_as(
@@ -353,7 +353,7 @@ impl<'a> FlagRepository<'a> {
     // ========================================================================
 
     /// Get flag issue by ID
-    pub async fn get_flag_issue_by_id(&self, issue_id: Uuid) -> Result<FlagIssue> {
+    pub async fn get_flag_issue_by_id(&self, issue_id: i64) -> Result<FlagIssue> {
         query_as::<_, FlagIssue>(
             r#"
             SELECT * FROM claims.flag_issue
@@ -402,7 +402,7 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// List flag issues by category
-    pub async fn list_flag_issues_by_category(&self, category_id: Uuid) -> Result<Vec<FlagIssue>> {
+    pub async fn list_flag_issues_by_category(&self, category_id: i64) -> Result<Vec<FlagIssue>> {
         query_as::<_, FlagIssue>(
             r#"
             SELECT * FROM claims.flag_issue
@@ -438,7 +438,7 @@ impl<'a> FlagRepository<'a> {
     // ========================================================================
 
     /// Create multiple encounter flags
-    pub async fn create_encounter_flags_batch(&self, flags: &[EncounterFlag]) -> Result<Vec<Uuid>> {
+    pub async fn create_encounter_flags_batch(&self, flags: &[EncounterFlag]) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
 
         for flag in flags {
@@ -450,7 +450,7 @@ impl<'a> FlagRepository<'a> {
     }
 
     /// Create multiple service line flags
-    pub async fn create_service_line_flags_batch(&self, flags: &[ServiceLineFlag]) -> Result<Vec<Uuid>> {
+    pub async fn create_service_line_flags_batch(&self, flags: &[ServiceLineFlag]) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
 
         for flag in flags {
@@ -464,12 +464,12 @@ impl<'a> FlagRepository<'a> {
     /// Get all flags for an encounter (both encounter and service line flags)
     pub async fn get_all_flags_for_encounter(
         &self,
-        encounter_id: Uuid,
+        encounter_id: i64,
     ) -> Result<(Vec<EncounterFlag>, Vec<ServiceLineFlag>)> {
         let encounter_flags = self.get_encounter_flags(encounter_id).await?;
 
         // Get all service line IDs for this encounter
-        let service_line_ids: Vec<(Uuid,)> = query_as(
+        let service_line_ids: Vec<(i64,)> = query_as(
             r#"
             SELECT service_line_id FROM claims.service_line
             WHERE encounter_id = $1

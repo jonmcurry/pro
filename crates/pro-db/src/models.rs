@@ -3,7 +3,7 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use uuid::Uuid;
+
 use rust_decimal::Decimal;
 
 // ============================================================================
@@ -12,7 +12,7 @@ use rust_decimal::Decimal;
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Organization {
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub organization_code: String,
     pub organization_name: String,
     pub tax_id: Option<String>,
@@ -32,8 +32,8 @@ pub struct Organization {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Region {
-    pub region_id: Uuid,
-    pub organization_id: Uuid,
+    pub region_id: i64,
+    pub organization_id: i64,
     pub region_code: String,
     pub region_name: String,
     pub description: Option<String>,
@@ -44,9 +44,9 @@ pub struct Region {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Facility {
-    pub facility_id: Uuid,
-    pub organization_id: Uuid,
-    pub region_id: Option<Uuid>,
+    pub facility_id: i64,
+    pub organization_id: i64,
+    pub region_id: Option<i64>,
     pub facility_code: String,
     pub facility_name: String,
     pub npi: Option<String>,
@@ -72,7 +72,7 @@ pub struct Facility {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Provider {
-    pub provider_id: Uuid,
+    pub provider_id: i64,
     pub npi: String,
     pub provider_type: String,
     pub last_name: String,
@@ -84,7 +84,7 @@ pub struct Provider {
     pub license_state: Option<String>,
     pub specialty: Option<String>,
     pub provider_group: Option<String>,
-    pub organization_id: Option<Uuid>,
+    pub organization_id: Option<i64>,
     pub address_line1: Option<String>,
     pub address_line2: Option<String>,
     pub city: Option<String>,
@@ -100,14 +100,14 @@ pub struct Provider {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Coder {
-    pub coder_id: Uuid,
+    pub coder_id: i64,
     pub coder_code: String,
     pub last_name: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub coder_group: Option<String>,
     pub certifications: Vec<String>,
-    pub organization_id: Option<Uuid>,
+    pub organization_id: Option<i64>,
     pub email: Option<String>,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
@@ -116,14 +116,14 @@ pub struct Coder {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Reviewer {
-    pub reviewer_id: Uuid,
+    pub reviewer_id: i64,
     pub reviewer_code: String,
     pub last_name: String,
     pub first_name: String,
     pub middle_name: Option<String>,
     pub reviewer_group: Option<String>,
     pub certifications: Vec<String>,
-    pub organization_id: Option<Uuid>,
+    pub organization_id: Option<i64>,
     pub email: Option<String>,
     pub is_active: bool,
     pub created_at: DateTime<Utc>,
@@ -136,10 +136,10 @@ pub struct Reviewer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Encounter {
-    pub encounter_id: Uuid,
-    pub facility_id: Uuid,
-    pub organization_id: Uuid,
-    pub region_id: Option<Uuid>,
+    pub encounter_id: i64,
+    pub facility_id: i64,
+    pub organization_id: i64,
+    pub region_id: Option<i64>,
 
     // Submitter information
     pub submitter_id: String,
@@ -171,7 +171,7 @@ pub struct Encounter {
     pub claim_filing_indicator: Option<String>,
 
     // Billing provider
-    pub billing_provider_id: Option<Uuid>,
+    pub billing_provider_id: Option<i64>,
     pub billing_provider_npi: Option<String>,
     pub billing_provider_tax_id: Option<String>,
     pub billing_provider_name: Option<String>,
@@ -186,19 +186,19 @@ pub struct Encounter {
     pub date_of_service_to: Option<NaiveDate>,
 
     // Providers
-    pub referring_provider_id: Option<Uuid>,
+    pub referring_provider_id: Option<i64>,
     pub referring_provider_npi: Option<String>,
-    pub rendering_provider_id: Option<Uuid>,
+    pub rendering_provider_id: Option<i64>,
     pub rendering_provider_npi: Option<String>,
-    pub supervising_provider_id: Option<Uuid>,
+    pub supervising_provider_id: Option<i64>,
     pub supervising_provider_npi: Option<String>,
 
     // Service facility
-    pub service_facility_id: Option<Uuid>,
+    pub service_facility_id: Option<i64>,
     pub service_facility_npi: Option<String>,
 
     // Coder information
-    pub coder_id: Option<Uuid>,
+    pub coder_id: Option<i64>,
     pub coding_date: Option<NaiveDate>,
 
     // Status and workflow
@@ -207,7 +207,7 @@ pub struct Encounter {
     pub financial_class: Option<String>,
 
     // Import tracking
-    pub import_batch_id: Option<Uuid>,
+    pub import_batch_id: Option<i64>,
     pub import_date: Option<DateTime<Utc>>,
 
     // Audit trail
@@ -221,8 +221,8 @@ pub struct Encounter {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ServiceLine {
-    pub service_line_id: Uuid,
-    pub encounter_id: Uuid,
+    pub service_line_id: i64,
+    pub encounter_id: i64,
     pub line_number: i16,
 
     // Service information
@@ -245,17 +245,17 @@ pub struct ServiceLine {
     pub service_date_to: Option<NaiveDate>,
 
     // Providers at line level
-    pub rendering_provider_id: Option<Uuid>,
+    pub rendering_provider_id: Option<i64>,
     pub rendering_provider_npi: Option<String>,
-    pub supervising_provider_id: Option<Uuid>,
+    pub supervising_provider_id: Option<i64>,
     pub supervising_provider_npi: Option<String>,
-    pub ordering_provider_id: Option<Uuid>,
+    pub ordering_provider_id: Option<i64>,
     pub ordering_provider_npi: Option<String>,
-    pub referring_provider_id: Option<Uuid>,
+    pub referring_provider_id: Option<i64>,
     pub referring_provider_npi: Option<String>,
 
     // Service facility at line level
-    pub service_facility_id: Option<Uuid>,
+    pub service_facility_id: Option<i64>,
     pub service_facility_npi: Option<String>,
 
     // Prior authorization and referral
@@ -291,8 +291,8 @@ pub struct ServiceLine {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct EncounterDiagnosis {
-    pub diagnosis_id: Uuid,
-    pub encounter_id: Uuid,
+    pub diagnosis_id: i64,
+    pub encounter_id: i64,
     pub sequence_number: i16,
     pub diagnosis_code_qualifier: Option<String>,
     pub diagnosis_code: String,
@@ -313,7 +313,7 @@ pub struct EncounterDiagnosis {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct FlagCategory {
-    pub category_id: Uuid,
+    pub category_id: i64,
     pub category_code: String,
     pub category_name: String,
     pub category_description: Option<String>,
@@ -323,8 +323,8 @@ pub struct FlagCategory {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct FlagIssue {
-    pub issue_id: Uuid,
-    pub category_id: Uuid,
+    pub issue_id: i64,
+    pub category_id: i64,
     pub issue_code: String,
     pub issue_description: String,
     pub severity: String,
@@ -334,9 +334,9 @@ pub struct FlagIssue {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct EncounterFlag {
-    pub flag_id: Uuid,
-    pub encounter_id: Uuid,
-    pub issue_id: Uuid,
+    pub flag_id: i64,
+    pub encounter_id: i64,
+    pub issue_id: i64,
     pub flag_type: String,
     pub severity: Option<String>,
     pub flag_reason: Option<String>,
@@ -355,9 +355,9 @@ pub struct EncounterFlag {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ServiceLineFlag {
-    pub flag_id: Uuid,
-    pub service_line_id: Uuid,
-    pub issue_id: Uuid,
+    pub flag_id: i64,
+    pub service_line_id: i64,
+    pub issue_id: i64,
     pub flag_type: String,
     pub severity: Option<String>,
     pub flag_reason: Option<String>,
@@ -379,9 +379,9 @@ pub struct ServiceLineFlag {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ImportBatch {
-    pub batch_id: Uuid,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub batch_id: i64,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub batch_name: Option<String>,
     pub batch_type: String,
     pub file_format: Option<String>,
@@ -399,7 +399,7 @@ pub struct ImportBatch {
     pub started_at: Option<DateTime<Utc>>,
     pub completed_at: Option<DateTime<Utc>>,
     pub processing_duration_seconds: Option<Decimal>,
-    pub configuration_id: Option<Uuid>,
+    pub configuration_id: Option<i64>,
     pub rules_applied: bool,
     pub error_message: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -412,7 +412,7 @@ pub struct ImportBatch {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct RvuReference {
-    pub rvu_id: Uuid,
+    pub rvu_id: i64,
     pub hcpcs_code: String,
     pub modifier: Option<String>,
     pub effective_year: i32,
@@ -434,7 +434,7 @@ pub struct RvuReference {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct ConversionFactor {
-    pub conversion_factor_id: Uuid,
+    pub conversion_factor_id: i64,
     pub factor_year: i32,
     pub effective_date: NaiveDate,
     pub termination_date: Option<NaiveDate>,
@@ -451,11 +451,11 @@ pub struct ConversionFactor {
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct DenialEvent {
-    pub denial_id: Uuid,
-    pub encounter_id: Uuid,
-    pub service_line_id: Option<Uuid>,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub denial_id: i64,
+    pub encounter_id: i64,
+    pub service_line_id: Option<i64>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub denial_type: String,
     pub denial_category: String,
     pub payer_id: Option<String>,
@@ -478,8 +478,8 @@ pub struct DenialEvent {
     pub root_cause_subcategory: Option<String>,
     pub root_cause_details: Option<String>,
     pub responsible_party: Option<String>,
-    pub coder_id: Option<Uuid>,
-    pub provider_id: Option<Uuid>,
+    pub coder_id: Option<i64>,
+    pub provider_id: Option<i64>,
     pub is_preventable: Option<bool>,
     pub preventable_category: Option<String>,
     pub prevention_recommendations: Option<String>,

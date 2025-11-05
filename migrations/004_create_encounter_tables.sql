@@ -4,12 +4,12 @@
 
 -- Main encounter table (represents a claim)
 CREATE TABLE claims.encounter (
-    encounter_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    encounter_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Organizational references
-    facility_id UUID NOT NULL REFERENCES claims.facility(facility_id),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    region_id UUID REFERENCES claims.region(region_id),
+    facility_id BIGINT NOT NULL REFERENCES claims.facility(facility_id),
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    region_id BIGINT REFERENCES claims.region(region_id),
 
     -- Submitter information (Loop 1000A)
     submitter_id VARCHAR(80) NOT NULL,
@@ -41,7 +41,7 @@ CREATE TABLE claims.encounter (
     claim_filing_indicator VARCHAR(2) DEFAULT 'MB', -- Medicare Part B
 
     -- Billing provider (Loop 2010AA)
-    billing_provider_id UUID REFERENCES claims.provider(provider_id),
+    billing_provider_id BIGINT REFERENCES claims.provider(provider_id),
     billing_provider_npi VARCHAR(10),
     billing_provider_tax_id VARCHAR(20),
     billing_provider_name VARCHAR(255),
@@ -88,17 +88,17 @@ CREATE TABLE claims.encounter (
     service_authorization_code VARCHAR(50),
 
     -- Referring provider (Loop 2310A)
-    referring_provider_id UUID REFERENCES claims.provider(provider_id),
+    referring_provider_id BIGINT REFERENCES claims.provider(provider_id),
     referring_provider_npi VARCHAR(10),
     referring_provider_name VARCHAR(255),
 
     -- Rendering provider (Loop 2310B)
-    rendering_provider_id UUID REFERENCES claims.provider(provider_id),
+    rendering_provider_id BIGINT REFERENCES claims.provider(provider_id),
     rendering_provider_npi VARCHAR(10),
     rendering_provider_name VARCHAR(255),
 
     -- Service facility (Loop 2310C)
-    service_facility_id UUID REFERENCES claims.facility(facility_id),
+    service_facility_id BIGINT REFERENCES claims.facility(facility_id),
     service_facility_npi VARCHAR(10),
     service_facility_name VARCHAR(255),
     service_facility_address_line1 VARCHAR(255),
@@ -108,7 +108,7 @@ CREATE TABLE claims.encounter (
     service_facility_postal_code VARCHAR(15),
 
     -- Supervising provider (Loop 2310D)
-    supervising_provider_id UUID REFERENCES claims.provider(provider_id),
+    supervising_provider_id BIGINT REFERENCES claims.provider(provider_id),
     supervising_provider_npi VARCHAR(10),
     supervising_provider_name VARCHAR(255),
 
@@ -126,7 +126,7 @@ CREATE TABLE claims.encounter (
     ambulance_patient_count INTEGER,
 
     -- Coder/billing information
-    coder_id UUID REFERENCES claims.coder(coder_id),
+    coder_id BIGINT REFERENCES claims.coder(coder_id),
     coding_date DATE,
 
     -- Status and workflow
@@ -135,9 +135,9 @@ CREATE TABLE claims.encounter (
     financial_class VARCHAR(50),
 
     -- Import tracking
-    import_batch_id UUID,
+    import_batch_id BIGINT,
     import_date TIMESTAMPTZ,
-    import_configuration_id UUID,
+    import_configuration_id BIGINT,
 
     -- Audit trail
     is_active BOOLEAN DEFAULT true,
@@ -190,8 +190,8 @@ CREATE TRIGGER update_encounter_updated_at BEFORE UPDATE ON claims.encounter
 
 -- Table for encounter notes/comments
 CREATE TABLE claims.encounter_note (
-    note_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    note_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
     note_type VARCHAR(50), -- GENERAL, AUDIT, BILLING, etc.
     note_text TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,

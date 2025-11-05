@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet};
-use uuid::Uuid;
+
 
 /// File hash for duplicate detection
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ impl FileHash {
 pub enum DuplicateStatus {
     Unique,
     Duplicate {
-        existing_batch_id: Uuid,
+        existing_batch_id: i64,
         imported_at: chrono::NaiveDateTime
     },
 }
@@ -56,7 +56,7 @@ impl FileValidator {
 
     /// Check if a file hash already exists in the database
     pub async fn check_file_duplicate(&self, file_hash: &str) -> Result<DuplicateStatus> {
-        let result = sqlx::query_as::<_, (Uuid, chrono::NaiveDateTime)>(
+        let result = sqlx::query_as::<_, (i64, chrono::NaiveDateTime)>(
             r#"
             SELECT batch_id, created_at
             FROM staging.import_batch
@@ -96,11 +96,11 @@ impl PatientControlNumberValidator {
     pub async fn check_pcn_duplicate(
         &self,
         patient_control_number: &str,
-        organization_id: Uuid,
-        facility_id: Option<Uuid>,
+        organization_id: i64,
+        facility_id: Option<i64>,
         date_of_service_from: NaiveDate,
-    ) -> Result<Vec<Uuid>> {
-        let result = sqlx::query_as::<_, (Uuid,)>(
+    ) -> Result<Vec<i64>> {
+        let result = sqlx::query_as::<_, (i64,)>(
             r#"
             SELECT encounter_id
             FROM claims.encounter
@@ -127,10 +127,10 @@ impl PatientControlNumberValidator {
     pub async fn find_similar_pcn(
         &self,
         patient_control_number: &str,
-        organization_id: Uuid,
+        organization_id: i64,
         threshold: f64,
-    ) -> Result<Vec<(Uuid, String, f64)>> {
-        let result = sqlx::query_as::<_, (Uuid, String, f32)>(
+    ) -> Result<Vec<(String, f64)>> {
+        let result = sqlx::query_as::<_, (i64, String, f32)>(
             r#"
             SELECT
                 encounter_id,
@@ -153,7 +153,7 @@ impl PatientControlNumberValidator {
 
         Ok(result
             .into_iter()
-            .map(|(id, pcn, sim)| (id, pcn, sim as f64))
+            .map(|(_id, pcn, sim)| (pcn, sim as f64))
             .collect())
     }
 }
@@ -172,12 +172,12 @@ impl ServiceLineValidator {
     /// Check for duplicate service lines within an encounter
     pub async fn check_service_line_duplicate(
         &self,
-        encounter_id: Uuid,
+        encounter_id: i64,
         procedure_code: &str,
         date_of_service: NaiveDate,
         service_unit_count: Decimal,
-    ) -> Result<Vec<Uuid>> {
-        let result = sqlx::query_as::<_, (Uuid,)>(
+    ) -> Result<Vec<i64>> {
+        let result = sqlx::query_as::<_, (i64,)>(
             r#"
             SELECT service_line_id
             FROM claims.service_line
@@ -374,7 +374,7 @@ impl BusinessRuleValidator {
     }
 
     /// Check if organization exists
-    async fn check_organization_exists(&self, organization_id: Uuid) -> Result<bool> {
+    async fn check_organization_exists(&self, organization_id: i64) -> Result<bool> {
         let result = sqlx::query_as::<_, (i64,)>(
             r#"
             SELECT COUNT(*) as count
@@ -393,7 +393,7 @@ impl BusinessRuleValidator {
     }
 
     /// Check if facility exists
-    async fn check_facility_exists(&self, facility_id: Uuid) -> Result<bool> {
+    async fn check_facility_exists(&self, facility_id: i64) -> Result<bool> {
         let result = sqlx::query_as::<_, (i64,)>(
             r#"
             SELECT COUNT(*) as count
@@ -415,8 +415,8 @@ impl BusinessRuleValidator {
 /// Encounter data for validation
 #[derive(Debug, Clone)]
 pub struct EncounterValidation {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub patient_control_number: String,
     pub date_of_service_from: NaiveDate,
     pub date_of_service_to: Option<NaiveDate>,

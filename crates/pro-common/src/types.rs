@@ -1,11 +1,11 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
 
 /// Organization entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub organization_code: String,
     pub organization_name: String,
     pub tax_id: Option<String>,
@@ -16,9 +16,9 @@ pub struct Organization {
 /// Facility entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Facility {
-    pub facility_id: Uuid,
-    pub organization_id: Uuid,
-    pub region_id: Option<Uuid>,
+    pub facility_id: i64,
+    pub organization_id: i64,
+    pub region_id: Option<i64>,
     pub facility_code: String,
     pub facility_name: String,
     pub npi: Option<String>,
@@ -28,7 +28,7 @@ pub struct Facility {
 /// Provider entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Provider {
-    pub provider_id: Uuid,
+    pub provider_id: i64,
     pub npi: String,
     pub provider_type: String,
     pub last_name: String,
@@ -41,7 +41,7 @@ pub struct Provider {
 /// Coder entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Coder {
-    pub coder_id: Uuid,
+    pub coder_id: i64,
     pub coder_code: String,
     pub last_name: String,
     pub first_name: String,
@@ -52,9 +52,9 @@ pub struct Coder {
 /// Encounter (claim) entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Encounter {
-    pub encounter_id: Uuid,
-    pub facility_id: Uuid,
-    pub organization_id: Uuid,
+    pub encounter_id: i64,
+    pub facility_id: i64,
+    pub organization_id: i64,
     pub patient_control_number: String,
     pub subscriber_id: String,
     pub subscriber_last_name: String,
@@ -66,15 +66,15 @@ pub struct Encounter {
     pub claim_status: String,
     pub billing_provider_npi: Option<String>,
     pub rendering_provider_npi: Option<String>,
-    pub coder_id: Option<Uuid>,
+    pub coder_id: Option<i64>,
     pub coding_date: Option<NaiveDate>,
 }
 
 /// Service line entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceLine {
-    pub service_line_id: Uuid,
-    pub encounter_id: Uuid,
+    pub service_line_id: i64,
+    pub encounter_id: i64,
     pub line_number: i16,
     pub procedure_code: String,
     pub procedure_modifier_1: Option<String>,
@@ -92,8 +92,8 @@ pub struct ServiceLine {
 /// Diagnosis entity
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnosis {
-    pub diagnosis_id: Uuid,
-    pub encounter_id: Uuid,
+    pub diagnosis_id: i64,
+    pub encounter_id: i64,
     pub sequence_number: i16,
     pub diagnosis_code: String,
     pub diagnosis_description: Option<String>,
@@ -103,7 +103,7 @@ pub struct Diagnosis {
 /// Flag category
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlagCategory {
-    pub category_id: Uuid,
+    pub category_id: i64,
     pub category_code: String,
     pub category_name: String,
     pub category_description: Option<String>,
@@ -112,8 +112,8 @@ pub struct FlagCategory {
 /// Flag issue
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlagIssue {
-    pub issue_id: Uuid,
-    pub category_id: Uuid,
+    pub issue_id: i64,
+    pub category_id: i64,
     pub issue_code: String,
     pub issue_description: String,
     pub severity: String,
@@ -122,9 +122,9 @@ pub struct FlagIssue {
 /// Encounter flag
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncounterFlag {
-    pub flag_id: Uuid,
-    pub encounter_id: Uuid,
-    pub issue_id: Uuid,
+    pub flag_id: i64,
+    pub encounter_id: i64,
+    pub issue_id: i64,
     pub flag_type: String,
     pub severity: Option<String>,
     pub flag_reason: Option<String>,
@@ -136,9 +136,9 @@ pub struct EncounterFlag {
 /// Service line flag
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceLineFlag {
-    pub flag_id: Uuid,
-    pub service_line_id: Uuid,
-    pub issue_id: Uuid,
+    pub flag_id: i64,
+    pub service_line_id: i64,
+    pub issue_id: i64,
     pub flag_type: String,
     pub severity: Option<String>,
     pub flag_reason: Option<String>,
@@ -152,9 +152,9 @@ pub struct ServiceLineFlag {
 /// Import batch
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportBatch {
-    pub batch_id: Uuid,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub batch_id: i64,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub batch_name: Option<String>,
     pub batch_type: String,
     pub file_format: Option<String>,
@@ -170,10 +170,10 @@ pub struct ImportBatch {
 /// Denial event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DenialEvent {
-    pub denial_id: Uuid,
-    pub encounter_id: Uuid,
-    pub service_line_id: Option<Uuid>,
-    pub organization_id: Uuid,
+    pub denial_id: i64,
+    pub encounter_id: i64,
+    pub service_line_id: Option<i64>,
+    pub organization_id: i64,
     pub denial_type: String,
     pub denial_category: String,
     pub claim_adjustment_reason_code: String,
@@ -187,7 +187,7 @@ pub struct DenialEvent {
 /// RVU reference data
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RvuReference {
-    pub rvu_id: Uuid,
+    pub rvu_id: i64,
     pub hcpcs_code: String,
     pub modifier: Option<String>,
     pub effective_year: i32,
@@ -202,7 +202,7 @@ pub struct RvuReference {
 /// Conversion factor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversionFactor {
-    pub conversion_factor_id: Uuid,
+    pub conversion_factor_id: i64,
     pub factor_year: i32,
     pub effective_date: NaiveDate,
     pub conversion_factor: rust_decimal::Decimal,
@@ -211,14 +211,14 @@ pub struct ConversionFactor {
 /// Audit assignment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditAssignment {
-    pub audit_id: Uuid,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub audit_id: i64,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub audit_name: String,
     pub audit_type: String,
     pub audit_scope: String,
     pub sample_size: Option<i32>,
-    pub reviewer_id: Option<Uuid>,
+    pub reviewer_id: Option<i64>,
     pub audit_status: String,
     pub due_date: Option<NaiveDate>,
 }

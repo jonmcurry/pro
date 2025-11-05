@@ -58,8 +58,8 @@ CREATE INDEX IF NOT EXISTS idx_service_line_dme_revision_date
 -- Phase 5.3: Home Health Claims (CR7, HSD Segments)
 -- Create home_health_plan table for Loop 2305
 CREATE TABLE IF NOT EXISTS claims.home_health_plan (
-    plan_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    plan_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
 
     -- CR7 Segment Elements
     discipline_type_code VARCHAR(2), -- AI=Skilled Nursing, PT=Physical Therapy, etc.
@@ -167,9 +167,9 @@ CREATE INDEX IF NOT EXISTS idx_service_line_oxygen_test_date
 -- Phase 5.6: Attachment Information (PWK Segment)
 -- Create claim_attachment table for Loops 2300 and 2400
 CREATE TABLE IF NOT EXISTS claims.claim_attachment (
-    attachment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    service_line_id UUID REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    attachment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
 
     -- PWK Segment Elements
     attachment_report_type_code VARCHAR(2) NOT NULL, -- 03=Report Justifying Treatment, 04=Drugs Administered, etc.

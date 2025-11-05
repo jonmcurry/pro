@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use pro_common::{Error, Result};
 use rust_decimal::Decimal;
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct ImportBatchRepository<'a> {
     pool: &'a DbPool,
@@ -16,7 +16,7 @@ impl<'a> ImportBatchRepository<'a> {
     }
 
     /// Get import batch by ID
-    pub async fn get_by_id(&self, batch_id: Uuid) -> Result<ImportBatch> {
+    pub async fn get_by_id(&self, batch_id: i64) -> Result<ImportBatch> {
         query_as::<_, ImportBatch>(
             r#"
             SELECT * FROM staging.import_batch
@@ -35,7 +35,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// List import batches by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ImportBatch>> {
@@ -58,7 +58,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// List import batches by status
     pub async fn list_by_status(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         import_status: &str,
         limit: i64,
         offset: i64,
@@ -84,7 +84,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// List import batches by facility
     pub async fn list_by_facility(
         &self,
-        facility_id: Uuid,
+        facility_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ImportBatch>> {
@@ -107,7 +107,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// List import batches by date range
     pub async fn list_by_date_range(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         from_date: DateTime<Utc>,
         to_date: DateTime<Utc>,
         limit: i64,
@@ -134,8 +134,8 @@ impl<'a> ImportBatchRepository<'a> {
     }
 
     /// Create a new import batch
-    pub async fn create(&self, batch: &ImportBatch) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, batch: &ImportBatch) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO staging.import_batch (
                 batch_id,
@@ -205,7 +205,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Update import batch status and statistics
     pub async fn update_status(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         import_status: &str,
         started_at: Option<DateTime<Utc>>,
         completed_at: Option<DateTime<Utc>>,
@@ -242,7 +242,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Update import batch statistics
     pub async fn update_statistics(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         total_records: i32,
         processed_records: i32,
         successful_records: i32,
@@ -285,7 +285,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Update import batch with error message
     pub async fn update_error(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         error_message: &str,
     ) -> Result<()> {
         let rows_affected = query(
@@ -315,7 +315,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Complete import batch with final statistics
     pub async fn complete(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         import_status: &str,
         total_records: i32,
         processed_records: i32,
@@ -397,7 +397,7 @@ impl<'a> ImportBatchRepository<'a> {
     }
 
     /// Count batches by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM staging.import_batch
@@ -415,7 +415,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Count batches by status
     pub async fn count_by_status(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         import_status: &str,
     ) -> Result<i64> {
         let count: (i64,) = query_as(
@@ -437,7 +437,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Get recent batches summary
     pub async fn get_recent_summary(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
     ) -> Result<Vec<ImportBatch>> {
         query_as::<_, ImportBatch>(
@@ -458,7 +458,7 @@ impl<'a> ImportBatchRepository<'a> {
     /// Delete old completed batches (soft cleanup)
     pub async fn delete_old_batches(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         older_than_days: i32,
     ) -> Result<u64> {
         let rows_affected = query(
@@ -492,7 +492,7 @@ mod tests {
         let repo = ImportBatchRepository::new(&pool);
 
         // Test count_by_organization with a sample organization ID
-        let sample_org_id = Uuid::new_v4();
+        let sample_org_id = 1i64;
         let count = repo.count_by_organization(sample_org_id).await;
         assert!(count.is_ok());
     }

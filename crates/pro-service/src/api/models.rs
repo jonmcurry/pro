@@ -5,7 +5,7 @@
 use chrono::{NaiveDate, NaiveDateTime};
 use serde::{Deserialize, Serialize};
 use sqlx::{types::Decimal, FromRow};
-use uuid::Uuid;
+
 
 // ============================================================================
 // Dashboard View Models (Migration 013)
@@ -13,9 +13,9 @@ use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ManagementOverview {
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub organization_name: String,
-    pub facility_id: Option<Uuid>,
+    pub facility_id: Option<i64>,
     pub facility_name: Option<String>,
     pub period_month: NaiveDate,
     pub total_encounters: Option<i64>,
@@ -39,8 +39,8 @@ pub struct ManagementOverview {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ClaimStatusSummary {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub claim_status: String,
     pub encounter_count: Option<i64>,
     pub total_billed_amount: Option<Decimal>,
@@ -49,9 +49,9 @@ pub struct ClaimStatusSummary {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct CoderPerformance {
-    pub coder_id: Uuid,
+    pub coder_id: i64,
     pub coder_name: String,
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub encounters_coded: Option<i64>,
     pub service_lines_coded: Option<i64>,
     pub work_rvus: Option<Decimal>,
@@ -71,10 +71,10 @@ pub struct CoderPerformance {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ProviderDocumentationAccuracy {
-    pub provider_id: Uuid,
+    pub provider_id: i64,
     pub provider_name: String,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub encounters_documented: Option<i64>,
     pub service_lines: Option<i64>,
     pub audits_reviewed: Option<i64>,
@@ -88,8 +88,8 @@ pub struct ProviderDocumentationAccuracy {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct FlagsByCategory {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub flag_category: String,
     pub issue_type: String,
     pub severity_level: String,
@@ -104,8 +104,8 @@ pub struct FlagsByCategory {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ServiceLineFlagsDetail {
-    pub flag_id: Uuid,
-    pub encounter_id: Uuid,
+    pub flag_id: i64,
+    pub encounter_id: i64,
     pub service_line_number: i32,
     pub flag_category: String,
     pub issue_type: String,
@@ -116,18 +116,18 @@ pub struct ServiceLineFlagsDetail {
     pub charged_amount: Decimal,
     pub flag_status: String,
     pub resolution_notes: Option<String>,
-    pub coder_id: Option<Uuid>,
+    pub coder_id: Option<i64>,
     pub coder_name: Option<String>,
-    pub provider_id: Uuid,
+    pub provider_id: i64,
     pub provider_name: String,
     pub facility_name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct DenialByPayer {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub payer_id: Uuid,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub payer_id: i64,
     pub payer_name: String,
     pub period_month: NaiveDate,
     pub denial_count: Option<i64>,
@@ -147,8 +147,8 @@ pub struct DenialByPayer {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct DenialByReason {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub denial_reason_code: String,
     pub denial_reason_description: Option<String>,
     pub denial_count: Option<i64>,
@@ -160,8 +160,8 @@ pub struct DenialByReason {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ProcedureVolume {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub procedure_code: String,
     pub procedure_description: Option<String>,
     pub procedure_count: Option<i64>,
@@ -175,10 +175,10 @@ pub struct ProcedureVolume {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ProviderProductivity {
-    pub provider_id: Uuid,
+    pub provider_id: i64,
     pub provider_name: String,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub period_month: NaiveDate,
     pub encounter_count: Option<i64>,
     pub service_line_count: Option<i64>,
@@ -193,9 +193,9 @@ pub struct ProviderProductivity {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct AuditAssignmentStatus {
-    pub assignment_id: Uuid,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub assignment_id: i64,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub audit_type: String,
     pub sample_size: i32,
     pub completed_count: Option<i64>,
@@ -205,7 +205,7 @@ pub struct AuditAssignmentStatus {
     pub flags_generated: Option<i64>,
     pub total_overpayment: Option<Decimal>,
     pub total_underpayment: Option<Decimal>,
-    pub reviewer_id: Option<Uuid>,
+    pub reviewer_id: Option<i64>,
     pub reviewer_name: Option<String>,
     pub assigned_date: NaiveDate,
     pub due_date: NaiveDate,
@@ -215,8 +215,8 @@ pub struct AuditAssignmentStatus {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ReimbursementAnalysis {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub period_month: NaiveDate,
     pub encounter_count: Option<i64>,
     pub service_line_count: Option<i64>,
@@ -235,7 +235,7 @@ pub struct ReimbursementAnalysis {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct QueueHealth {
-    pub facility_id: Option<Uuid>,
+    pub facility_id: Option<i64>,
     pub facility_name: Option<String>,
     pub queued_count: Option<i64>,
     pub processing_count: Option<i64>,
@@ -249,7 +249,7 @@ pub struct QueueHealth {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct QueueStatistics {
-    pub facility_id: Option<Uuid>,
+    pub facility_id: Option<i64>,
     pub facility_name: Option<String>,
     pub hour: Option<NaiveDateTime>,
     pub files_queued: Option<i64>,
@@ -262,12 +262,12 @@ pub struct QueueStatistics {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct FifoViolation {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub earlier_encounter_id: Uuid,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub earlier_encounter_id: i64,
     pub earlier_service_date: NaiveDate,
     pub earlier_created_at: NaiveDateTime,
-    pub later_encounter_id: Uuid,
+    pub later_encounter_id: i64,
     pub later_service_date: NaiveDate,
     pub later_created_at: NaiveDateTime,
     pub time_gap_hours: Option<Decimal>,
@@ -279,8 +279,8 @@ pub struct FifoViolation {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct FlagStatisticsDaily {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub flag_date: NaiveDate,
     pub flag_category: String,
     pub severity_level: String,
@@ -293,11 +293,11 @@ pub struct FlagStatisticsDaily {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct EncounterStatisticsDaily {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub encounter_date: NaiveDate,
     pub claim_status: String,
-    pub payer_id: Uuid,
+    pub payer_id: i64,
     pub encounter_count: Option<i64>,
     pub total_charges: Option<Decimal>,
     pub total_rvus: Option<Decimal>,
@@ -306,8 +306,8 @@ pub struct EncounterStatisticsDaily {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ProcedureStatistics {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
     pub procedure_code: String,
     pub procedure_count: Option<i64>,
     pub total_charges: Option<Decimal>,
@@ -319,9 +319,9 @@ pub struct ProcedureStatistics {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct ProviderPerformance {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub provider_id: Uuid,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub provider_id: i64,
     pub encounter_count: Option<i64>,
     pub total_charges: Option<Decimal>,
     pub total_rvus: Option<Decimal>,
@@ -331,9 +331,9 @@ pub struct ProviderPerformance {
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct PayerStatistics {
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub payer_id: Uuid,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub payer_id: i64,
     pub encounter_count: Option<i64>,
     pub total_charges: Option<Decimal>,
     pub denial_count: Option<i64>,
@@ -356,8 +356,8 @@ pub struct MlModelPerformance {
 
 #[derive(Debug, Deserialize)]
 pub struct DashboardQueryParams {
-    pub organization_id: Option<Uuid>,
-    pub facility_id: Option<Uuid>,
+    pub organization_id: Option<i64>,
+    pub facility_id: Option<i64>,
     pub start_date: Option<NaiveDate>,
     pub end_date: Option<NaiveDate>,
     pub limit: Option<i64>,

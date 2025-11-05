@@ -2,7 +2,7 @@ use crate::models::Reviewer;
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct ReviewerRepository<'a> {
     pool: &'a DbPool,
@@ -14,7 +14,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Get reviewer by ID
-    pub async fn get_by_id(&self, reviewer_id: Uuid) -> Result<Reviewer> {
+    pub async fn get_by_id(&self, reviewer_id: i64) -> Result<Reviewer> {
         query_as::<_, Reviewer>(
             r#"
             SELECT * FROM core.reviewer
@@ -51,7 +51,7 @@ impl<'a> ReviewerRepository<'a> {
     /// List reviewers by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Reviewer>> {
@@ -74,7 +74,7 @@ impl<'a> ReviewerRepository<'a> {
     /// List active reviewers by organization
     pub async fn list_active_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Reviewer>> {
@@ -144,8 +144,8 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Create a new reviewer
-    pub async fn create(&self, reviewer: &Reviewer) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, reviewer: &Reviewer) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO core.reviewer (
                 reviewer_id,
@@ -222,7 +222,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Update reviewer status (activate/deactivate)
-    pub async fn update_status(&self, reviewer_id: Uuid, is_active: bool) -> Result<()> {
+    pub async fn update_status(&self, reviewer_id: i64, is_active: bool) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.reviewer
@@ -249,8 +249,8 @@ impl<'a> ReviewerRepository<'a> {
     /// Update reviewer organization
     pub async fn update_organization(
         &self,
-        reviewer_id: Uuid,
-        organization_id: Option<Uuid>,
+        reviewer_id: i64,
+        organization_id: Option<i64>,
     ) -> Result<()> {
         let rows_affected = query(
             r#"
@@ -276,7 +276,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Add certification to reviewer
-    pub async fn add_certification(&self, reviewer_id: Uuid, certification: &str) -> Result<()> {
+    pub async fn add_certification(&self, reviewer_id: i64, certification: &str) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.reviewer
@@ -302,7 +302,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Remove certification from reviewer
-    pub async fn remove_certification(&self, reviewer_id: Uuid, certification: &str) -> Result<()> {
+    pub async fn remove_certification(&self, reviewer_id: i64, certification: &str) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.reviewer
@@ -327,7 +327,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Soft delete reviewer (deactivate)
-    pub async fn soft_delete(&self, reviewer_id: Uuid) -> Result<()> {
+    pub async fn soft_delete(&self, reviewer_id: i64) -> Result<()> {
         self.update_status(reviewer_id, false).await
     }
 
@@ -348,7 +348,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Count reviewers by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.reviewer
@@ -364,7 +364,7 @@ impl<'a> ReviewerRepository<'a> {
     }
 
     /// Count active reviewers by organization
-    pub async fn count_active_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_active_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.reviewer

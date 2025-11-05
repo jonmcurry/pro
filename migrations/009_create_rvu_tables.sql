@@ -4,7 +4,7 @@
 
 -- RVU reference data (from CMS Physician Fee Schedule)
 CREATE TABLE claims.rvu_reference (
-    rvu_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rvu_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Procedure identification
     hcpcs_code VARCHAR(5) NOT NULL,
@@ -68,7 +68,7 @@ CREATE TRIGGER update_rvu_reference_updated_at BEFORE UPDATE ON claims.rvu_refer
 
 -- Conversion factors (annual updates from CMS)
 CREATE TABLE claims.conversion_factor (
-    conversion_factor_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    conversion_factor_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Identification
     factor_year INTEGER NOT NULL UNIQUE,
@@ -101,7 +101,7 @@ VALUES (2024, '2024-01-01', 33.2875, 'SYSTEM');
 
 -- Geographic Practice Cost Index (GPCI) by locality
 CREATE TABLE claims.gpci_reference (
-    gpci_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    gpci_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Locality identification
     locality_code VARCHAR(5) NOT NULL,
@@ -136,7 +136,7 @@ CREATE TRIGGER update_gpci_reference_updated_at BEFORE UPDATE ON claims.gpci_ref
 
 -- Modifier reimbursement adjustments
 CREATE TABLE claims.modifier_adjustment (
-    adjustment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    adjustment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Modifier
     modifier_code VARCHAR(2) NOT NULL UNIQUE,
@@ -195,13 +195,13 @@ INSERT INTO claims.modifier_adjustment (modifier_code, modifier_description, pay
 
 -- Reimbursement estimates for service lines
 CREATE TABLE claims.service_line_reimbursement (
-    reimbursement_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    service_line_id UUID NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    reimbursement_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    service_line_id BIGINT NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
 
     -- RVU calculation
-    rvu_id UUID REFERENCES claims.rvu_reference(rvu_id),
-    conversion_factor_id UUID REFERENCES claims.conversion_factor(conversion_factor_id),
-    gpci_id UUID REFERENCES claims.gpci_reference(gpci_id),
+    rvu_id BIGINT REFERENCES claims.rvu_reference(rvu_id),
+    conversion_factor_id BIGINT REFERENCES claims.conversion_factor(conversion_factor_id),
+    gpci_id BIGINT REFERENCES claims.gpci_reference(gpci_id),
 
     -- RVU components used
     work_rvu NUMERIC(10,3),

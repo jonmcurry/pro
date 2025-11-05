@@ -4,7 +4,7 @@
 
 -- Organization table (top level)
 CREATE TABLE claims.organization (
-    organization_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    organization_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 50) PRIMARY KEY,
     organization_code VARCHAR(50) NOT NULL UNIQUE,
     organization_name VARCHAR(255) NOT NULL,
     tax_id VARCHAR(20),
@@ -31,8 +31,8 @@ COMMENT ON TABLE claims.organization IS 'Top-level organization entities';
 
 -- Region table (middle level - optional)
 CREATE TABLE claims.region (
-    region_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id) ON DELETE CASCADE,
+    region_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 50) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id) ON DELETE CASCADE,
     region_code VARCHAR(50) NOT NULL,
     region_name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -52,9 +52,9 @@ COMMENT ON TABLE claims.region IS 'Regional divisions within organizations (opti
 
 -- Facility table (bottom level - required)
 CREATE TABLE claims.facility (
-    facility_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id) ON DELETE CASCADE,
-    region_id UUID REFERENCES claims.region(region_id) ON DELETE SET NULL,
+    facility_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 50) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id) ON DELETE CASCADE,
+    region_id BIGINT REFERENCES claims.region(region_id) ON DELETE SET NULL,
     facility_code VARCHAR(50) NOT NULL,
     facility_name VARCHAR(255) NOT NULL,
     npi VARCHAR(10),

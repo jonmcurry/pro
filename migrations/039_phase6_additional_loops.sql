@@ -6,8 +6,8 @@
 -- Phase 6.1: Patient Information (Loop 2010BC)
 -- Create patient table for when patient is different from subscriber
 CREATE TABLE IF NOT EXISTS claims.patient (
-    patient_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    patient_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
 
     -- NM1*QC Segment (Patient Name)
     patient_last_name VARCHAR(255) NOT NULL,
@@ -70,7 +70,7 @@ CREATE TRIGGER update_patient_updated_at
 -- Phase 6.2: Purchased Service Provider (Loop 2420B)
 -- Add columns for reference lab or purchased services
 ALTER TABLE claims.service_line
-    ADD COLUMN IF NOT EXISTS purchased_service_provider_id UUID REFERENCES claims.provider(provider_id),
+    ADD COLUMN IF NOT EXISTS purchased_service_provider_id BIGINT REFERENCES claims.provider(provider_id),
     ADD COLUMN IF NOT EXISTS purchased_service_provider_npi VARCHAR(10),
     ADD COLUMN IF NOT EXISTS purchased_service_provider_name VARCHAR(255),
     ADD COLUMN IF NOT EXISTS purchased_service_charge_amount NUMERIC(18,2);
@@ -94,9 +94,9 @@ CREATE INDEX IF NOT EXISTS idx_service_line_purchased_provider_npi
 -- Phase 6.3: Test Results (MEA Segment)
 -- Create test_result table for lab and diagnostic test results
 CREATE TABLE IF NOT EXISTS claims.test_result (
-    test_result_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    service_line_id UUID REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    test_result_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
 
     -- MEA Segment Elements
     measurement_reference_id VARCHAR(20), -- Reference ID code

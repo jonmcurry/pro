@@ -3,7 +3,7 @@ use crate::DbPool;
 use chrono::NaiveDate;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct ServiceLineRepository<'a> {
     pool: &'a DbPool,
@@ -15,7 +15,7 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Get service line by ID
-    pub async fn get_by_id(&self, id: Uuid) -> Result<ServiceLine> {
+    pub async fn get_by_id(&self, id: i64) -> Result<ServiceLine> {
         query_as::<_, ServiceLine>(
             r#"
             SELECT * FROM claims.service_line
@@ -32,7 +32,7 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Get all service lines for an encounter
-    pub async fn get_by_encounter(&self, encounter_id: Uuid) -> Result<Vec<ServiceLine>> {
+    pub async fn get_by_encounter(&self, encounter_id: i64) -> Result<Vec<ServiceLine>> {
         query_as::<_, ServiceLine>(
             r#"
             SELECT * FROM claims.service_line
@@ -96,8 +96,8 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Create a new service line
-    pub async fn create(&self, service_line: &ServiceLine) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, service_line: &ServiceLine) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.service_line (
                 encounter_id, line_number,
@@ -189,7 +189,7 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Batch insert service lines for an encounter
-    pub async fn create_batch(&self, service_lines: &[ServiceLine]) -> Result<Vec<Uuid>> {
+    pub async fn create_batch(&self, service_lines: &[ServiceLine]) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
 
         for service_line in service_lines {
@@ -205,8 +205,8 @@ impl<'a> ServiceLineRepository<'a> {
         &self,
         service_line: &ServiceLine,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    ) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.service_line (
                 encounter_id, line_number,
@@ -302,7 +302,7 @@ impl<'a> ServiceLineRepository<'a> {
         &self,
         service_lines: &[ServiceLine],
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Result<Vec<Uuid>> {
+    ) -> Result<Vec<i64>> {
         let mut ids = Vec::new();
 
         for service_line in service_lines {
@@ -357,7 +357,7 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Delete a service line
-    pub async fn delete(&self, id: Uuid) -> Result<()> {
+    pub async fn delete(&self, id: i64) -> Result<()> {
         let rows_affected = query(
             r#"
             DELETE FROM claims.service_line
@@ -378,7 +378,7 @@ impl<'a> ServiceLineRepository<'a> {
     }
 
     /// Count service lines for an encounter
-    pub async fn count_by_encounter(&self, encounter_id: Uuid) -> Result<i64> {
+    pub async fn count_by_encounter(&self, encounter_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM claims.service_line
@@ -422,7 +422,7 @@ impl<'a> ServiceLineRepository<'a> {
     /// Get service lines by provider
     pub async fn get_by_rendering_provider(
         &self,
-        provider_id: Uuid,
+        provider_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<ServiceLine>> {
@@ -455,7 +455,7 @@ mod tests {
         let repo = ServiceLineRepository::new(&pool);
 
         // Test count_by_encounter with a sample encounter ID
-        let sample_encounter_id = Uuid::new_v4();
+        let sample_encounter_id = 1i64;
         let count = repo.count_by_encounter(sample_encounter_id).await;
         assert!(count.is_ok());
     }

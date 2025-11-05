@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS staging.batch_sequences (
     completed_at TIMESTAMPTZ,
 
     -- Batch metadata
-    batch_id UUID NOT NULL REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
+    batch_id BIGINT NOT NULL REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
     claim_count INTEGER NOT NULL,
     processing_stage TEXT NOT NULL DEFAULT 'STAGE2',
 

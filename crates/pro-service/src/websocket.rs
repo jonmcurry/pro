@@ -15,7 +15,7 @@ use serde_json;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tracing::{error, info, warn};
-use uuid::Uuid;
+
 
 /// Shared state for WebSocket connections
 #[derive(Clone)]
@@ -60,7 +60,7 @@ impl Default for WebSocketState {
 /// real-time progress events for the specified queue_id.
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
-    Path(queue_id): Path<Uuid>,
+    Path(queue_id): Path<i64>,
     State(state): State<Arc<WebSocketState>>,
 ) -> Response {
     info!("WebSocket connection request for queue_id: {}", queue_id);
@@ -69,7 +69,7 @@ pub async fn ws_handler(
 }
 
 /// Handle WebSocket connection
-async fn handle_socket(socket: WebSocket, queue_id: Uuid, state: Arc<WebSocketState>) {
+async fn handle_socket(socket: WebSocket, queue_id: i64, state: Arc<WebSocketState>) {
     info!("WebSocket connected for queue_id: {}", queue_id);
 
     let (mut sender, mut receiver) = socket.split();
@@ -195,8 +195,8 @@ mod tests {
         let mut rx = state.subscribe();
 
         let test_event = ProgressEvent::Started {
-            queue_id: Uuid::new_v4(),
-            progress_id: Uuid::new_v4(),
+            queue_id: 1,
+            progress_id: 1,
             total_claims: 100,
             started_at: Utc::now(),
         };

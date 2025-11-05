@@ -6,7 +6,7 @@ NM1*41*2*North Region Clinic****46*ORG001-R1-F2~
 PER*IC*Contact Name*TE*5555551234~
 NM1*40*2*PAYER NAME****46*PAYER001~
 HL*1**20*1~
-NM1*85*2*North Region Clinic****XX*ORG001-R1-F2~
+NM1*85*2*North Region Clinic*****XX*ORG001-R1-F2~
 N3*7598 Healthcare Drive~
 N4*Chicago*CA*74931~
 REF*EI*64-8316119~

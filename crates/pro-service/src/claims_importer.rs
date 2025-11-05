@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+
 
 /// Claims importer that processes CSV and EDI files
 #[derive(Clone)]
@@ -42,7 +42,7 @@ impl ClaimsImporter {
     }
 
     /// Enqueue a file for processing (adds to staging.file_processing_queue)
-    pub async fn enqueue_file(&self, file_path: &Path) -> Result<Uuid> {
+    pub async fn enqueue_file(&self, file_path: &Path) -> Result<i64> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
@@ -78,12 +78,10 @@ impl ClaimsImporter {
         // Get facility info from file
         let (facility_id, org_id) = self.extract_facility_info(file_path, &file_ext_lower).await?;
 
-        // Create import batch first
-        let batch_id = Uuid::new_v4();
-        sqlx::query(
+        // Create import batch and get generated ID
+        let batch_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO staging.import_batch (
-                batch_id,
                 organization_id,
                 facility_id,
                 batch_name,
@@ -95,10 +93,10 @@ impl ClaimsImporter {
                 import_status,
                 total_records
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING batch_id
             "#
         )
-        .bind(batch_id)
         .bind(org_id)
         .bind(facility_id)
         .bind(&filename)
@@ -109,7 +107,7 @@ impl ClaimsImporter {
         .bind(&file_hash)
         .bind("QUEUED")
         .bind(0) // Will be updated when processing starts
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .context("Failed to create import batch record")?;
 
@@ -131,7 +129,7 @@ impl ClaimsImporter {
     }
 
     /// Extract facility information from file (supports both CSV and EDI formats)
-    async fn extract_facility_info(&self, file_path: &Path, file_ext: &str) -> Result<(Option<Uuid>, Uuid)> {
+    async fn extract_facility_info(&self, file_path: &Path, file_ext: &str) -> Result<(Option<i64>, i64)> {
         let file_path_str = file_path.display().to_string();
 
         // Route to appropriate parser based on file extension
@@ -187,7 +185,7 @@ impl ClaimsImporter {
 
         // Look up facility by code/NPI if we extracted one
         if let Some(identifier) = facility_identifier {
-            let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+            let result = sqlx::query_as::<_, (i64, i64)>(
                 r#"
                 SELECT facility_id, organization_id
                 FROM claims.facility
@@ -208,7 +206,7 @@ impl ClaimsImporter {
         }
 
         // Fallback to first organization and its first facility
-        let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+        let result = sqlx::query_as::<_, (i64, i64)>(
             r#"
             SELECT f.facility_id, f.organization_id
             FROM claims.facility f
@@ -264,7 +262,7 @@ impl ClaimsImporter {
     /// Log a processing metric to staging.processing_metrics
     async fn log_processing_metric(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         metric_type: &str,
         metric_name: &str,
         started_at: chrono::DateTime<chrono::Utc>,
@@ -301,7 +299,7 @@ impl ClaimsImporter {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             "#
         )
-        .bind(Uuid::new_v4())
+        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)
@@ -324,7 +322,7 @@ impl ClaimsImporter {
     /// This is the new two-stage processing approach:
     /// - Stage 1: Fast ingestion (file -> raw_claims) - THIS METHOD
     /// - Stage 2: Validated processing (raw_claims -> encounters/errors) - ClaimsProcessor
-    pub async fn ingest_file_to_staging(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<IngestResult> {
+    pub async fn ingest_file_to_staging(&self, file_path: &Path, queue_id: Option<i64>) -> Result<IngestResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
@@ -363,7 +361,7 @@ impl ClaimsImporter {
             if let Some(facility_code) = first_row.encounter_fields.get("facility_code") {
                 info!("Found facility_code in first row: {}", facility_code);
 
-                let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+                let result = sqlx::query_as::<_, (i64, i64)>(
                     r#"
                     SELECT facility_id, organization_id
                     FROM claims.facility
@@ -380,7 +378,7 @@ impl ClaimsImporter {
                     (Some(fac_id), org_id)
                 } else {
                     warn!("Facility not found in database: {}", facility_code);
-                    let org: Option<Uuid> = sqlx::query_scalar(
+                    let org: Option<i64> = sqlx::query_scalar(
                         "SELECT organization_id FROM claims.organization LIMIT 1"
                     )
                     .fetch_optional(&self.pool)
@@ -392,7 +390,7 @@ impl ClaimsImporter {
                 }
             } else {
                 warn!("No facility_code found in first row");
-                let org: Option<Uuid> = sqlx::query_scalar(
+                let org: Option<i64> = sqlx::query_scalar(
                     "SELECT organization_id FROM claims.organization LIMIT 1"
                 )
                 .fetch_optional(&self.pool)
@@ -404,7 +402,7 @@ impl ClaimsImporter {
             }
         } else {
             warn!("CSV file has no rows");
-            let org: Option<Uuid> = sqlx::query_scalar(
+            let org: Option<i64> = sqlx::query_scalar(
                 "SELECT organization_id FROM claims.organization LIMIT 1"
             )
             .fetch_optional(&self.pool)
@@ -419,15 +417,13 @@ impl ClaimsImporter {
         let queue_id = queue_id.context("queue_id required for two-stage pipeline ingestion")?;
 
         // Create import batch record with INGESTING status
-        let batch_id = Uuid::new_v4();
         let started_at = chrono::Utc::now();
 
-        info!("Creating import batch record: batch_id={}", batch_id);
+        info!("Creating import batch record");
 
-        sqlx::query(
+        let batch_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO staging.import_batch (
-                batch_id,
                 organization_id,
                 facility_id,
                 batch_name,
@@ -439,10 +435,10 @@ impl ClaimsImporter {
                 total_records,
                 started_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING batch_id
             "#
         )
-        .bind(batch_id)
         .bind(org_id)
         .bind(facility_id)
         .bind(&filename)
@@ -453,11 +449,11 @@ impl ClaimsImporter {
         .bind("INGESTING")  // New status for Stage 1
         .bind(parsed_rows.len() as i32)
         .bind(started_at)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .context("Failed to create import batch record")?;
 
-        info!("Import batch record created successfully");
+        info!("Import batch record created successfully: batch_id={}", batch_id);
 
         // Log PARSE metric
         if let Err(e) = self.log_processing_metric(
@@ -532,7 +528,7 @@ impl ClaimsImporter {
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 "#
             )
-            .bind(Uuid::new_v4())
+            .bind(0i64) // TODO: Refactor to use RETURNING
             .bind(batch_id)
             .bind(queue_id)
             .bind(encounter_fields_json)
@@ -623,7 +619,7 @@ impl ClaimsImporter {
 
     /// STAGE 1: Ingest EDI 837p file to staging.raw_claims (two-stage pipeline)
     /// Similar to CSV ingestion but uses EDI parser
-    pub async fn ingest_edi_to_staging(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<IngestResult> {
+    pub async fn ingest_edi_to_staging(&self, file_path: &Path, queue_id: Option<i64>) -> Result<IngestResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
@@ -633,7 +629,7 @@ impl ClaimsImporter {
         info!("====== STAGE 1: Starting EDI file ingestion to staging: {} ======", file_path_str);
 
         // Get batch_id from queue (it was created during enqueue_file)
-        let batch_id: Uuid = sqlx::query_scalar(
+        let batch_id: i64 = sqlx::query_scalar(
             "SELECT import_batch_id FROM staging.file_processing_queue WHERE queue_id = $1"
         )
         .bind(queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?)
@@ -750,11 +746,26 @@ impl ClaimsImporter {
             encounter_fields.insert("date_of_service_from".to_string(), serde_json::json!(claim.date_of_service_from.format("%Y-%m-%d").to_string()));
             encounter_fields.insert("date_of_service_to".to_string(), serde_json::json!(claim.date_of_service_to.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
 
-            // Provider NPIs
+            // Provider NPIs and Names
             encounter_fields.insert("rendering_provider_npi".to_string(), serde_json::json!(claim.rendering_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("rendering_provider_last_name".to_string(), serde_json::json!(claim.rendering_provider_last_name.clone().unwrap_or_default()));
+            encounter_fields.insert("rendering_provider_first_name".to_string(), serde_json::json!(claim.rendering_provider_first_name.clone().unwrap_or_default()));
+            encounter_fields.insert("rendering_provider_taxonomy".to_string(), serde_json::json!(claim.rendering_provider_taxonomy.clone().unwrap_or_default()));
+
             encounter_fields.insert("referring_provider_npi".to_string(), serde_json::json!(claim.referring_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("referring_provider_last_name".to_string(), serde_json::json!(claim.referring_provider_last_name.clone().unwrap_or_default()));
+            encounter_fields.insert("referring_provider_first_name".to_string(), serde_json::json!(claim.referring_provider_first_name.clone().unwrap_or_default()));
+
             encounter_fields.insert("supervising_provider_npi".to_string(), serde_json::json!(claim.supervising_provider_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("supervising_provider_last_name".to_string(), serde_json::json!(claim.supervising_provider_last_name.clone().unwrap_or_default()));
+            encounter_fields.insert("supervising_provider_first_name".to_string(), serde_json::json!(claim.supervising_provider_first_name.clone().unwrap_or_default()));
+
+            encounter_fields.insert("billing_provider_npi".to_string(), serde_json::json!(transaction.billing_provider.npi.clone()));
+            encounter_fields.insert("billing_provider_name".to_string(), serde_json::json!(transaction.billing_provider.organization_name.clone().unwrap_or_default()));
+            encounter_fields.insert("billing_provider_tax_id".to_string(), serde_json::json!(transaction.billing_provider.tax_id.clone().unwrap_or_default()));
+
             encounter_fields.insert("service_facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_name".to_string(), serde_json::json!(claim.service_facility_name.clone().unwrap_or_default()));
 
             // CRITICAL: facility_npi for Stage 2 facility resolution
             encounter_fields.insert("facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
@@ -919,7 +930,7 @@ impl ClaimsImporter {
     /// Log a processing metric with processing_stage column (for two-stage pipeline)
     async fn log_processing_metric_with_stage(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         metric_type: &str,
         metric_name: &str,
         started_at: chrono::DateTime<chrono::Utc>,
@@ -958,7 +969,7 @@ impl ClaimsImporter {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#
         )
-        .bind(Uuid::new_v4())
+        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)
@@ -981,7 +992,7 @@ impl ClaimsImporter {
     /// Import a CSV file with optional queue_id for tracking
     /// LEGACY METHOD - For backward compatibility with single-stage processing
     /// New code should use ingest_file_to_staging() for Stage 1 instead
-    pub async fn import_file_with_queue(&self, file_path: &Path, queue_id: Option<Uuid>) -> Result<ImportResult> {
+    pub async fn import_file_with_queue(&self, file_path: &Path, queue_id: Option<i64>) -> Result<ImportResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
@@ -1021,7 +1032,7 @@ impl ClaimsImporter {
             if let Some(facility_code) = first_row.encounter_fields.get("facility_code") {
                 info!("Found facility_code in first row: {}", facility_code);
 
-                let result = sqlx::query_as::<_, (Uuid, Uuid)>(
+                let result = sqlx::query_as::<_, (i64, i64)>(
                     r#"
                     SELECT facility_id, organization_id
                     FROM claims.facility
@@ -1039,7 +1050,7 @@ impl ClaimsImporter {
                 } else {
                     warn!("Facility not found in database: {}", facility_code);
                     // Facility not found - get first org as fallback
-                    let org: Option<Uuid> = sqlx::query_scalar(
+                    let org: Option<i64> = sqlx::query_scalar(
                         "SELECT organization_id FROM claims.organization LIMIT 1"
                     )
                     .fetch_optional(&self.pool)
@@ -1052,7 +1063,7 @@ impl ClaimsImporter {
             } else {
                 warn!("No facility_code found in first row");
                 // No facility code in data - get first org
-                let org: Option<Uuid> = sqlx::query_scalar(
+                let org: Option<i64> = sqlx::query_scalar(
                     "SELECT organization_id FROM claims.organization LIMIT 1"
                 )
                 .fetch_optional(&self.pool)
@@ -1065,7 +1076,7 @@ impl ClaimsImporter {
         } else {
             warn!("CSV file has no rows");
             // Empty file - get first org
-            let org: Option<Uuid> = sqlx::query_scalar(
+            let org: Option<i64> = sqlx::query_scalar(
                 "SELECT organization_id FROM claims.organization LIMIT 1"
             )
             .fetch_optional(&self.pool)
@@ -1076,16 +1087,14 @@ impl ClaimsImporter {
             (None, org)
         };
 
-        // Create import batch record
-        let batch_id = Uuid::new_v4();
+        // Create import batch record and get generated ID
         let started_at = chrono::Utc::now();
 
-        info!("Creating import batch record: batch_id={}", batch_id);
+        info!("Creating import batch record");
 
-        sqlx::query(
+        let batch_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO staging.import_batch (
-                batch_id,
                 organization_id,
                 facility_id,
                 batch_name,
@@ -1097,10 +1106,10 @@ impl ClaimsImporter {
                 total_records,
                 started_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING batch_id
             "#
         )
-        .bind(batch_id)
         .bind(org_id)
         .bind(facility_id)
         .bind(&filename)
@@ -1111,11 +1120,11 @@ impl ClaimsImporter {
         .bind("PROCESSING")
         .bind(parsed_rows.len() as i32)
         .bind(started_at)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
         .context("Failed to create import batch record")?;
 
-        info!("Import batch record created successfully");
+        info!("Import batch record created successfully: batch_id={}", batch_id);
 
         // Log PARSE metric
         if let Err(e) = self.log_processing_metric(
@@ -1165,7 +1174,7 @@ impl ClaimsImporter {
 
         // Facility lookup cache for performance optimization
         // Key: facility_code, Value: (facility_id, organization_id, region_id)
-        let mut facility_cache: HashMap<String, (Uuid, Uuid, Option<Uuid>)> = HashMap::new();
+        let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
 
         // Import each row with progress tracking
         for parsed_row in parsed_rows {
@@ -1399,7 +1408,7 @@ impl ClaimsImporter {
     /// Log an import error to the staging.import_error_log table
     async fn log_import_error(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         record_number: usize,
         field_name: Option<String>,
         error_type: &str,
@@ -1421,7 +1430,7 @@ impl ClaimsImporter {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#
         )
-        .bind(Uuid::new_v4())
+        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(record_number as i32)
         .bind(field_name)
@@ -1441,8 +1450,8 @@ impl ClaimsImporter {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         parsed_row: &pro_parser_csv::parser::ParsedRow,
-        facility_cache: &mut HashMap<String, (Uuid, Uuid, Option<Uuid>)>,
-    ) -> Result<Uuid> {
+        facility_cache: &mut HashMap<String, (Option<i64>, i64, Option<i64>)>,
+    ) -> Result<i64> {
         // Extract facility_code from encounter fields
         let facility_code = parsed_row.encounter_fields.get("facility_code")
             .or_else(|| parsed_row.encounter_fields.get("facility_npi"))
@@ -1454,7 +1463,7 @@ impl ClaimsImporter {
             *cached
         } else {
             // Cache miss - query database and cache result
-            let facility = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+            let facility = sqlx::query_as::<_, (Option<i64>, i64, Option<i64>)>(
                 r#"
                 SELECT facility_id, organization_id, region_id
                 FROM claims.facility
@@ -1474,7 +1483,7 @@ impl ClaimsImporter {
         };
 
         // Generate encounter ID
-        let encounter_id = Uuid::new_v4();
+        let encounter_id = 0i64; // TODO: Use RETURNING
 
         // Extract required encounter fields
         let patient_control_number = parsed_row.encounter_fields.get("patient_control_number")
@@ -1583,10 +1592,10 @@ impl ClaimsImporter {
     async fn import_service_line(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        encounter_id: Uuid,
+        encounter_id: i64,
         parsed_row: &pro_parser_csv::parser::ParsedRow,
     ) -> Result<()> {
-        let service_line_id = Uuid::new_v4();
+        let service_line_id = 0i64; // TODO: Use RETURNING
 
         // Extract required service line fields
         let procedure_code = parsed_row.service_line_fields.get("procedure_code")
@@ -1649,14 +1658,14 @@ impl ClaimsImporter {
     async fn import_diagnoses(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        encounter_id: Uuid,
+        encounter_id: i64,
         parsed_row: &pro_parser_csv::parser::ParsedRow,
     ) -> Result<()> {
         // Get all diagnosis codes
         for (field_name, codes) in &parsed_row.diagnosis_fields {
             if field_name == "diagnosis_code" {
                 for (idx, code) in codes.iter().enumerate() {
-                    let diagnosis_id = Uuid::new_v4();
+                    let diagnosis_id = 0i64; // TODO: Use RETURNING
                     let sequence_number = (idx + 1) as i16;  // Changed to i16 for SMALLINT
 
                     sqlx::query(
@@ -1692,7 +1701,7 @@ impl ClaimsImporter {
 /// Result of a Stage 1 file ingestion operation
 #[derive(Debug, Clone)]
 pub struct IngestResult {
-    pub batch_id: Uuid,
+    pub batch_id: i64,
     pub total_rows: usize,
     pub ingested_at: chrono::DateTime<chrono::Utc>,
 }

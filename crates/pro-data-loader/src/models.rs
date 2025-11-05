@@ -71,21 +71,21 @@ pub struct Provider {
 // Helper structs for database operations
 #[derive(Debug, Clone)]
 pub struct OrganizationDb {
-    pub organization_id: Uuid,
+    pub organization_id: i64,
     pub organization_code: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct RegionDb {
-    pub region_id: Uuid,
-    pub organization_id: Uuid,
+    pub region_id: i64,
+    pub organization_id: i64,
     pub region_code: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct FacilityDb {
-    pub facility_id: Uuid,
-    pub region_id: Uuid,
+    pub facility_id: i64,
+    pub region_id: i64,
     pub facility_code: String,
 }
 

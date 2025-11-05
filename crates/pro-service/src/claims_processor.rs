@@ -13,7 +13,7 @@ use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+
 
 /// Claims processor for Stage 2 of two-stage pipeline
 #[derive(Clone)]
@@ -72,7 +72,7 @@ impl ClaimsProcessor {
         info!("Found {} pending raw claims to process", raw_claims.len());
 
         // Mark claims as PROCESSING
-        let raw_claim_ids: Vec<Uuid> = raw_claims.iter().map(|c| c.raw_claim_id).collect();
+        let raw_claim_ids: Vec<i64> = raw_claims.iter().map(|c| c.raw_claim_id).collect();
         sqlx::query(
             r#"
             UPDATE staging.raw_claims
@@ -88,8 +88,8 @@ impl ClaimsProcessor {
         let process_start = chrono::Utc::now();
 
         // Group claims by batch for metrics tracking
-        let batch_ids: Vec<Uuid> = raw_claims.iter().map(|c| c.batch_id).collect();
-        let unique_batch_ids: std::collections::HashSet<Uuid> = batch_ids.into_iter().collect();
+        let batch_ids: Vec<i64> = raw_claims.iter().map(|c| c.batch_id).collect();
+        let unique_batch_ids: std::collections::HashSet<i64> = batch_ids.into_iter().collect();
 
         // Update batch status to PROCESSING
         for batch_id in &unique_batch_ids {
@@ -120,7 +120,7 @@ impl ClaimsProcessor {
         let mut batch_count = 0;
 
         // Facility lookup cache for performance
-        let mut facility_cache: HashMap<String, (Uuid, Uuid, Option<Uuid>)> = HashMap::new();
+        let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
 
         info!("Processing {} raw claims...", raw_claims.len());
 
@@ -227,11 +227,9 @@ impl ClaimsProcessor {
                         .await?;
 
                         // Log error to staging.import_error_log
-                        let error_log_id = Uuid::new_v4();
-                        sqlx::query(
+                        let error_log_id: i64 = sqlx::query_scalar(
                             r#"
                             INSERT INTO staging.import_error_log (
-                                error_id,
                                 batch_id,
                                 record_number,
                                 error_type,
@@ -239,17 +237,17 @@ impl ClaimsProcessor {
                                 error_message,
                                 raw_data
                             )
-                            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                            VALUES ($1, $2, $3, $4, $5, $6)
+                            RETURNING error_id
                             "#
                         )
-                        .bind(error_log_id)
                         .bind(service_line.batch_id)
                         .bind(service_line.row_number)
                         .bind("VALIDATION")
                         .bind("ERROR")
                         .bind(&error_message)
                         .bind(serde_json::to_string(&service_line.encounter_fields).ok())
-                        .execute(&mut *tx)
+                        .fetch_one(&mut *tx)
                         .await?;
                     }
 
@@ -352,8 +350,8 @@ impl ClaimsProcessor {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         service_lines: Vec<RawClaim>,
-        facility_cache: &mut HashMap<String, (Uuid, Uuid, Option<Uuid>)>,
-    ) -> Result<Uuid> {
+        facility_cache: &mut HashMap<String, (Option<i64>, i64, Option<i64>)>,
+    ) -> Result<i64> {
         if service_lines.is_empty() {
             return Err(anyhow::anyhow!("No service lines provided"));
         }
@@ -374,7 +372,7 @@ impl ClaimsProcessor {
         let (facility_id, organization_id, region_id) = if let Some(cached) = facility_cache.get(facility_code) {
             *cached
         } else {
-            let facility = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+            let facility = sqlx::query_as::<_, (Option<i64>, i64, Option<i64>)>(
                 r#"
                 SELECT facility_id, organization_id, region_id
                 FROM claims.facility
@@ -391,9 +389,6 @@ impl ClaimsProcessor {
             facility_cache.insert(facility_code.clone(), facility_result);
             facility_result
         };
-
-        // Generate encounter ID (ONE for all service lines)
-        let encounter_id = Uuid::new_v4();
 
         // Extract required encounter fields
         let patient_control_number = encounter_fields.get("patient_control_number")
@@ -442,11 +437,10 @@ impl ClaimsProcessor {
         let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
         let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
-        // Insert encounter (ONE record)
-        sqlx::query(
+        // Insert encounter and get generated ID (ONE record for all service lines)
+        let encounter_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO claims.encounter (
-                encounter_id,
                 facility_id,
                 organization_id,
                 region_id,
@@ -466,10 +460,10 @@ impl ClaimsProcessor {
                 medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            RETURNING encounter_id
             "#
         )
-        .bind(encounter_id)
         .bind(facility_id)
         .bind(organization_id)
         .bind(region_id)
@@ -488,7 +482,7 @@ impl ClaimsProcessor {
         .bind(place_of_service)
         .bind(medical_record_number)
         .bind("NEW")
-        .execute(&mut **tx)
+        .fetch_one(&mut **tx)
         .await
         .context("Failed to insert encounter")?;
 
@@ -511,8 +505,8 @@ impl ClaimsProcessor {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         raw_claim: &RawClaim,
-        facility_cache: &mut HashMap<String, (Uuid, Uuid, Option<Uuid>)>,
-    ) -> Result<Uuid> {
+        facility_cache: &mut HashMap<String, (Option<i64>, i64, Option<i64>)>,
+    ) -> Result<i64> {
         // Deserialize JSONB fields
         let encounter_fields: HashMap<String, String> = serde_json::from_value(raw_claim.encounter_fields.clone())
             .context("Failed to deserialize encounter_fields")?;
@@ -528,7 +522,7 @@ impl ClaimsProcessor {
             *cached
         } else {
             // Cache miss - query database and cache result
-            let facility = sqlx::query_as::<_, (Uuid, Uuid, Option<Uuid>)>(
+            let facility = sqlx::query_as::<_, (Option<i64>, i64, Option<i64>)>(
                 r#"
                 SELECT facility_id, organization_id, region_id
                 FROM claims.facility
@@ -548,7 +542,7 @@ impl ClaimsProcessor {
         };
 
         // Generate encounter ID
-        let encounter_id = Uuid::new_v4();
+        let encounter_id = 0i64; // TODO: Use RETURNING
 
         // Extract required encounter fields
         let patient_control_number = encounter_fields.get("patient_control_number")
@@ -665,6 +659,88 @@ impl ClaimsProcessor {
         let referring_provider_taxonomy = encounter_fields.get("referring_provider_taxonomy").map(|s| s.as_str());
         let supervising_provider_taxonomy = encounter_fields.get("supervising_provider_taxonomy").map(|s| s.as_str());
 
+        // Extract provider first/last names (from 837P NM1 segments)
+        let rendering_provider_last_name = encounter_fields.get("rendering_provider_last_name").map(|s| s.as_str());
+        let rendering_provider_first_name = encounter_fields.get("rendering_provider_first_name").map(|s| s.as_str());
+        let referring_provider_last_name = encounter_fields.get("referring_provider_last_name").map(|s| s.as_str());
+        let referring_provider_first_name = encounter_fields.get("referring_provider_first_name").map(|s| s.as_str());
+        let supervising_provider_last_name = encounter_fields.get("supervising_provider_last_name").map(|s| s.as_str());
+        let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").map(|s| s.as_str());
+
+        // Ensure providers exist in claims.provider table and get their provider_ids
+        let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
+            self.ensure_provider_exists(
+                tx,
+                npi,
+                "Rendering",
+                rendering_provider_last_name,
+                rendering_provider_first_name,
+                None,
+                rendering_provider_taxonomy,
+                Some(organization_id),
+            ).await.unwrap_or(None)
+        } else {
+            None
+        };
+
+        let referring_provider_id = if let Some(npi) = referring_provider_npi {
+            self.ensure_provider_exists(
+                tx,
+                npi,
+                "Referring",
+                referring_provider_last_name,
+                referring_provider_first_name,
+                None,
+                referring_provider_taxonomy,
+                Some(organization_id),
+            ).await.unwrap_or(None)
+        } else {
+            None
+        };
+
+        let supervising_provider_id = if let Some(npi) = supervising_provider_npi {
+            self.ensure_provider_exists(
+                tx,
+                npi,
+                "Supervising",
+                supervising_provider_last_name,
+                supervising_provider_first_name,
+                None,
+                supervising_provider_taxonomy,
+                Some(organization_id),
+            ).await.unwrap_or(None)
+        } else {
+            None
+        };
+
+        let billing_provider_id = if let Some(npi) = billing_provider_npi {
+            // For billing provider, we may only have organization name (not first/last)
+            // Split billing_provider_name into last/first if it contains a comma
+            let (last, first) = if let Some(name) = billing_provider_name {
+                if name.contains(',') {
+                    let parts: Vec<&str> = name.splitn(2, ',').collect();
+                    (Some(parts[0].trim()), parts.get(1).map(|s| s.trim()))
+                } else {
+                    (Some(name), None)
+                }
+            } else {
+                (None, None)
+            };
+
+            self.ensure_provider_exists(
+                tx,
+                npi,
+                "Billing",
+                last,
+                first,
+                None,
+                None,
+                Some(organization_id),
+            ).await.unwrap_or(None)
+        } else {
+            None
+        };
+
         // Phase 3.4: Condition codes (CRC segments) - stored as JSONB
         let condition_codes = encounter_fields.get("condition_codes").map(|s| s.as_str());
 
@@ -741,6 +817,7 @@ impl ClaimsProcessor {
                 payer_city,
                 payer_state,
                 payer_postal_code,
+                billing_provider_id,
                 billing_provider_npi,
                 billing_provider_tax_id,
                 billing_provider_name,
@@ -748,12 +825,15 @@ impl ClaimsProcessor {
                 billing_provider_city,
                 billing_provider_state,
                 billing_provider_postal_code,
+                rendering_provider_id,
                 rendering_provider_npi,
                 rendering_provider_name,
+                referring_provider_id,
                 referring_provider_npi,
                 referring_provider_name,
                 service_facility_npi,
                 service_facility_name,
+                supervising_provider_id,
                 supervising_provider_npi,
                 supervising_provider_name,
                 total_claim_charge_amount,
@@ -803,7 +883,7 @@ impl ClaimsProcessor {
                 medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95)
             "#
         )
         .bind(encounter_id)
@@ -833,6 +913,7 @@ impl ClaimsProcessor {
         .bind(payer_city)
         .bind(payer_state)
         .bind(payer_postal_code)
+        .bind(billing_provider_id)
         .bind(billing_provider_npi)
         .bind(billing_provider_tax_id)
         .bind(billing_provider_name)
@@ -840,12 +921,15 @@ impl ClaimsProcessor {
         .bind(billing_provider_city)
         .bind(billing_provider_state)
         .bind(billing_provider_postal_code)
+        .bind(rendering_provider_id)
         .bind(rendering_provider_npi)
         .bind(rendering_provider_name)
+        .bind(referring_provider_id)
         .bind(referring_provider_npi)
         .bind(referring_provider_name)
         .bind(service_facility_npi)
         .bind(service_facility_name)
+        .bind(supervising_provider_id)
         .bind(supervising_provider_npi)
         .bind(supervising_provider_name)
         .bind(total_claim_charge)
@@ -913,12 +997,10 @@ impl ClaimsProcessor {
     async fn import_service_line(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        encounter_id: Uuid,
+        encounter_id: i64,
         raw_claim: &RawClaim,
         line_number: i32,
     ) -> Result<()> {
-        let service_line_id = Uuid::new_v4();
-
         // Deserialize encounter and service line fields
         let encounter_fields: HashMap<String, String> = serde_json::from_value(raw_claim.encounter_fields.clone())
             .context("Failed to deserialize encounter_fields")?;
@@ -1012,11 +1094,10 @@ impl ClaimsProcessor {
         let sl_non_covered_charges = service_line_fields.get("non_covered_charges")
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
 
-        // Insert service line with all critical fields
-        sqlx::query(
+        // Insert service line and get generated ID
+        let service_line_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO claims.service_line (
-                service_line_id,
                 encounter_id,
                 line_number,
                 product_service_id_qualifier,
@@ -1043,10 +1124,10 @@ impl ClaimsProcessor {
                 non_covered_charges,
                 line_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            RETURNING service_line_id
             "#
         )
-        .bind(service_line_id)
         .bind(encounter_id)
         .bind(line_number)
         .bind(product_service_id_qualifier)
@@ -1072,7 +1153,7 @@ impl ClaimsProcessor {
         .bind(sl_approved_amount)
         .bind(sl_non_covered_charges)
         .bind("IMPORTED")
-        .execute(&mut **tx)
+        .fetch_one(&mut **tx)
         .await
         .map_err(|e| {
             error!("DATABASE ERROR inserting service line: {:?}", e);
@@ -1093,7 +1174,7 @@ impl ClaimsProcessor {
     async fn import_diagnoses(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        encounter_id: Uuid,
+        encounter_id: i64,
         raw_claim: &RawClaim,
     ) -> Result<()> {
         // Parse diagnosis fields from raw_claim
@@ -1106,27 +1187,25 @@ impl ClaimsProcessor {
         for (field_name, codes) in &diagnosis_fields {
             if field_name == "diagnosis_code" {
                 for (idx, code) in codes.iter().enumerate() {
-                    let diagnosis_id = Uuid::new_v4();
                     let sequence_number = (idx + 1) as i16;
 
-                    sqlx::query(
+                    let diagnosis_id: i64 = sqlx::query_scalar(
                         r#"
                         INSERT INTO claims.encounter_diagnosis (
-                            diagnosis_id,
                             encounter_id,
                             sequence_number,
                             diagnosis_code,
                             is_principal
                         )
-                        VALUES ($1, $2, $3, $4, $5)
+                        VALUES ($1, $2, $3, $4)
+                        RETURNING diagnosis_id
                         "#
                     )
-                    .bind(diagnosis_id)
                     .bind(encounter_id)
                     .bind(sequence_number)
                     .bind(code)
                     .bind(idx == 0)
-                    .execute(&mut **tx)
+                    .fetch_one(&mut **tx)
                     .await
                     .context("Failed to insert diagnosis")?;
 
@@ -1142,7 +1221,7 @@ impl ClaimsProcessor {
     /// Log a processing metric to staging.processing_metrics
     async fn log_processing_metric(
         &self,
-        batch_id: Uuid,
+        batch_id: i64,
         metric_type: &str,
         metric_name: &str,
         started_at: chrono::DateTime<chrono::Utc>,
@@ -1181,7 +1260,7 @@ impl ClaimsProcessor {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
             "#
         )
-        .bind(Uuid::new_v4())
+        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)
@@ -1205,7 +1284,7 @@ impl ClaimsProcessor {
     /// This method is called by workers in the batch sequencing system
     pub async fn process_sequenced_batch(
         &self,
-        claim_ids: &[Uuid],
+        claim_ids: &[i64],
         sequence_number: i32,
         worker_id: String,
     ) -> Result<crate::batch_sequencer::BatchResult> {
@@ -1248,7 +1327,7 @@ impl ClaimsProcessor {
             warn!("No claims found for batch sequence {}", sequence_number);
             return Ok(crate::batch_sequencer::BatchResult {
                 sequence_number,
-                batch_id: Uuid::nil(),
+                batch_id: 0,
                 success_count: 0,
                 failure_count: 0,
                 processing_time_seconds: 0.0,
@@ -1264,7 +1343,7 @@ impl ClaimsProcessor {
             .context("Failed to begin transaction")?;
 
         // Facility lookup cache
-        let mut facility_cache: HashMap<String, (Uuid, Uuid, Option<Uuid>)> = HashMap::new();
+        let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
 
         // Group raw_claims by encounter (patient_control_number + date_of_service)
         use std::collections::HashMap as StdHashMap;
@@ -1323,7 +1402,7 @@ impl ClaimsProcessor {
                     success_count += service_lines.len();
 
                     // Mark all raw_claims in this encounter as COMPLETED (bulk update)
-                    let claim_ids: Vec<Uuid> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+                    let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
                     sqlx::query(
                         r#"
                         UPDATE staging.raw_claims
@@ -1346,7 +1425,7 @@ impl ClaimsProcessor {
 
                     // Collect error logs and claim IDs for bulk operations
                     let mut error_log_inserts = Vec::new();
-                    let claim_ids: Vec<Uuid> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+                    let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
 
                     for service_line in &service_lines {
                         let error_message = format!("Row {}: {}", service_line.row_number, error_str);
@@ -1354,7 +1433,7 @@ impl ClaimsProcessor {
 
                         // Prepare error log insert
                         error_log_inserts.push((
-                            Uuid::new_v4(),
+                            0i64, // error_log_id - database will generate
                             service_line.batch_id,
                             service_line.row_number,
                             error_message,
@@ -1451,14 +1530,139 @@ impl ClaimsProcessor {
             errors,
         })
     }
+
+    /// Ensure a provider exists in claims.provider table, creating if necessary
+    /// Returns the provider_id (either existing or newly created)
+    async fn ensure_provider_exists(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        npi: &str,
+        provider_type: &str,
+        last_name: Option<&str>,
+        first_name: Option<&str>,
+        middle_name: Option<&str>,
+        taxonomy_code: Option<&str>,
+        organization_id: Option<i64>,
+    ) -> Result<Option<i64>> {
+        // Skip if NPI is empty
+        if npi.is_empty() {
+            return Ok(None);
+        }
+
+        // Validate NPI format (10 digits)
+        if npi.len() != 10 || !npi.chars().all(|c| c.is_ascii_digit()) {
+            warn!("Invalid NPI format: {} (expected 10 digits)", npi);
+            return Ok(None);
+        }
+
+        // Check if provider already exists
+        let existing_provider: Option<i64> = sqlx::query_scalar(
+            r#"
+            SELECT provider_id
+            FROM claims.provider
+            WHERE npi = $1
+            "#
+        )
+        .bind(npi)
+        .fetch_optional(&mut **tx)
+        .await
+        .context("Failed to query existing provider")?;
+
+        if let Some(provider_id) = existing_provider {
+            // Provider exists, return the ID
+            return Ok(Some(provider_id));
+        }
+
+        // Provider doesn't exist, create it
+        // Use "Unknown" for last_name if not provided, and empty string for first_name
+        let last_name_value = last_name.unwrap_or("Unknown");
+        let first_name_value = first_name.unwrap_or("");
+
+        // Lookup specialty from taxonomy code if provided
+        let specialty = if let Some(tax_code) = taxonomy_code {
+            sqlx::query_scalar::<_, String>(
+                r#"
+                SELECT specialty_display
+                FROM claims.provider_taxonomy
+                WHERE taxonomy_code = $1 AND is_active = true
+                "#
+            )
+            .bind(tax_code)
+            .fetch_optional(&mut **tx)
+            .await
+            .unwrap_or(None)
+        } else {
+            None
+        };
+
+        // Log if taxonomy lookup succeeded
+        if let Some(ref spec) = specialty {
+            debug!("Mapped taxonomy {} to specialty: {}", taxonomy_code.unwrap_or(""), spec);
+        } else if taxonomy_code.is_some() && !taxonomy_code.unwrap().is_empty() {
+            warn!("No specialty mapping found for taxonomy code: {}", taxonomy_code.unwrap());
+        }
+
+        let provider_id: i64 = sqlx::query_scalar(
+            r#"
+            INSERT INTO claims.provider (
+                npi,
+                provider_type,
+                last_name,
+                first_name,
+                middle_name,
+                taxonomy_code,
+                specialty,
+                organization_id,
+                is_active,
+                created_at,
+                updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (npi) DO UPDATE
+            SET updated_at = CURRENT_TIMESTAMP
+            RETURNING provider_id
+            "#
+        )
+        .bind(npi)
+        .bind(provider_type)
+        .bind(last_name_value)
+        .bind(first_name_value)
+        .bind(middle_name)
+        .bind(taxonomy_code)
+        .bind(specialty.as_deref())
+        .bind(organization_id)
+        .fetch_one(&mut **tx)
+        .await
+        .context("Failed to insert provider")?;
+
+        debug!("Created new provider: NPI={}, Type={}, Name={} {}, Specialty={:?}",
+            npi, provider_type, first_name_value, last_name_value, specialty);
+
+        // Enqueue provider for background NPI enrichment (fire-and-forget)
+        // This does not block claim processing if it fails
+        let _ = sqlx::query(
+            r#"
+            INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (provider_id) DO NOTHING
+            "#
+        )
+        .bind(provider_id)
+        .bind(npi)
+        .bind(5) // Default priority
+        .execute(&mut **tx)
+        .await;
+
+        Ok(Some(provider_id))
+    }
 }
 
 /// Raw claim from staging.raw_claims table
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct RawClaim {
-    raw_claim_id: Uuid,
-    batch_id: Uuid,
-    queue_id: Uuid,
+    raw_claim_id: i64,
+    batch_id: i64,
+    queue_id: i64,
     encounter_fields: JsonValue,
     service_line_fields: Option<JsonValue>,
     diagnosis_fields: Option<JsonValue>,

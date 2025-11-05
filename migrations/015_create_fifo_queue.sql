@@ -7,13 +7,13 @@
 -- Ensures files are processed in chronological order per facility
 
 CREATE TABLE IF NOT EXISTS staging.file_processing_queue (
-    queue_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    facility_id UUID NOT NULL REFERENCES claims.facility(facility_id),
-    import_batch_id UUID NOT NULL REFERENCES staging.import_batch(batch_id),
+    queue_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    facility_id BIGINT NOT NULL REFERENCES claims.facility(facility_id),
+    import_batch_id BIGINT NOT NULL REFERENCES staging.import_batch(batch_id),
     file_path TEXT NOT NULL,
     file_hash TEXT NOT NULL,
     file_format TEXT NOT NULL,
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
 
     -- FIFO ordering
     queued_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,

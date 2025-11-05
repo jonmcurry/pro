@@ -2,7 +2,7 @@ use crate::models::Coder;
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct CoderRepository<'a> {
     pool: &'a DbPool,
@@ -14,7 +14,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Get coder by ID
-    pub async fn get_by_id(&self, coder_id: Uuid) -> Result<Coder> {
+    pub async fn get_by_id(&self, coder_id: i64) -> Result<Coder> {
         query_as::<_, Coder>(
             r#"
             SELECT * FROM core.coder
@@ -51,7 +51,7 @@ impl<'a> CoderRepository<'a> {
     /// List coders by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Coder>> {
@@ -74,7 +74,7 @@ impl<'a> CoderRepository<'a> {
     /// List active coders by organization
     pub async fn list_active_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Coder>> {
@@ -144,8 +144,8 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Create a new coder
-    pub async fn create(&self, coder: &Coder) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, coder: &Coder) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO core.coder (
                 coder_id,
@@ -222,7 +222,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Update coder status (activate/deactivate)
-    pub async fn update_status(&self, coder_id: Uuid, is_active: bool) -> Result<()> {
+    pub async fn update_status(&self, coder_id: i64, is_active: bool) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.coder
@@ -249,8 +249,8 @@ impl<'a> CoderRepository<'a> {
     /// Update coder organization
     pub async fn update_organization(
         &self,
-        coder_id: Uuid,
-        organization_id: Option<Uuid>,
+        coder_id: i64,
+        organization_id: Option<i64>,
     ) -> Result<()> {
         let rows_affected = query(
             r#"
@@ -276,7 +276,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Add certification to coder
-    pub async fn add_certification(&self, coder_id: Uuid, certification: &str) -> Result<()> {
+    pub async fn add_certification(&self, coder_id: i64, certification: &str) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.coder
@@ -302,7 +302,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Remove certification from coder
-    pub async fn remove_certification(&self, coder_id: Uuid, certification: &str) -> Result<()> {
+    pub async fn remove_certification(&self, coder_id: i64, certification: &str) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.coder
@@ -327,7 +327,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Soft delete coder (deactivate)
-    pub async fn soft_delete(&self, coder_id: Uuid) -> Result<()> {
+    pub async fn soft_delete(&self, coder_id: i64) -> Result<()> {
         self.update_status(coder_id, false).await
     }
 
@@ -348,7 +348,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Count coders by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.coder
@@ -364,7 +364,7 @@ impl<'a> CoderRepository<'a> {
     }
 
     /// Count active coders by organization
-    pub async fn count_active_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_active_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.coder

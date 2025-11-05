@@ -41,7 +41,7 @@ GROUP BY
 CREATE UNIQUE INDEX idx_flag_stats_daily_pk
     ON analytics.flag_statistics_daily(
         organization_id,
-        COALESCE(facility_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE(facility_id, 0::bigint),
         flag_date,
         flag_category,
         flag_severity,
@@ -97,7 +97,7 @@ GROUP BY
 CREATE UNIQUE INDEX idx_encounter_stats_daily_pk
     ON analytics.encounter_statistics_daily(
         organization_id,
-        COALESCE(facility_id, '00000000-0000-0000-0000-000000000000'::uuid),
+        COALESCE(facility_id, 0::bigint),
         service_date,
         claim_status,
         payer_responsibility_code

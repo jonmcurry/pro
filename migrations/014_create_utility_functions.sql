@@ -334,9 +334,9 @@ COMMENT ON MATERIALIZED VIEW claims.mv_denial_statistics IS 'Pre-aggregated deni
 -- ====================================================================================
 
 -- Function to get open flags for an encounter
-CREATE OR REPLACE FUNCTION get_open_flags(p_encounter_id UUID)
+CREATE OR REPLACE FUNCTION get_open_flags(p_encounter_id BIGINT)
 RETURNS TABLE(
-    flag_id UUID,
+    flag_id BIGINT,
     issue_code VARCHAR,
     issue_description TEXT,
     severity VARCHAR,
@@ -364,7 +364,7 @@ COMMENT ON FUNCTION get_open_flags IS 'Get all open flags for an encounter';
 
 -- Function to get coder accuracy summary
 CREATE OR REPLACE FUNCTION get_coder_accuracy_summary(
-    p_coder_id UUID,
+    p_coder_id BIGINT,
     p_start_date DATE,
     p_end_date DATE
 )

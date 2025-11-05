@@ -20,14 +20,14 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tracing::{debug, error, info, warn};
-use uuid::Uuid;
+
 
 /// Batch information with sequence number
 #[derive(Debug, Clone)]
 pub struct SequencedBatch {
     pub sequence_number: i32,
-    pub batch_id: Uuid,
-    pub claim_ids: Vec<Uuid>,
+    pub batch_id: i64,
+    pub claim_ids: Vec<i64>,
     pub assigned_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -35,7 +35,7 @@ pub struct SequencedBatch {
 #[derive(Debug, Clone)]
 pub struct BatchResult {
     pub sequence_number: i32,
-    pub batch_id: Uuid,
+    pub batch_id: i64,
     pub success_count: usize,
     pub failure_count: usize,
     pub processing_time_seconds: f64,
@@ -143,7 +143,7 @@ impl SequencedBatchAcquirer {
         // Get next batch of PENDING claims with encounter grouping fields
         // Query 2x batch_size to ensure we get complete encounters (avg ~10 service lines per encounter)
         // Use FOR UPDATE SKIP LOCKED for fast lock acquisition (single acquirer, so safe to skip locked rows)
-        let raw_claims: Vec<(Uuid, Uuid, String, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
+        let raw_claims: Vec<(i64, i64, String, String, chrono::DateTime<chrono::Utc>)> = sqlx::query_as(
             r#"
             SELECT
                 raw_claim_id,
@@ -172,9 +172,9 @@ impl SequencedBatchAcquirer {
         // Group claims by encounter key (patient_control_number + date_of_service_from)
         // Maintain FIFO order by processing in ingested_at order
         use std::collections::HashMap;
-        let mut encounter_groups: HashMap<(String, String), Vec<Uuid>> = HashMap::new();
+        let mut encounter_groups: HashMap<(String, String), Vec<i64>> = HashMap::new();
         let mut encounter_order: Vec<(String, String)> = Vec::new();
-        let mut batch_id_set: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+        let mut batch_id_set: std::collections::HashSet<i64> = std::collections::HashSet::new();
 
         for (claim_id, batch_id, patient_control_number, date_of_service, _ingested_at) in raw_claims {
             batch_id_set.insert(batch_id);
@@ -200,7 +200,7 @@ impl SequencedBatchAcquirer {
 
         // Accumulate complete encounter groups until we have enough for a batch
         // By fetching 2x batch_size initially, we should have complete encounters
-        let mut claim_ids: Vec<Uuid> = Vec::new();
+        let mut claim_ids: Vec<i64> = Vec::new();
         let mut total_count = 0;
 
         for encounter_key in encounter_order {

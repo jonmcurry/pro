@@ -2,7 +2,7 @@ use crate::models::Facility;
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct FacilityRepository<'a> {
     pool: &'a DbPool,
@@ -14,7 +14,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Get facility by ID
-    pub async fn get_by_id(&self, facility_id: Uuid) -> Result<Facility> {
+    pub async fn get_by_id(&self, facility_id: i64) -> Result<Facility> {
         query_as::<_, Facility>(
             r#"
             SELECT * FROM core.facility
@@ -69,7 +69,7 @@ impl<'a> FacilityRepository<'a> {
     /// List facilities by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Facility>> {
@@ -92,7 +92,7 @@ impl<'a> FacilityRepository<'a> {
     /// List active facilities by organization
     pub async fn list_active_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Facility>> {
@@ -116,7 +116,7 @@ impl<'a> FacilityRepository<'a> {
     /// List facilities by region
     pub async fn list_by_region(
         &self,
-        region_id: Uuid,
+        region_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<Facility>> {
@@ -185,8 +185,8 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Create a new facility
-    pub async fn create(&self, facility: &Facility) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, facility: &Facility) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO core.facility (
                 facility_id,
@@ -293,7 +293,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Update facility status (activate/deactivate)
-    pub async fn update_status(&self, facility_id: Uuid, is_active: bool) -> Result<()> {
+    pub async fn update_status(&self, facility_id: i64, is_active: bool) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.facility
@@ -318,7 +318,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Update facility region
-    pub async fn update_region(&self, facility_id: Uuid, region_id: Option<Uuid>) -> Result<()> {
+    pub async fn update_region(&self, facility_id: i64, region_id: Option<i64>) -> Result<()> {
         let rows_affected = query(
             r#"
             UPDATE core.facility
@@ -343,14 +343,14 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Soft delete facility (deactivate)
-    pub async fn soft_delete(&self, facility_id: Uuid) -> Result<()> {
+    pub async fn soft_delete(&self, facility_id: i64) -> Result<()> {
         self.update_status(facility_id, false).await
     }
 
     /// Check if facility code exists for organization
     pub async fn exists_by_facility_code(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         facility_code: &str,
     ) -> Result<bool> {
         let count: (i64,) = query_as(
@@ -386,7 +386,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Count facilities by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.facility
@@ -402,7 +402,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Count active facilities by organization
-    pub async fn count_active_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_active_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.facility
@@ -419,7 +419,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Count facilities by region
-    pub async fn count_by_region(&self, region_id: Uuid) -> Result<i64> {
+    pub async fn count_by_region(&self, region_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM core.facility
@@ -435,7 +435,7 @@ impl<'a> FacilityRepository<'a> {
     }
 
     /// Get all facilities for an organization (no pagination)
-    pub async fn get_all_by_organization(&self, organization_id: Uuid) -> Result<Vec<Facility>> {
+    pub async fn get_all_by_organization(&self, organization_id: i64) -> Result<Vec<Facility>> {
         query_as::<_, Facility>(
             r#"
             SELECT * FROM core.facility
@@ -452,7 +452,7 @@ impl<'a> FacilityRepository<'a> {
     /// Search facilities by name (partial match)
     pub async fn search_by_name(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         name_pattern: &str,
         limit: i64,
     ) -> Result<Vec<Facility>> {
@@ -487,7 +487,7 @@ mod tests {
         let repo = FacilityRepository::new(&pool);
 
         // Test count_by_organization with a sample organization ID
-        let sample_org_id = Uuid::new_v4();
+        let sample_org_id = 1i64;
         let count = repo.count_by_organization(sample_org_id).await;
         assert!(count.is_ok());
     }

@@ -4,7 +4,7 @@
 
 -- Provider table (physicians, practitioners, etc.)
 CREATE TABLE claims.provider (
-    provider_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    provider_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     npi VARCHAR(10) NOT NULL UNIQUE,
     provider_type VARCHAR(50) NOT NULL, -- Billing, Rendering, Referring, Supervising, Ordering
     last_name VARCHAR(255) NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE claims.provider (
     license_state CHAR(2),
     specialty VARCHAR(100),
     provider_group VARCHAR(255),
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
     address_line1 VARCHAR(255),
     address_line2 VARCHAR(255),
     city VARCHAR(100),
@@ -43,14 +43,14 @@ COMMENT ON TABLE claims.provider IS 'Healthcare providers (physicians, practitio
 
 -- Coder table (individuals who code/bill claims)
 CREATE TABLE claims.coder (
-    coder_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    coder_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     coder_code VARCHAR(50) NOT NULL UNIQUE,
     last_name VARCHAR(255) NOT NULL,
     first_name VARCHAR(255) NOT NULL,
     middle_name VARCHAR(255),
     coder_group VARCHAR(100),
     certifications TEXT[], -- Array of certifications (CPC, CCS, etc.)
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
     email citext,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -69,14 +69,14 @@ COMMENT ON TABLE claims.coder IS 'Medical coders who code/bill claims';
 
 -- Reviewer table (individuals who perform audits)
 CREATE TABLE claims.reviewer (
-    reviewer_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    reviewer_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     reviewer_code VARCHAR(50) NOT NULL UNIQUE,
     last_name VARCHAR(255) NOT NULL,
     first_name VARCHAR(255) NOT NULL,
     middle_name VARCHAR(255),
     reviewer_group VARCHAR(100),
     certifications TEXT[], -- Array of certifications
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
     email citext,
     is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,

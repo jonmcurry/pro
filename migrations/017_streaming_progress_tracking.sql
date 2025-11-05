@@ -3,8 +3,8 @@
 
 -- Progress tracking table for real-time updates
 CREATE TABLE IF NOT EXISTS staging.file_processing_progress (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
+    id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    queue_id BIGINT NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
 
     -- Claim counts
     total_claims INTEGER NOT NULL DEFAULT 0,
@@ -42,9 +42,9 @@ CREATE TRIGGER update_file_processing_progress_updated_at
 
 -- Failed claims table for streaming error handling
 CREATE TABLE IF NOT EXISTS staging.failed_claims (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
-    progress_id UUID REFERENCES staging.file_processing_progress(id) ON DELETE CASCADE,
+    id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    queue_id BIGINT NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
+    progress_id BIGINT REFERENCES staging.file_processing_progress(id) ON DELETE CASCADE,
 
     -- Claim identification
     claim_number VARCHAR(50),

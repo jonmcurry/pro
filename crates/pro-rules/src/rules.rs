@@ -1632,14 +1632,14 @@ pub fn create_default_rules() -> Vec<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    
 
     #[tokio::test]
     async fn test_units_exceed_maximum() {
         let pool = PgPool::connect_lazy("postgres://dummy").unwrap();
         let rule = UnitsExceedMaximumRule::new(Decimal::new(50, 0));
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.service_unit_count = Some(Decimal::new(75, 0));
         ctx.procedure_code = Some("99213".to_string());
 
@@ -1653,7 +1653,7 @@ mod tests {
         let pool = PgPool::connect_lazy("postgres://dummy").unwrap();
         let rule = UnitsExceedMaximumRule::new(Decimal::new(100, 0));
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.service_unit_count = Some(Decimal::new(50, 0));
 
         let result = rule.execute(&ctx, &pool).await.unwrap();
@@ -1665,7 +1665,7 @@ mod tests {
         let pool = PgPool::connect_lazy("postgres://dummy").unwrap();
         let rule = ConflictingModifiersRule;
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.procedure_code = Some("27447".to_string());
         ctx.procedure_modifiers = vec!["LT".to_string(), "RT".to_string()];
 
@@ -1678,7 +1678,7 @@ mod tests {
         let pool = PgPool::connect_lazy("postgres://dummy").unwrap();
         let rule = UnspecifiedDiagnosisRule;
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.diagnosis_codes = vec!["E11.9".to_string(), "I10".to_string()];
 
         let result = rule.execute(&ctx, &pool).await.unwrap();

@@ -9,21 +9,21 @@ use sqlx::PgPool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use uuid::Uuid;
+
 
 /// Progress event types for broadcasting
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProgressEvent {
     Started {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         total_claims: usize,
         started_at: DateTime<Utc>,
     },
     Progress {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         total_claims: usize,
         processed_claims: usize,
         failed_claims: usize,
@@ -33,20 +33,20 @@ pub enum ProgressEvent {
         estimated_completion_seconds: Option<i64>,
     },
     ClaimProcessed {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         claim_number: Option<String>,
         processing_time_ms: u64,
     },
     ClaimFailed {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         claim_number: Option<String>,
         error: String,
     },
     Completed {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         total_claims: usize,
         processed_claims: usize,
         failed_claims: usize,
@@ -54,8 +54,8 @@ pub enum ProgressEvent {
         duration_seconds: i64,
     },
     Failed {
-        queue_id: Uuid,
-        progress_id: Uuid,
+        queue_id: i64,
+        progress_id: i64,
         error: String,
     },
 }
@@ -63,8 +63,8 @@ pub enum ProgressEvent {
 /// Progress statistics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProgressSnapshot {
-    pub progress_id: Uuid,
-    pub queue_id: Uuid,
+    pub progress_id: i64,
+    pub queue_id: i64,
     pub total_claims: usize,
     pub processed_claims: usize,
     pub failed_claims: usize,
@@ -82,8 +82,8 @@ pub struct ProgressSnapshot {
 /// Real-time progress tracker
 #[derive(Clone)]
 pub struct ProgressTracker {
-    progress_id: Uuid,
-    queue_id: Uuid,
+    progress_id: i64,
+    queue_id: i64,
     pool: PgPool,
     broadcaster: broadcast::Sender<ProgressEvent>,
 
@@ -101,27 +101,26 @@ pub struct ProgressTracker {
 impl ProgressTracker {
     /// Create a new progress tracker
     pub async fn new(
-        queue_id: Uuid,
+        queue_id: i64,
         total_claims: usize,
         pool: PgPool,
         broadcaster: broadcast::Sender<ProgressEvent>,
     ) -> Result<Self> {
-        let progress_id = Uuid::new_v4();
         let started_at = Utc::now();
 
-        // Insert initial progress record
-        sqlx::query(
+        // Insert initial progress record and get generated ID
+        let progress_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO staging.file_processing_progress (
-                id, queue_id, total_claims, started_at, is_active
-            ) VALUES ($1, $2, $3, $4, true)
+                queue_id, total_claims, started_at, is_active
+            ) VALUES ($1, $2, $3, true)
+            RETURNING id
             "#
         )
-        .bind(progress_id)
         .bind(queue_id)
         .bind(total_claims as i32)
         .bind(started_at)
-        .execute(&pool)
+        .fetch_one(&pool)
         .await
         .map_err(Error::Database)?;
 
@@ -360,7 +359,7 @@ impl ProgressTracker {
 
     /// Get current progress snapshot
     pub async fn snapshot(&self) -> Result<ProgressSnapshot> {
-        let row: (Uuid, Uuid, i32, i32, i32, i32, i32, Option<rust_decimal::Decimal>, DateTime<Utc>, DateTime<Utc>, bool) = sqlx::query_as(
+        let row: (i32, i32, i32, i32, i32, i32, i32, Option<rust_decimal::Decimal>, DateTime<Utc>, DateTime<Utc>, bool) = sqlx::query_as(
             r#"
             SELECT
                 id, queue_id, total_claims, processed_claims, failed_claims,
@@ -384,8 +383,8 @@ impl ProgressTracker {
         };
 
         Ok(ProgressSnapshot {
-            progress_id: row.0,
-            queue_id: row.1,
+            progress_id: row.0 as i64,
+            queue_id: row.1 as i64,
             total_claims: total,
             processed_claims: processed,
             failed_claims: row.4 as usize,
@@ -402,12 +401,12 @@ impl ProgressTracker {
     }
 
     /// Get progress ID
-    pub fn progress_id(&self) -> Uuid {
+    pub fn progress_id(&self) -> i64 {
         self.progress_id
     }
 
     /// Get queue ID
-    pub fn queue_id(&self) -> Uuid {
+    pub fn queue_id(&self) -> i64 {
         self.queue_id
     }
 
@@ -418,8 +417,8 @@ impl ProgressTracker {
 }
 
 /// Query progress by queue ID
-pub async fn get_progress_by_queue_id(pool: &PgPool, queue_id: Uuid) -> Result<Option<ProgressSnapshot>> {
-    let row: Option<(Uuid, Uuid, i32, i32, i32, i32, i32, Option<rust_decimal::Decimal>, DateTime<Utc>, DateTime<Utc>, bool)> = sqlx::query_as(
+pub async fn get_progress_by_queue_id(pool: &PgPool, queue_id: i64) -> Result<Option<ProgressSnapshot>> {
+    let row: Option<(i32, i32, i32, i32, i32, i32, i32, Option<rust_decimal::Decimal>, DateTime<Utc>, DateTime<Utc>, bool)> = sqlx::query_as(
         r#"
         SELECT
             id, queue_id, total_claims, processed_claims, failed_claims,
@@ -446,8 +445,8 @@ pub async fn get_progress_by_queue_id(pool: &PgPool, queue_id: Uuid) -> Result<O
         };
 
         ProgressSnapshot {
-            progress_id: row.0,
-            queue_id: row.1,
+            progress_id: row.0 as i64,
+            queue_id: row.1 as i64,
             total_claims: total,
             processed_claims: processed,
             failed_claims: row.4 as usize,

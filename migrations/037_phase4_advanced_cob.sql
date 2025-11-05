@@ -6,8 +6,8 @@
 -- Phase 4.1: Create other_insurance table for full SBR segment data
 -- Supports multiple other payers per claim (primary, secondary, tertiary)
 CREATE TABLE IF NOT EXISTS claims.other_insurance (
-    other_insurance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    other_insurance_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
 
     -- SBR Segment Elements
     payer_responsibility_sequence VARCHAR(1) NOT NULL, -- P=Primary, S=Secondary, T=Tertiary
@@ -82,10 +82,10 @@ COMMENT ON COLUMN claims.other_insurance.individual_relationship_code IS
 -- Phase 4.2: Create claim_adjustment table for CAS segments
 -- Stores claim and line-level adjustments from previous payers
 CREATE TABLE IF NOT EXISTS claims.claim_adjustment (
-    adjustment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    service_line_id UUID REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
-    other_insurance_id UUID REFERENCES claims.other_insurance(other_insurance_id) ON DELETE CASCADE,
+    adjustment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    other_insurance_id BIGINT REFERENCES claims.other_insurance(other_insurance_id) ON DELETE CASCADE,
 
     -- CAS Segment Elements
     adjustment_group_code VARCHAR(2) NOT NULL, -- CO=Contractual, CR=Correction, OA=Other, PI=Payer Initiated, PR=Patient Responsibility

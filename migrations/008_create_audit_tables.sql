@@ -4,9 +4,9 @@
 
 -- Audit assignments (post-bill retrospective audits)
 CREATE TABLE claims.audit_assignment (
-    audit_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    facility_id UUID REFERENCES claims.facility(facility_id),
+    audit_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    facility_id BIGINT REFERENCES claims.facility(facility_id),
 
     -- Assignment details
     audit_name VARCHAR(255) NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE claims.audit_assignment (
     dos_to DATE,
 
     -- Assigned to
-    reviewer_id UUID REFERENCES claims.reviewer(reviewer_id),
+    reviewer_id BIGINT REFERENCES claims.reviewer(reviewer_id),
     assigned_at TIMESTAMPTZ,
     due_date DATE,
 
@@ -66,9 +66,9 @@ CREATE TRIGGER update_audit_assignment_updated_at BEFORE UPDATE ON claims.audit_
 
 -- Encounters included in audits
 CREATE TABLE claims.audit_encounter (
-    audit_encounter_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    audit_id UUID NOT NULL REFERENCES claims.audit_assignment(audit_id) ON DELETE CASCADE,
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    audit_encounter_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    audit_id BIGINT NOT NULL REFERENCES claims.audit_assignment(audit_id) ON DELETE CASCADE,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
 
     -- Review details
     review_status VARCHAR(50) DEFAULT 'PENDING', -- PENDING, IN_REVIEW, COMPLETED, SKIPPED
@@ -107,10 +107,10 @@ COMMENT ON TABLE claims.audit_encounter IS 'Encounters selected for audit review
 
 -- Service line evaluations (detailed audit findings)
 CREATE TABLE claims.service_line_evaluation (
-    evaluation_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    audit_encounter_id UUID NOT NULL REFERENCES claims.audit_encounter(audit_encounter_id) ON DELETE CASCADE,
-    service_line_id UUID NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
-    reviewer_id UUID NOT NULL REFERENCES claims.reviewer(reviewer_id),
+    evaluation_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    audit_encounter_id BIGINT NOT NULL REFERENCES claims.audit_encounter(audit_encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    reviewer_id BIGINT NOT NULL REFERENCES claims.reviewer(reviewer_id),
 
     -- Original values
     original_procedure_code VARCHAR(48),
@@ -135,7 +135,7 @@ CREATE TABLE claims.service_line_evaluation (
     has_error BOOLEAN DEFAULT false,
 
     -- Issue details
-    issue_id UUID REFERENCES claims.flag_issue(issue_id),
+    issue_id BIGINT REFERENCES claims.flag_issue(issue_id),
     issue_description TEXT,
     issue_severity VARCHAR(20),
 
@@ -168,10 +168,10 @@ COMMENT ON TABLE claims.service_line_evaluation IS 'Detailed audit findings for 
 
 -- Diagnosis evaluations
 CREATE TABLE claims.diagnosis_evaluation (
-    diagnosis_eval_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    audit_encounter_id UUID NOT NULL REFERENCES claims.audit_encounter(audit_encounter_id) ON DELETE CASCADE,
-    encounter_diagnosis_id UUID REFERENCES claims.encounter_diagnosis(diagnosis_id) ON DELETE CASCADE,
-    reviewer_id UUID NOT NULL REFERENCES claims.reviewer(reviewer_id),
+    diagnosis_eval_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    audit_encounter_id BIGINT NOT NULL REFERENCES claims.audit_encounter(audit_encounter_id) ON DELETE CASCADE,
+    encounter_diagnosis_id BIGINT REFERENCES claims.encounter_diagnosis(diagnosis_id) ON DELETE CASCADE,
+    reviewer_id BIGINT NOT NULL REFERENCES claims.reviewer(reviewer_id),
 
     -- Original diagnosis
     original_diagnosis_code VARCHAR(30),
@@ -188,7 +188,7 @@ CREATE TABLE claims.diagnosis_evaluation (
     has_error BOOLEAN DEFAULT false,
 
     -- Issue details
-    issue_id UUID REFERENCES claims.flag_issue(issue_id),
+    issue_id BIGINT REFERENCES claims.flag_issue(issue_id),
     issue_description TEXT,
     issue_severity VARCHAR(20),
 
@@ -217,9 +217,9 @@ COMMENT ON TABLE claims.diagnosis_evaluation IS 'Audit findings for diagnosis co
 
 -- Coder accuracy tracking
 CREATE TABLE claims.coder_accuracy (
-    accuracy_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    coder_id UUID NOT NULL REFERENCES claims.coder(coder_id),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
+    accuracy_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    coder_id BIGINT NOT NULL REFERENCES claims.coder(coder_id),
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
 
     -- Period
     period_start_date DATE NOT NULL,
@@ -278,9 +278,9 @@ COMMENT ON TABLE claims.coder_accuracy IS 'Coder accuracy metrics over time peri
 
 -- Provider accuracy tracking
 CREATE TABLE claims.provider_accuracy (
-    accuracy_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    provider_id UUID NOT NULL REFERENCES claims.provider(provider_id),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
+    accuracy_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    provider_id BIGINT NOT NULL REFERENCES claims.provider(provider_id),
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
 
     -- Period
     period_start_date DATE NOT NULL,

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use uuid::Uuid;
+
 
 /// Flag categories - 11 main categories
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -500,12 +500,12 @@ impl fmt::Display for FlagSeverity {
 /// Context information for flag creation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlagContext {
-    pub encounter_id: Option<Uuid>,
-    pub service_line_id: Option<Uuid>,
-    pub organization_id: Uuid,
-    pub facility_id: Option<Uuid>,
-    pub provider_id: Option<Uuid>,
-    pub coder_id: Option<Uuid>,
+    pub encounter_id: Option<i64>,
+    pub service_line_id: Option<i64>,
+    pub organization_id: i64,
+    pub facility_id: Option<i64>,
+    pub provider_id: Option<i64>,
+    pub coder_id: Option<i64>,
     pub procedure_code: Option<String>,
     pub diagnosis_codes: Vec<String>,
     pub modifiers: Vec<String>,
@@ -514,7 +514,7 @@ pub struct FlagContext {
 }
 
 impl FlagContext {
-    pub fn new(organization_id: Uuid) -> Self {
+    pub fn new(organization_id: i64) -> Self {
         Self {
             encounter_id: None,
             service_line_id: None,
@@ -530,17 +530,17 @@ impl FlagContext {
         }
     }
 
-    pub fn with_encounter(mut self, encounter_id: Uuid) -> Self {
+    pub fn with_encounter(mut self, encounter_id: i64) -> Self {
         self.encounter_id = Some(encounter_id);
         self
     }
 
-    pub fn with_service_line(mut self, service_line_id: Uuid) -> Self {
+    pub fn with_service_line(mut self, service_line_id: i64) -> Self {
         self.service_line_id = Some(service_line_id);
         self
     }
 
-    pub fn with_provider(mut self, provider_id: Uuid) -> Self {
+    pub fn with_provider(mut self, provider_id: i64) -> Self {
         self.provider_id = Some(provider_id);
         self
     }
@@ -701,9 +701,9 @@ mod tests {
 
     #[test]
     fn test_flag_context_builder() {
-        let org_id = Uuid::new_v4();
-        let encounter_id = Uuid::new_v4();
-        let provider_id = Uuid::new_v4();
+        let org_id = 1i64;
+        let encounter_id = 1i64;
+        let provider_id = 1i64;
 
         let context = FlagContext::new(org_id)
             .with_encounter(encounter_id)

@@ -231,7 +231,7 @@ impl std::fmt::Display for CacheStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
+    
 
     #[test]
     fn test_cache_creation() {
@@ -246,7 +246,7 @@ mod tests {
     fn test_cache_hit_miss() {
         let cache = RuleResultCache::new();
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.procedure_code = Some("99213".to_string());
         ctx.diagnosis_codes = vec!["J06.9".to_string()];
 
@@ -273,15 +273,15 @@ mod tests {
         let cache = RuleResultCache::new();
 
         // Two contexts with different IDs but same characteristics
-        let mut ctx1 = RuleExecutionContext::new(Uuid::new_v4());
-        ctx1.encounter_id = Some(Uuid::new_v4());
-        ctx1.service_line_id = Some(Uuid::new_v4());
+        let mut ctx1 = RuleExecutionContext::new(1);
+        ctx1.encounter_id = Some(1);
+        ctx1.service_line_id = Some(1);
         ctx1.procedure_code = Some("99213".to_string());
         ctx1.diagnosis_codes = vec!["J06.9".to_string()];
 
-        let mut ctx2 = RuleExecutionContext::new(Uuid::new_v4());
-        ctx2.encounter_id = Some(Uuid::new_v4()); // Different ID
-        ctx2.service_line_id = Some(Uuid::new_v4()); // Different ID
+        let mut ctx2 = RuleExecutionContext::new(1);
+        ctx2.encounter_id = Some(1); // Different ID
+        ctx2.service_line_id = Some(1); // Different ID
         ctx2.procedure_code = Some("99213".to_string()); // Same
         ctx2.diagnosis_codes = vec!["J06.9".to_string()]; // Same
 
@@ -298,7 +298,7 @@ mod tests {
     fn test_cache_ttl_expiration() {
         let cache = RuleResultCache::with_config(Duration::milliseconds(10), 100);
 
-        let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx = RuleExecutionContext::new(1);
         ctx.procedure_code = Some("99213".to_string());
 
         // Insert result
@@ -320,7 +320,7 @@ mod tests {
 
         // Fill cache beyond capacity
         for i in 0..15 {
-            let mut ctx = RuleExecutionContext::new(Uuid::new_v4());
+            let mut ctx = RuleExecutionContext::new(1);
             ctx.procedure_code = Some(format!("9921{}", i));
             cache.insert(&ctx, vec![]);
         }
@@ -333,11 +333,11 @@ mod tests {
     #[test]
     fn test_sorted_modifiers_hash_consistency() {
         // Ensure modifiers in different orders produce same fingerprint
-        let mut ctx1 = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx1 = RuleExecutionContext::new(1);
         ctx1.procedure_code = Some("99213".to_string());
         ctx1.procedure_modifiers = vec!["25".to_string(), "59".to_string()];
 
-        let mut ctx2 = RuleExecutionContext::new(Uuid::new_v4());
+        let mut ctx2 = RuleExecutionContext::new(1);
         ctx2.procedure_code = Some("99213".to_string());
         ctx2.procedure_modifiers = vec!["59".to_string(), "25".to_string()]; // Reversed
 

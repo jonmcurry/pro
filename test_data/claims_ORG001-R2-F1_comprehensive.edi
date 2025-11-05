@@ -6,7 +6,7 @@ NM1*41*2*South Region Medical Center****46*ORG001-R2-F1~
 PER*IC*Contact Name*TE*5555551234~
 NM1*40*2*PAYER NAME****46*PAYER001~
 HL*1**20*1~
-NM1*85*2*South Region Medical Center****XX*ORG001-R2-F1~
+NM1*85*2*South Region Medical Center*****XX*ORG001-R2-F1~
 N3*2756 Healthcare Drive~
 N4*Chicago*CA*60366~
 REF*EI*64-8316119~

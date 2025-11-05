@@ -4,8 +4,8 @@
 
 -- ML model registry
 CREATE TABLE ml.model_registry (
-    model_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    model_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
 
     -- Model identification
     model_name VARCHAR(255) NOT NULL,
@@ -81,10 +81,10 @@ CREATE TRIGGER update_model_registry_updated_at BEFORE UPDATE ON ml.model_regist
 
 -- Model predictions
 CREATE TABLE ml.model_prediction (
-    prediction_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    model_id UUID NOT NULL REFERENCES ml.model_registry(model_id),
-    encounter_id UUID REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    service_line_id UUID REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    prediction_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    model_id BIGINT NOT NULL REFERENCES ml.model_registry(model_id),
+    encounter_id BIGINT REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    service_line_id BIGINT REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
 
     -- Prediction details
     prediction_type VARCHAR(50) NOT NULL, -- DENIAL_RISK, CODING_ERROR, AUDIT_PRIORITY, etc.
@@ -139,7 +139,7 @@ COMMENT ON TABLE ml.model_prediction IS 'Predictions made by ML models';
 
 -- Feature engineering definitions
 CREATE TABLE ml.feature_definition (
-    feature_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    feature_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Feature identification
     feature_name VARCHAR(255) NOT NULL UNIQUE,
@@ -196,8 +196,8 @@ CREATE TRIGGER update_feature_definition_updated_at BEFORE UPDATE ON ml.feature_
 
 -- Training datasets
 CREATE TABLE ml.training_dataset (
-    dataset_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    dataset_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
 
     -- Dataset identification
     dataset_name VARCHAR(255) NOT NULL,
@@ -261,8 +261,8 @@ CREATE TRIGGER update_training_dataset_updated_at BEFORE UPDATE ON ml.training_d
 
 -- Model performance monitoring
 CREATE TABLE ml.model_performance_log (
-    performance_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    model_id UUID NOT NULL REFERENCES ml.model_registry(model_id),
+    performance_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    model_id BIGINT NOT NULL REFERENCES ml.model_registry(model_id),
 
     -- Measurement period
     measurement_date DATE NOT NULL,
@@ -320,8 +320,8 @@ COMMENT ON TABLE ml.model_performance_log IS 'Performance monitoring for deploye
 
 -- A/B testing experiments
 CREATE TABLE ml.ab_test_experiment (
-    experiment_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID REFERENCES claims.organization(organization_id),
+    experiment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT REFERENCES claims.organization(organization_id),
 
     -- Experiment details
     experiment_name VARCHAR(255) NOT NULL,
@@ -329,8 +329,8 @@ CREATE TABLE ml.ab_test_experiment (
     hypothesis TEXT,
 
     -- Models being compared
-    control_model_id UUID REFERENCES ml.model_registry(model_id),
-    treatment_model_id UUID REFERENCES ml.model_registry(model_id),
+    control_model_id BIGINT REFERENCES ml.model_registry(model_id),
+    treatment_model_id BIGINT REFERENCES ml.model_registry(model_id),
 
     -- Traffic split
     control_percentage NUMERIC(5,2) DEFAULT 50.00,

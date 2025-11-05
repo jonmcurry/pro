@@ -4,9 +4,9 @@
 
 -- Import batch tracking
 CREATE TABLE staging.import_batch (
-    batch_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    facility_id UUID REFERENCES claims.facility(facility_id),
+    batch_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    facility_id BIGINT REFERENCES claims.facility(facility_id),
 
     -- Batch information
     batch_name VARCHAR(255),
@@ -34,7 +34,7 @@ CREATE TABLE staging.import_batch (
     processing_duration_seconds NUMERIC(15,3),
 
     -- Configuration used
-    configuration_id UUID,
+    configuration_id BIGINT,
     rules_applied BOOLEAN DEFAULT false,
 
     -- Error tracking
@@ -68,8 +68,8 @@ COMMENT ON TABLE staging.import_batch IS 'Tracks file import batches and process
 
 -- File upload tracking (for large files uploaded in chunks)
 CREATE TABLE staging.file_upload (
-    upload_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
+    upload_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
 
     -- Upload details
     original_filename VARCHAR(500) NOT NULL,
@@ -106,8 +106,8 @@ COMMENT ON TABLE staging.file_upload IS 'Tracks multi-part file uploads';
 
 -- Import configuration profiles
 CREATE TABLE staging.import_configuration (
-    configuration_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
+    configuration_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
 
     -- Configuration details
     configuration_name VARCHAR(255) NOT NULL,
@@ -167,9 +167,9 @@ CREATE TRIGGER update_import_config_updated_at BEFORE UPDATE ON staging.import_c
 
 -- Rules engine configuration
 CREATE TABLE staging.rules_configuration (
-    rule_config_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organization_id UUID NOT NULL REFERENCES claims.organization(organization_id),
-    facility_id UUID REFERENCES claims.facility(facility_id),
+    rule_config_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id),
+    facility_id BIGINT REFERENCES claims.facility(facility_id),
 
     -- Rule identification
     rule_code VARCHAR(50) NOT NULL,
@@ -187,7 +187,7 @@ CREATE TABLE staging.rules_configuration (
     auto_flag BOOLEAN DEFAULT true,
 
     -- Issue to create when triggered
-    flag_issue_id UUID REFERENCES claims.flag_issue(issue_id),
+    flag_issue_id BIGINT REFERENCES claims.flag_issue(issue_id),
 
     -- Conditions
     applies_to_claim_types TEXT[], -- Which claim types this applies to
@@ -231,8 +231,8 @@ CREATE TRIGGER update_rules_config_updated_at BEFORE UPDATE ON staging.rules_con
 
 -- Processing metrics and performance tracking
 CREATE TABLE staging.processing_metrics (
-    metric_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    batch_id UUID REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
+    metric_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    batch_id BIGINT REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
 
     -- Metric details
     metric_type VARCHAR(50) NOT NULL, -- PARSE, VALIDATE, TRANSFORM, DEDUPE, RULES, INSERT
@@ -268,8 +268,8 @@ COMMENT ON TABLE staging.processing_metrics IS 'Performance metrics for import p
 
 -- Error log for import failures
 CREATE TABLE staging.import_error_log (
-    error_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    batch_id UUID REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
+    error_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    batch_id BIGINT REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
 
     -- Error location
     record_number INTEGER,

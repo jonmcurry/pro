@@ -3,7 +3,7 @@
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+
 
 /// Complete 837P transaction
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +114,7 @@ pub struct BillingProvider {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedClaim {
     // Temporary ID for processing
-    pub temp_id: Uuid,
+    pub temp_id: i64,
 
     // Loop 2000B - Subscriber Hierarchical Level
     pub subscriber_hl_number: String,

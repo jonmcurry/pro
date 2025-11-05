@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use pro_common::{Error, Result};
 use rust_decimal::Decimal;
 use sqlx::{query, query_as};
-use uuid::Uuid;
+
 
 pub struct DenialRepository<'a> {
     pool: &'a DbPool,
@@ -16,7 +16,7 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Get denial event by ID
-    pub async fn get_by_id(&self, denial_id: Uuid) -> Result<DenialEvent> {
+    pub async fn get_by_id(&self, denial_id: i64) -> Result<DenialEvent> {
         query_as::<_, DenialEvent>(
             r#"
             SELECT * FROM claims.denial_event
@@ -33,7 +33,7 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Get denials by encounter
-    pub async fn get_by_encounter(&self, encounter_id: Uuid) -> Result<Vec<DenialEvent>> {
+    pub async fn get_by_encounter(&self, encounter_id: i64) -> Result<Vec<DenialEvent>> {
         query_as::<_, DenialEvent>(
             r#"
             SELECT * FROM claims.denial_event
@@ -48,7 +48,7 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Get denials by service line
-    pub async fn get_by_service_line(&self, service_line_id: Uuid) -> Result<Vec<DenialEvent>> {
+    pub async fn get_by_service_line(&self, service_line_id: i64) -> Result<Vec<DenialEvent>> {
         query_as::<_, DenialEvent>(
             r#"
             SELECT * FROM claims.denial_event
@@ -65,7 +65,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by organization
     pub async fn list_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -88,7 +88,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by facility
     pub async fn list_by_facility(
         &self,
-        facility_id: Uuid,
+        facility_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -111,7 +111,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by date range
     pub async fn list_by_date_range(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         from_date: NaiveDate,
         to_date: NaiveDate,
         limit: i64,
@@ -140,7 +140,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by denial type
     pub async fn list_by_denial_type(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         denial_type: &str,
         limit: i64,
         offset: i64,
@@ -166,7 +166,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by category
     pub async fn list_by_category(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         denial_category: &str,
         limit: i64,
         offset: i64,
@@ -192,7 +192,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by payer
     pub async fn list_by_payer(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         payer_name: &str,
         limit: i64,
         offset: i64,
@@ -218,7 +218,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by reason code
     pub async fn list_by_reason_code(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         reason_code: &str,
         limit: i64,
         offset: i64,
@@ -244,7 +244,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by status
     pub async fn list_by_status(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         denial_status: &str,
         limit: i64,
         offset: i64,
@@ -270,7 +270,7 @@ impl<'a> DenialRepository<'a> {
     /// List preventable denials
     pub async fn list_preventable(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -294,7 +294,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials pending appeal
     pub async fn list_pending_appeal(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -320,7 +320,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by coder
     pub async fn list_by_coder(
         &self,
-        coder_id: Uuid,
+        coder_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -343,7 +343,7 @@ impl<'a> DenialRepository<'a> {
     /// List denials by provider
     pub async fn list_by_provider(
         &self,
-        provider_id: Uuid,
+        provider_id: i64,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<DenialEvent>> {
@@ -364,8 +364,8 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Create denial event
-    pub async fn create(&self, denial: &DenialEvent) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, denial: &DenialEvent) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.denial_event (
                 denial_id, encounter_id, service_line_id, organization_id, facility_id,
@@ -500,7 +500,7 @@ impl<'a> DenialRepository<'a> {
     /// Update denial status
     pub async fn update_status(
         &self,
-        denial_id: Uuid,
+        denial_id: i64,
         denial_status: &str,
         resolution_status: Option<&str>,
         resolution_notes: Option<&str>,
@@ -539,7 +539,7 @@ impl<'a> DenialRepository<'a> {
     /// Update appeal information
     pub async fn update_appeal(
         &self,
-        denial_id: Uuid,
+        denial_id: i64,
         appeal_filed: bool,
         appeal_level: Option<&str>,
         appeal_deadline: Option<NaiveDate>,
@@ -575,7 +575,7 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Count denials by organization
-    pub async fn count_by_organization(&self, organization_id: Uuid) -> Result<i64> {
+    pub async fn count_by_organization(&self, organization_id: i64) -> Result<i64> {
         let count: (i64,) = query_as(
             r#"
             SELECT COUNT(*) FROM claims.denial_event
@@ -593,7 +593,7 @@ impl<'a> DenialRepository<'a> {
     /// Count denials by status
     pub async fn count_by_status(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
         denial_status: &str,
     ) -> Result<i64> {
         let count: (i64,) = query_as(
@@ -613,7 +613,7 @@ impl<'a> DenialRepository<'a> {
     }
 
     /// Sum denied amount by organization
-    pub async fn sum_denied_amount_by_organization(&self, organization_id: Uuid) -> Result<Decimal> {
+    pub async fn sum_denied_amount_by_organization(&self, organization_id: i64) -> Result<Decimal> {
         let sum: (Option<Decimal>,) = query_as(
             r#"
             SELECT SUM(denied_amount) FROM claims.denial_event
@@ -631,7 +631,7 @@ impl<'a> DenialRepository<'a> {
     /// Get denial rate by organization (percentage)
     pub async fn get_denial_rate_by_organization(
         &self,
-        organization_id: Uuid,
+        organization_id: i64,
     ) -> Result<Decimal> {
         let rate: (Option<Decimal>,) = query_as(
             r#"
@@ -667,7 +667,7 @@ mod tests {
         let repo = DenialRepository::new(&pool);
 
         // Test count_by_organization
-        let sample_org_id = Uuid::new_v4();
+        let sample_org_id = 1i64;
         let count = repo.count_by_organization(sample_org_id).await;
         assert!(count.is_ok());
     }

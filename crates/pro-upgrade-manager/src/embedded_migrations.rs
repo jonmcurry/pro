@@ -211,5 +211,30 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "phase6_additional_loops",
             sql: include_str!("../../../migrations/039_phase6_additional_loops.sql"),
         },
+        EmbeddedMigration {
+            version: "041",
+            name: "create_provider_taxonomy",
+            sql: include_str!("../../../migrations/041_create_provider_taxonomy.sql"),
+        },
+        EmbeddedMigration {
+            version: "042",
+            name: "create_provider_enrichment_queue",
+            sql: include_str!("../../../migrations/042_create_provider_enrichment_queue.sql"),
+        },
+        EmbeddedMigration {
+            version: "043",
+            name: "add_missing_foreign_key_indexes",
+            sql: include_str!("../../../migrations/043_add_missing_foreign_key_indexes.sql"),
+        },
+        EmbeddedMigration {
+            version: "044",
+            name: "add_taxonomy_foreign_key",
+            sql: include_str!("../../../migrations/044_add_taxonomy_foreign_key.sql"),
+        },
+        EmbeddedMigration {
+            version: "045",
+            name: "add_staging_foreign_keys",
+            sql: include_str!("../../../migrations/045_add_staging_foreign_keys.sql"),
+        },
     ]
 }

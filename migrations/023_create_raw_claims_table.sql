@@ -5,9 +5,9 @@
 
 -- Create raw_claims table for storing parsed but unvalidated claims
 CREATE TABLE IF NOT EXISTS staging.raw_claims (
-    raw_claim_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    batch_id UUID NOT NULL REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
-    queue_id UUID NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
+    raw_claim_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    batch_id BIGINT NOT NULL REFERENCES staging.import_batch(batch_id) ON DELETE CASCADE,
+    queue_id BIGINT NOT NULL REFERENCES staging.file_processing_queue(queue_id) ON DELETE CASCADE,
 
     -- Original parsed data stored as JSONB for flexibility
     -- Allows storing any claim format without schema changes

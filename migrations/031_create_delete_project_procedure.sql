@@ -1,7 +1,7 @@
 -- Migration 031: Create stored procedure for deleting projects
 -- This procedure handles cascading deletion of all project-related data
 
-CREATE OR REPLACE PROCEDURE claims.usp_DeleteProject(p_id uuid)
+CREATE OR REPLACE PROCEDURE claims.usp_DeleteProject(p_id bigint)
 LANGUAGE plpgsql
 AS $$
 BEGIN

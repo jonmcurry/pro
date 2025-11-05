@@ -4,7 +4,7 @@
 
 -- Flag categories and definitions
 CREATE TABLE claims.flag_category (
-    category_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    category_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     category_code VARCHAR(10) NOT NULL UNIQUE, -- COD, DOC, EMO, EMU, EMI, EMT, MOD, OTH, QTY, SUP, DX
     category_name VARCHAR(100) NOT NULL,
     category_description TEXT,
@@ -32,8 +32,8 @@ INSERT INTO claims.flag_category (category_code, category_name, category_descrip
 
 -- Flag issue definitions
 CREATE TABLE claims.flag_issue (
-    issue_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    category_id UUID NOT NULL REFERENCES claims.flag_category(category_id),
+    issue_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    category_id BIGINT NOT NULL REFERENCES claims.flag_category(category_id),
     issue_code VARCHAR(20) NOT NULL UNIQUE,
     issue_description TEXT NOT NULL,
     severity VARCHAR(20) DEFAULT 'MEDIUM', -- HIGH, MEDIUM, LOW
@@ -99,9 +99,9 @@ INSERT INTO claims.flag_issue (category_id, issue_code, issue_description, sever
 
 -- Flag assignments to encounters
 CREATE TABLE claims.encounter_flag (
-    flag_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    encounter_id UUID NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
-    issue_id UUID NOT NULL REFERENCES claims.flag_issue(issue_id),
+    flag_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    encounter_id BIGINT NOT NULL REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    issue_id BIGINT NOT NULL REFERENCES claims.flag_issue(issue_id),
 
     -- Flag details
     flag_type VARCHAR(20) DEFAULT 'POST_BILL', -- POST_BILL, PRE_BILL
@@ -142,9 +142,9 @@ COMMENT ON TABLE claims.encounter_flag IS 'Flags assigned to encounters by the r
 
 -- Flag assignments to service lines
 CREATE TABLE claims.service_line_flag (
-    flag_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    service_line_id UUID NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
-    issue_id UUID NOT NULL REFERENCES claims.flag_issue(issue_id),
+    flag_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
+    service_line_id BIGINT NOT NULL REFERENCES claims.service_line(service_line_id) ON DELETE CASCADE,
+    issue_id BIGINT NOT NULL REFERENCES claims.flag_issue(issue_id),
 
     -- Flag details
     flag_type VARCHAR(20) DEFAULT 'POST_BILL', -- POST_BILL, PRE_BILL

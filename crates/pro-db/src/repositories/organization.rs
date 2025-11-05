@@ -2,7 +2,7 @@ use crate::models::Organization;
 use crate::DbPool;
 use pro_common::{Error, Result};
 use sqlx::query_as;
-use uuid::Uuid;
+
 
 pub struct OrganizationRepository<'a> {
     pool: &'a DbPool,
@@ -14,7 +14,7 @@ impl<'a> OrganizationRepository<'a> {
     }
 
     /// Get organization by ID
-    pub async fn get_by_id(&self, id: Uuid) -> Result<Organization> {
+    pub async fn get_by_id(&self, id: i64) -> Result<Organization> {
         query_as::<_, Organization>(
             r#"
             SELECT * FROM claims.organization
@@ -62,8 +62,8 @@ impl<'a> OrganizationRepository<'a> {
     }
 
     /// Create a new organization
-    pub async fn create(&self, org: &Organization) -> Result<Uuid> {
-        let id = query_as::<_, (Uuid,)>(
+    pub async fn create(&self, org: &Organization) -> Result<i64> {
+        let id = query_as::<_, (i64,)>(
             r#"
             INSERT INTO claims.organization (
                 organization_code, organization_name, tax_id, npi,
@@ -146,7 +146,7 @@ impl<'a> OrganizationRepository<'a> {
     }
 
     /// Deactivate an organization (soft delete)
-    pub async fn deactivate(&self, id: Uuid) -> Result<()> {
+    pub async fn deactivate(&self, id: i64) -> Result<()> {
         let rows_affected = sqlx::query(
             r#"
             UPDATE claims.organization
