@@ -1,5 +1,7 @@
 # Professional SMART
 
+**Version**: 1.5.30.0 | **Release Date**: November 4, 2025
+
 A comprehensive healthcare claims auditing and analytics system for processing 837p professional claims and CSV files with automated flagging, rules engine, RVU-based reimbursement estimation, and denial tracking.
 
 ## Overview
@@ -49,9 +51,16 @@ pro/
 │   └── pro-ml/                  # Machine learning models
 ├── docs/
 │   ├── CLAUDE.md                # Project rules and guidelines
-│   ├── srd.md                   # Software Requirements Document
-│   └── 837p_compguide.pdf       # CMS 837P Companion Guide
-└── todo.md                      # Progress tracking
+│   ├── INSTALLATION.md          # Installation guide (MSI and manual)
+│   ├── EDI_PARSING.md          # 837P EDI parser documentation
+│   ├── CHANGELOG.md            # Version history and release notes
+│   ├── CONFIGURATION.md        # System configuration guide
+│   ├── DATABASE_SETUP.md       # Database setup and migration guide
+│   ├── srd.md                  # Software Requirements Document
+│   └── 837p_compguide.pdf      # CMS 837P Companion Guide
+├── installer/
+│   └── ProfessionalSMART.msi   # Windows installer package
+└── test_data/                  # Test EDI and CSV files
 
 ```
 
@@ -99,7 +108,25 @@ The application uses PostgreSQL with three schemas:
 - **Logging**: Tracing
 - **CLI**: Clap
 
-## Getting Started
+## Quick Start
+
+### Production Installation (Recommended)
+
+1. Download `ProfessionalSMART.msi` from the `installer` directory
+2. Run the MSI installer as Administrator
+3. Follow the installation wizard
+4. See [INSTALLATION.md](docs/INSTALLATION.md) for detailed instructions
+
+### Documentation
+
+- **[Installation Guide](docs/INSTALLATION.md)** - MSI installer and manual installation
+- **[EDI Parsing](docs/EDI_PARSING.md)** - 837P format, loop structure, and troubleshooting
+- **[Changelog](docs/CHANGELOG.md)** - Version history and release notes
+- **[Configuration](docs/CONFIGURATION.md)** - System configuration options
+- **[Database Setup](docs/DATABASE_SETUP.md)** - Database migrations and setup
+- **[Development Rules](docs/CLAUDE.md)** - Project guidelines and best practices
+
+## Getting Started (Development)
 
 ### Prerequisites
 
@@ -162,9 +189,14 @@ SERVER_PORT=3000
 - [x] Validation functions for healthcare standards
 
 ### In Progress
-- [ ] Database access layer (pro-db)
-- [ ] 837p EDI parser (pro-parser-edi)
-- [ ] Dynamic CSV parser (pro-parser-csv)
+- [x] Database access layer (pro-db)
+- [x] 837p EDI parser (pro-parser-edi) - **v1.5.30.0 with critical loop identification fix**
+- [x] Dynamic CSV parser (pro-parser-csv)
+- [x] Windows service implementation (pro-service)
+- [x] Claims importer with facility lookup
+- [x] Claims processor with service line handling
+- [x] File watcher and batch processing
+- [x] MSI installer with automated setup
 
 ### Pending
 - [ ] Rules engine implementation

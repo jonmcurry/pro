@@ -2,6 +2,32 @@
 
 This guide provides step-by-step instructions for installing the Professional SMART claims processing system on Windows.
 
+**Current Version**: 1.5.30.0
+**Release Date**: November 4, 2025
+
+## Quick Start (MSI Installer)
+
+For production deployments, use the MSI installer for automated installation:
+
+1. **Download** `ProfessionalSMART.msi` from the `installer` directory
+2. **Run** the MSI installer as Administrator
+3. **Follow** the installation wizard:
+   - Configure database connection (server, database name, credentials)
+   - Set data directories (input, processed, error)
+   - Configure service startup options
+4. **Verify** installation by checking Windows Services for "Professional SMART"
+
+The MSI installer automatically:
+- Installs the service executable and dependencies
+- Creates necessary directories (`data\input`, `data\processed`, `data\error`, `logs`)
+- Runs all database migrations (001-039)
+- Configures the Windows service
+- Generates `.env` configuration file
+
+Skip to [Post-Installation Verification](#installation-verification) after MSI installation.
+
+---
+
 ## Upgrading from Previous Version
 
 **If you already have Professional SMART installed**, please see the [UPGRADE_GUIDE.md](UPGRADE_GUIDE.md) for upgrade instructions. Starting with version 1.1.0, you can upgrade in-place without losing your data.
@@ -291,6 +317,7 @@ All tests should pass.
 2. **Set Up Database**: See [DATABASE_SETUP.md](DATABASE_SETUP.md)
 3. **Import RVU Data**: See [DATABASE_SETUP.md](DATABASE_SETUP.md#import-rvu-data)
 4. **Configure Organizations**: Add facilities, providers, and coders
+5. **Understand EDI Parsing**: See [EDI_PARSING.md](EDI_PARSING.md) for 837P format details
 
 ## Troubleshooting
 
