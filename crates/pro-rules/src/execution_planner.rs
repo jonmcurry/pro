@@ -7,6 +7,65 @@ use crate::rule_engine::Rule;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
+/// Helper to parse flag type from string (PHASE 8)
+/// This matches the flag_type strings stored in the database
+fn parse_flag_type(type_str: &str) -> Result<FlagIssueType, ()> {
+    // Try to parse as the enum variant name (e.g., "CodUpcoding")
+    // This is a simplified parser - in production, use serde or strum
+    match type_str {
+        // Coding (4 types)
+        "CodIncorrectProcedureCode" => Ok(FlagIssueType::CodIncorrectProcedureCode),
+        "CodProcedureNotSupportedByDiagnosis" => Ok(FlagIssueType::CodProcedureNotSupportedByDiagnosis),
+        "CodUnbundling" => Ok(FlagIssueType::CodUnbundling),
+        "CodUpcoding" => Ok(FlagIssueType::CodUpcoding),
+
+        // Documentation (2 types)
+        "DocInsufficientDocumentation" => Ok(FlagIssueType::DocInsufficientDocumentation),
+        "DocMissingRequiredElements" => Ok(FlagIssueType::DocMissingRequiredElements),
+
+        // E/M Overcoded (2 types)
+        "EMOLevelHigherThanMDM" => Ok(FlagIssueType::EMOLevelHigherThanMDM),
+        "EMOLevelHigherThanHistoryExam" => Ok(FlagIssueType::EMOLevelHigherThanHistoryExam),
+
+        // E/M Undercoded (2 types)
+        "EMULevelLowerThanMDM" => Ok(FlagIssueType::EMULevelLowerThanMDM),
+        "EMULevelLowerThanTime" => Ok(FlagIssueType::EMULevelLowerThanTime),
+
+        // E/M Incorrect Category (1 type)
+        "EMIWrongCategory" => Ok(FlagIssueType::EMIWrongCategory),
+
+        // E/M Time Not Documented (1 type)
+        "EMTTimeNotDocumented" => Ok(FlagIssueType::EMTTimeNotDocumented),
+
+        // Modifier (3 types)
+        "ModMissingRequired" => Ok(FlagIssueType::ModMissingRequired),
+        "ModIncorrect" => Ok(FlagIssueType::ModIncorrect),
+        "ModConflicting" => Ok(FlagIssueType::ModConflicting),
+
+        // Other (3 types)
+        "OthMedicalNecessityNotEstablished" => Ok(FlagIssueType::OthMedicalNecessityNotEstablished),
+        "OthWrongProviderType" => Ok(FlagIssueType::OthWrongProviderType),
+        "OthDuplicateService" => Ok(FlagIssueType::OthDuplicateService),
+
+        // Quantity (2 types)
+        "QtyUnitsExceedMaximum" => Ok(FlagIssueType::QtyUnitsExceedMaximum),
+        "QtyUnitsInconsistent" => Ok(FlagIssueType::QtyUnitsInconsistent),
+
+        // Supervision (3 types)
+        "SupSupervisionNotDocumented" => Ok(FlagIssueType::SupSupervisionNotDocumented),
+        "SupInappropriateLevel" => Ok(FlagIssueType::SupInappropriateLevel),
+        "SupTeachingPhysicianNotMet" => Ok(FlagIssueType::SupTeachingPhysicianNotMet),
+
+        // Diagnosis (4 types)
+        "DxPrimaryDoesNotSupport" => Ok(FlagIssueType::DxPrimaryDoesNotSupport),
+        "DxMissingSpecificity" => Ok(FlagIssueType::DxMissingSpecificity),
+        "DxSequencingError" => Ok(FlagIssueType::DxSequencingError),
+        "DxUnspecifiedWhenSpecificAvailable" => Ok(FlagIssueType::DxUnspecifiedWhenSpecificAvailable),
+
+        _ => Err(()),
+    }
+}
+
 /// Statistics for a rule's execution
 #[derive(Debug, Clone)]
 pub struct RuleStats {
@@ -122,15 +181,62 @@ impl RuleExecutionPlanner {
         &self.stats
     }
 
-    /// Load statistics from historical data (placeholder for database integration)
-    pub async fn load_historical_stats(&mut self, _pool: &sqlx::PgPool) -> pro_common::Result<()> {
-        // TODO: Load stats from database
-        // SELECT flag_type,
-        //        AVG(CASE WHEN flag_created THEN 1.0 ELSE 0.0 END) as trigger_rate,
-        //        AVG(financial_impact) as avg_impact,
-        //        AVG(execution_time_ms) as avg_time
-        // FROM rule_execution_log
-        // GROUP BY flag_type
+    /// Load statistics from historical data (PHASE 8)
+    /// Reads from materialized view for fast initialization
+    pub async fn load_historical_stats(&mut self, pool: &sqlx::PgPool) -> pro_common::Result<()> {
+        use sqlx::Row;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                flag_type,
+                trigger_rate,
+                avg_financial_impact,
+                avg_execution_time_ms,
+                execution_count
+            FROM claims.rule_execution_stats_summary
+            ORDER BY trigger_rate * COALESCE(avg_financial_impact, 0) DESC
+            "#
+        )
+        .fetch_all(pool)
+        .await?;
+
+        let mut loaded_count = 0;
+
+        // Update stats for each flag type found in historical data
+        for row in rows {
+            let flag_type_str: String = row.get("flag_type");
+
+            // Parse flag type string to enum
+            if let Ok(flag_type) = parse_flag_type(&flag_type_str) {
+                // Only update if we have stats for this flag type
+                if let Some(stats) = self.stats.get_mut(&flag_type) {
+                    stats.trigger_rate = row.get("trigger_rate");
+                    stats.avg_financial_impact = row.get::<Option<rust_decimal::Decimal>, _>("avg_financial_impact")
+                        .map(|d| d.to_string().parse::<f64>().unwrap_or(100.0))
+                        .unwrap_or(100.0);
+                    stats.avg_execution_time_ms = row.get::<f32, _>("avg_execution_time_ms") as f64;
+                    stats.execution_count = row.get::<i64, _>("execution_count") as u64;
+
+                    loaded_count += 1;
+
+                    tracing::debug!(
+                        "Loaded historical stats for {:?}: trigger_rate={:.3}, avg_impact=${:.2}, avg_time={:.2}ms, count={}",
+                        flag_type,
+                        stats.trigger_rate,
+                        stats.avg_financial_impact,
+                        stats.avg_execution_time_ms,
+                        stats.execution_count
+                    );
+                }
+            }
+        }
+
+        if loaded_count > 0 {
+            tracing::info!("Loaded historical statistics for {} rule types", loaded_count);
+        } else {
+            tracing::warn!("No historical statistics found - using default values");
+        }
 
         Ok(())
     }

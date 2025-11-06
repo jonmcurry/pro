@@ -30,8 +30,14 @@ async-trait = { workspace = true }
 rust_decimal = "1.36"
 rust_decimal_macros = "1.36"
 
+# PHASE 3: Regex for pattern matching
+regex = "1.10"
+
 # PHASE 4: Fast hash implementation for performance
 rustc-hash = "1.1"
+
+# Logging
+tracing = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

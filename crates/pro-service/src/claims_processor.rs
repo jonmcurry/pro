@@ -91,18 +91,20 @@ impl ClaimsProcessor {
         let batch_ids: Vec<i64> = raw_claims.iter().map(|c| c.batch_id).collect();
         let unique_batch_ids: std::collections::HashSet<i64> = batch_ids.into_iter().collect();
 
-        // Update batch status to PROCESSING
-        for batch_id in &unique_batch_ids {
+        // PHASE 6 OPTIMIZATION: Update batch status to PROCESSING (batch query instead of loop)
+        let batch_ids_vec: Vec<i64> = unique_batch_ids.iter().copied().collect();
+        if !batch_ids_vec.is_empty() {
             sqlx::query(
                 r#"
                 UPDATE staging.import_batch
                 SET import_status = 'PROCESSING'
-                WHERE batch_id = $1 AND import_status = 'INGESTED'
+                WHERE batch_id = ANY($1) AND import_status = 'INGESTED'
                 "#
             )
-            .bind(batch_id)
+            .bind(&batch_ids_vec)
             .execute(&self.pool)
-            .await?;
+            .await
+            .context("Failed to update batch status to PROCESSING")?;
         }
 
         let mut result = ProcessResult {
@@ -279,36 +281,39 @@ impl ClaimsProcessor {
         info!("Processing complete: {} total, {} successful, {} failed",
             result.total_processed, result.successful, result.failed);
 
-        // Update batch statuses to COMPLETED
-        for batch_id in &unique_batch_ids {
-            let batch_status = if result.failed == 0 {
-                "COMPLETED"
-            } else if result.successful > 0 {
-                "PARTIAL"
-            } else {
-                "FAILED"
-            };
+        // PHASE 6 OPTIMIZATION: Update batch statuses with single query using batch counts
+        // Pre-compute counts for all batches at once, then update in batch
+        if !unique_batch_ids.is_empty() {
+            let batch_ids_vec: Vec<i64> = unique_batch_ids.iter().copied().collect();
 
+            // Single query to get counts for all batches
             sqlx::query(
                 r#"
-                UPDATE staging.import_batch
-                SET import_status = $1,
-                    successful_records = (
-                        SELECT COUNT(*) FROM staging.raw_claims
-                        WHERE batch_id = $2 AND processing_status = 'COMPLETED'
-                    ),
-                    failed_records = (
-                        SELECT COUNT(*) FROM staging.raw_claims
-                        WHERE batch_id = $2 AND processing_status = 'FAILED'
-                    ),
+                UPDATE staging.import_batch ib
+                SET import_status = CASE
+                        WHEN counts.failed_count = 0 THEN 'COMPLETED'
+                        WHEN counts.successful_count > 0 THEN 'PARTIAL'
+                        ELSE 'FAILED'
+                    END,
+                    successful_records = counts.successful_count,
+                    failed_records = counts.failed_count,
                     completed_at = CURRENT_TIMESTAMP
-                WHERE batch_id = $2
+                FROM (
+                    SELECT
+                        batch_id,
+                        COUNT(*) FILTER (WHERE processing_status = 'COMPLETED') as successful_count,
+                        COUNT(*) FILTER (WHERE processing_status = 'FAILED') as failed_count
+                    FROM staging.raw_claims
+                    WHERE batch_id = ANY($1)
+                    GROUP BY batch_id
+                ) counts
+                WHERE ib.batch_id = counts.batch_id
                 "#
             )
-            .bind(batch_status)
-            .bind(batch_id)
+            .bind(&batch_ids_vec)
             .execute(&self.pool)
-            .await?;
+            .await
+            .context("Failed to update batch completion status")?;
         }
 
         // Log PROCESS metric for each batch (Stage 2 performance)

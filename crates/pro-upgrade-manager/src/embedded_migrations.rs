@@ -236,5 +236,25 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_staging_foreign_keys",
             sql: include_str!("../../../migrations/045_add_staging_foreign_keys.sql"),
         },
+        EmbeddedMigration {
+            version: "046",
+            name: "create_rule_configuration_system",
+            sql: include_str!("../../../migrations/046_create_rule_configuration_system.sql"),
+        },
+        EmbeddedMigration {
+            version: "047",
+            name: "add_test_facility_rule_assignments",
+            sql: include_str!("../../../migrations/047_add_test_facility_rule_assignments.sql"),
+        },
+        EmbeddedMigration {
+            version: "048",
+            name: "add_rule_templates",
+            sql: include_str!("../../../migrations/048_add_rule_templates.sql"),
+        },
+        EmbeddedMigration {
+            version: "049",
+            name: "add_flag_issue_helpers",
+            sql: include_str!("../../../migrations/049_add_flag_issue_helpers.sql"),
+        },
     ]
 }

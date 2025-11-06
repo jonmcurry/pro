@@ -4231,6 +4231,7 @@ dependencies = [
  "chrono",
  "pro-common",
  "pro-db",
+ "regex",
  "rust_decimal",
  "rust_decimal_macros",
  "rustc-hash 1.1.0",
@@ -4239,6 +4240,7 @@ dependencies = [
  "sqlx",
  "thiserror 1.0.69",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

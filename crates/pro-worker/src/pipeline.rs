@@ -12,7 +12,7 @@ use pro_db::{
 };
 use pro_parser_csv::CsvParser;
 use pro_parser_edi::parser::EdiParser;
-use pro_rules::RuleEngine;
+use pro_rules::{RuleEngine, load_rules_from_database};
 use pro_rvu::PaymentCalculator;
 use sqlx::PgPool;
 use tracing::{info, warn, error};
@@ -25,15 +25,60 @@ pub struct IngestionPipeline {
     pool: PgPool,
     rule_engine: RuleEngine,
     payment_calculator: PaymentCalculator,
+    facility_id: Option<i64>, // For facility-specific rule loading
 }
 
 impl IngestionPipeline {
-    /// Create a new ingestion pipeline
-    pub fn new(pool: PgPool) -> Self {
-        // Initialize rule engine with database pool
+    /// Create a new ingestion pipeline with database-driven rules
+    ///
+    /// Rules are loaded from database based on ENABLE_DATABASE_RULES env var:
+    /// - If true: Load rules from database (requires RULE_ENCRYPTION_KEY)
+    /// - If false: Use legacy hard-coded rules (backward compatibility)
+    pub async fn new(pool: PgPool, facility_id: Option<i64>) -> Result<Self> {
+        // Check if database-driven rules are enabled
+        let use_database_rules = std::env::var("ENABLE_DATABASE_RULES")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
+            .unwrap_or(false);
+
+        let rule_engine = if use_database_rules {
+            info!("Loading rules from database (facility_id: {:?})", facility_id);
+            match load_rules_from_database(&pool, facility_id).await {
+                Ok((engine, rules)) => {
+                    info!("Loaded {} rule(s) from database", rules.len());
+                    for rule in rules {
+                        info!("  - {} ({}): {}", rule.rule_code, rule.execution_level, rule.rule_name);
+                    }
+                    engine
+                }
+                Err(e) => {
+                    error!("Failed to load rules from database: {}", e);
+                    warn!("Falling back to legacy hard-coded rules");
+                    Self::create_legacy_rule_engine(&pool)
+                }
+            }
+        } else {
+            info!("Using legacy hard-coded rules (ENABLE_DATABASE_RULES=false)");
+            Self::create_legacy_rule_engine(&pool)
+        };
+
+        // Initialize payment calculator with sample data
+        // In production, this would load from database
+        let payment_calculator = PaymentCalculator::with_sample_data();
+
+        Ok(Self {
+            pool,
+            rule_engine,
+            payment_calculator,
+            facility_id,
+        })
+    }
+
+    /// Create legacy rule engine with hard-coded rules (backward compatibility)
+    fn create_legacy_rule_engine(pool: &PgPool) -> RuleEngine {
         let mut rule_engine = RuleEngine::new(pool.clone());
 
-        // Add default rules directly
+        // Add default rules directly (legacy approach)
         rule_engine.add_rule(pro_rules::rules::DuplicateServiceRule);
         rule_engine.add_rule(pro_rules::rules::UnitsExceedMaximumRule::default());
         rule_engine.add_rule(pro_rules::rules::MissingRequiredModifierRule::default());
@@ -41,15 +86,7 @@ impl IngestionPipeline {
         rule_engine.add_rule(pro_rules::rules::UnspecifiedDiagnosisRule);
         rule_engine.add_rule(pro_rules::rules::MissingDiagnosisSpecificityRule);
 
-        // Initialize payment calculator with sample data
-        // In production, this would load from database
-        let payment_calculator = PaymentCalculator::with_sample_data();
-
-        Self {
-            pool,
-            rule_engine,
-            payment_calculator,
-        }
+        rule_engine
     }
 
     /// Process a file ingestion job
@@ -1898,7 +1935,7 @@ mod tests {
     #[tokio::test]
     async fn test_pipeline_creation() {
         let pool = PgPool::connect_lazy("postgres://dummy").unwrap();
-        let pipeline = IngestionPipeline::new(pool);
+        let pipeline = IngestionPipeline::new(pool, None).await.unwrap();
 
         assert_eq!(pipeline.rule_engine().rule_count(), 6);
     }
