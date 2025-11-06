@@ -89,7 +89,7 @@ COMMENT ON FUNCTION claims.get_flag_issue_type_name(TEXT) IS
 -- This view is used by the rule loader to get the proper enum names
 CREATE OR REPLACE VIEW claims.v_rule_definitions_with_flag_types AS
 SELECT
-    rd.rule_definition_id,
+    rd.rule_id,
     rd.rule_code,
     rd.rule_name,
     rd.template_id,
@@ -103,8 +103,7 @@ SELECT
     rd.is_active,
     rd.created_at,
     rd.updated_at,
-    rd.rule_parameters_encrypted,
-    rd.rule_parameters_hash
+    rd.rule_parameters_encrypted
 FROM claims.rule_definition rd
 INNER JOIN claims.flag_issue fi ON rd.flag_issue_id = fi.issue_id
 LEFT JOIN claims.rule_template rt ON rd.template_id = rt.template_id
@@ -117,9 +116,9 @@ COMMENT ON VIEW claims.v_rule_definitions_with_flag_types IS
 -- Helper view: Active facility rules with flag type names
 CREATE OR REPLACE VIEW claims.v_active_facility_rules_with_types AS
 SELECT
-    fa.facility_rule_id,
+    fa.assignment_id AS facility_rule_id,
     fa.facility_id,
-    fa.rule_definition_id,
+    fa.rule_id,
     rd.rule_code,
     rd.rule_name,
     rt.template_code,
@@ -128,13 +127,13 @@ SELECT
     rd.execution_order,
     rd.execution_level,
     fa.parameter_overrides_encrypted,
-    fa.is_active AS facility_override_active,
+    fa.is_enabled AS facility_override_active,
     rd.is_active AS rule_active
 FROM claims.facility_rule_assignment fa
-INNER JOIN claims.rule_definition rd ON fa.rule_definition_id = rd.rule_definition_id
+INNER JOIN claims.rule_definition rd ON fa.rule_id = rd.rule_id
 INNER JOIN claims.flag_issue fi ON rd.flag_issue_id = fi.issue_id
 LEFT JOIN claims.rule_template rt ON rd.template_id = rt.template_id
-WHERE fa.is_active = true
+WHERE fa.is_enabled = true
   AND rd.is_active = true
 ORDER BY fa.facility_id, rd.execution_order;
 
@@ -143,9 +142,14 @@ COMMENT ON VIEW claims.v_active_facility_rules_with_types IS
 
 -- Add index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_rule_definition_active ON claims.rule_definition(is_active) WHERE is_active = true;
-CREATE INDEX IF NOT EXISTS idx_facility_rule_active ON claims.facility_rule_assignment(is_active, facility_id) WHERE is_active = true;
+CREATE INDEX IF NOT EXISTS idx_facility_rule_active ON claims.facility_rule_assignment(is_enabled, facility_id) WHERE is_enabled = true;
 
--- Grant permissions
-GRANT EXECUTE ON FUNCTION claims.get_flag_issue_type_name(TEXT) TO pro_app;
-GRANT SELECT ON claims.v_rule_definitions_with_flag_types TO pro_app;
-GRANT SELECT ON claims.v_active_facility_rules_with_types TO pro_app;
+-- Grant permissions (conditional - only if role exists)
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'pro_app') THEN
+        GRANT EXECUTE ON FUNCTION claims.get_flag_issue_type_name(TEXT) TO pro_app;
+        GRANT SELECT ON claims.v_rule_definitions_with_flag_types TO pro_app;
+        GRANT SELECT ON claims.v_active_facility_rules_with_types TO pro_app;
+    END IF;
+END $$;

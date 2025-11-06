@@ -188,6 +188,54 @@ pub fn run_service() -> Result<()> {
             }
         }
 
+        // MIGRATION CHECK: Apply pending database migrations before connecting
+        info!("Checking for pending database migrations...");
+
+        // Create a temporary connection to check/apply migrations
+        match pro_db::connection::create_pool_default().await {
+            Ok(temp_pool) => {
+                let migration_manager = pro_upgrade_manager::MigrationManager::new_embedded(temp_pool.clone());
+
+                match migration_manager.get_pending_migrations().await {
+                    Ok(pending) => {
+                        if pending.is_empty() {
+                            info!("No pending migrations - database is up to date");
+                        } else {
+                            info!("Found {} pending migrations - applying...", pending.len());
+                            for migration in &pending {
+                                info!("  - {}", migration.file_name);
+                            }
+
+                            match migration_manager.apply_pending_migrations().await {
+                                Ok(applied_names) => {
+                                    info!("Successfully applied {} migrations", applied_names.len());
+                                    for name in &applied_names {
+                                        info!("  Applied: {}", name);
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to apply migrations: {}", e);
+                                    error!("Service will continue but may encounter database errors");
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("Could not check pending migrations: {}", e);
+                        warn!("Service will continue but migrations may be needed");
+                    }
+                }
+
+                // Close temporary pool
+                temp_pool.close().await;
+            }
+            Err(e) => {
+                warn!("Could not connect to database for migration check: {}", e);
+                warn!("Migrations will not be applied automatically");
+            }
+        }
+
+        info!("Creating main database connection pool...");
         let db_pool = match pro_db::connection::create_pool_default().await {
             Ok(pool) => pool,
             Err(e) => {

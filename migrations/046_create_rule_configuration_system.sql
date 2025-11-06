@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- 1. Rule Templates (Compiled Rust code)
 -- ============================================================================
 
-CREATE TABLE claims.rule_template (
+CREATE TABLE IF NOT EXISTS claims.rule_template (
     template_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 50) PRIMARY KEY,
     template_code VARCHAR(50) NOT NULL UNIQUE, -- e.g., 'THRESHOLD', 'DUPLICATE', 'MISSING_FIELD'
     template_name VARCHAR(100) NOT NULL,
@@ -33,8 +33,8 @@ CREATE TABLE claims.rule_template (
     created_by VARCHAR(100) DEFAULT 'SYSTEM'
 );
 
-CREATE INDEX idx_rule_template_code ON claims.rule_template(template_code);
-CREATE INDEX idx_rule_template_active ON claims.rule_template(is_active);
+CREATE INDEX IF NOT EXISTS idx_rule_template_code ON claims.rule_template(template_code);
+CREATE INDEX IF NOT EXISTS idx_rule_template_active ON claims.rule_template(is_active);
 
 COMMENT ON TABLE claims.rule_template IS 'Pre-compiled rule templates implemented in Rust';
 
@@ -42,7 +42,7 @@ COMMENT ON TABLE claims.rule_template IS 'Pre-compiled rule templates implemente
 -- 2. Rule Definitions (Instances of templates)
 -- ============================================================================
 
-CREATE TABLE claims.rule_definition (
+CREATE TABLE IF NOT EXISTS claims.rule_definition (
     rule_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Rule metadata
@@ -89,11 +89,11 @@ CREATE TABLE claims.rule_definition (
     replaces_rule_id BIGINT REFERENCES claims.rule_definition(rule_id)
 );
 
-CREATE INDEX idx_rule_definition_code ON claims.rule_definition(rule_code);
-CREATE INDEX idx_rule_definition_template ON claims.rule_definition(template_id);
-CREATE INDEX idx_rule_definition_active ON claims.rule_definition(is_active);
-CREATE INDEX idx_rule_definition_order ON claims.rule_definition(execution_order);
-CREATE INDEX idx_rule_definition_level ON claims.rule_definition(execution_level);
+CREATE INDEX IF NOT EXISTS idx_rule_definition_code ON claims.rule_definition(rule_code);
+CREATE INDEX IF NOT EXISTS idx_rule_definition_template ON claims.rule_definition(template_id);
+CREATE INDEX IF NOT EXISTS idx_rule_definition_active ON claims.rule_definition(is_active);
+CREATE INDEX IF NOT EXISTS idx_rule_definition_order ON claims.rule_definition(execution_order);
+CREATE INDEX IF NOT EXISTS idx_rule_definition_level ON claims.rule_definition(execution_level);
 
 COMMENT ON TABLE claims.rule_definition IS 'Rule instances configured from templates or custom implementations';
 
@@ -101,7 +101,7 @@ COMMENT ON TABLE claims.rule_definition IS 'Rule instances configured from templ
 -- 3. Facility Rule Assignments (Enable/Disable per Facility)
 -- ============================================================================
 
-CREATE TABLE claims.facility_rule_assignment (
+CREATE TABLE IF NOT EXISTS claims.facility_rule_assignment (
     assignment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     -- Scope
@@ -128,14 +128,15 @@ CREATE TABLE claims.facility_rule_assignment (
     UNIQUE (facility_id, rule_id)
 );
 
-CREATE INDEX idx_facility_rule_facility ON claims.facility_rule_assignment(facility_id);
-CREATE INDEX idx_facility_rule_rule ON claims.facility_rule_assignment(rule_id);
-CREATE INDEX idx_facility_rule_enabled ON claims.facility_rule_assignment(is_enabled);
-CREATE INDEX idx_facility_rule_dates ON claims.facility_rule_assignment(effective_from, effective_to);
+CREATE INDEX IF NOT EXISTS idx_facility_rule_facility ON claims.facility_rule_assignment(facility_id);
+CREATE INDEX IF NOT EXISTS idx_facility_rule_rule ON claims.facility_rule_assignment(rule_id);
+CREATE INDEX IF NOT EXISTS idx_facility_rule_enabled ON claims.facility_rule_assignment(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_facility_rule_dates ON claims.facility_rule_assignment(effective_from, effective_to);
 
 -- Composite index for fast rule lookup by facility
-CREATE INDEX idx_facility_rule_active_lookup ON claims.facility_rule_assignment(facility_id, rule_id, is_enabled)
-    WHERE is_enabled = true AND (effective_to IS NULL OR effective_to >= CURRENT_DATE);
+-- Note: Cannot use CURRENT_DATE in index predicate as it's not immutable
+CREATE INDEX IF NOT EXISTS idx_facility_rule_active_lookup ON claims.facility_rule_assignment(facility_id, rule_id, is_enabled)
+    WHERE is_enabled = true;
 
 COMMENT ON TABLE claims.facility_rule_assignment IS 'Per-facility rule activation and parameter overrides';
 
@@ -143,7 +144,7 @@ COMMENT ON TABLE claims.facility_rule_assignment IS 'Per-facility rule activatio
 -- 4. Organization Rule Assignments (Enable/Disable per Organization)
 -- ============================================================================
 
-CREATE TABLE claims.organization_rule_assignment (
+CREATE TABLE IF NOT EXISTS claims.organization_rule_assignment (
     assignment_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     organization_id BIGINT NOT NULL REFERENCES claims.organization(organization_id) ON DELETE CASCADE,
@@ -163,10 +164,10 @@ CREATE TABLE claims.organization_rule_assignment (
     UNIQUE (organization_id, rule_id)
 );
 
-CREATE INDEX idx_org_rule_org ON claims.organization_rule_assignment(organization_id);
-CREATE INDEX idx_org_rule_rule ON claims.organization_rule_assignment(rule_id);
-CREATE INDEX idx_org_rule_enabled ON claims.organization_rule_assignment(is_enabled);
-CREATE INDEX idx_org_rule_dates ON claims.organization_rule_assignment(effective_from, effective_to);
+CREATE INDEX IF NOT EXISTS idx_org_rule_org ON claims.organization_rule_assignment(organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_rule_rule ON claims.organization_rule_assignment(rule_id);
+CREATE INDEX IF NOT EXISTS idx_org_rule_enabled ON claims.organization_rule_assignment(is_enabled);
+CREATE INDEX IF NOT EXISTS idx_org_rule_dates ON claims.organization_rule_assignment(effective_from, effective_to);
 
 COMMENT ON TABLE claims.organization_rule_assignment IS 'Per-organization rule activation (applies to all facilities in org unless overridden)';
 
@@ -174,7 +175,7 @@ COMMENT ON TABLE claims.organization_rule_assignment IS 'Per-organization rule a
 -- 5. Rule Execution Statistics
 -- ============================================================================
 
-CREATE TABLE claims.rule_execution_stats (
+CREATE TABLE IF NOT EXISTS claims.rule_execution_stats (
     stat_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
 
     rule_id BIGINT NOT NULL REFERENCES claims.rule_definition(rule_id) ON DELETE CASCADE,
@@ -206,10 +207,10 @@ CREATE TABLE claims.rule_execution_stats (
     UNIQUE (rule_id, facility_id, stat_date)
 );
 
-CREATE INDEX idx_rule_stats_rule ON claims.rule_execution_stats(rule_id);
-CREATE INDEX idx_rule_stats_facility ON claims.rule_execution_stats(facility_id);
-CREATE INDEX idx_rule_stats_date ON claims.rule_execution_stats(stat_date);
-CREATE INDEX idx_rule_stats_date_rule ON claims.rule_execution_stats(stat_date, rule_id);
+CREATE INDEX IF NOT EXISTS idx_rule_stats_rule ON claims.rule_execution_stats(rule_id);
+CREATE INDEX IF NOT EXISTS idx_rule_stats_facility ON claims.rule_execution_stats(facility_id);
+CREATE INDEX IF NOT EXISTS idx_rule_stats_date ON claims.rule_execution_stats(stat_date);
+CREATE INDEX IF NOT EXISTS idx_rule_stats_date_rule ON claims.rule_execution_stats(stat_date, rule_id);
 
 COMMENT ON TABLE claims.rule_execution_stats IS 'Daily execution statistics per rule per facility';
 
@@ -296,7 +297,8 @@ INSERT INTO claims.rule_template (template_code, template_name, template_descrip
 
 ('CROSS_FIELD', 'Cross-Field Comparison', 'Compare two fields against each other', 'CrossFieldRule',
  '{"type": "object", "properties": {"field1": {"type": "string"}, "operator": {"enum": [">", "<", ">=", "<=", "=", "!="]}, "field2": {"type": "string"}}, "required": ["field1", "operator", "field2"]}',
- 'BOTH', 1);
+ 'BOTH', 1)
+ON CONFLICT (template_code) DO NOTHING;
 
 -- ============================================================================
 -- 8. Migrate Existing Rules to Database (Legacy mapping)

@@ -256,5 +256,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_flag_issue_helpers",
             sql: include_str!("../../../migrations/049_add_flag_issue_helpers.sql"),
         },
+        EmbeddedMigration {
+            version: "050",
+            name: "add_performance_indexes",
+            sql: include_str!("../../../migrations/050_add_performance_indexes.sql"),
+        },
+        EmbeddedMigration {
+            version: "051",
+            name: "add_rule_execution_stats",
+            sql: include_str!("../../../migrations/051_add_rule_execution_stats.sql"),
+        },
     ]
 }

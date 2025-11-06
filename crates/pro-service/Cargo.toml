@@ -10,6 +10,7 @@ pro-db = { path = "../pro-db" }
 pro-parser-csv = { path = "../pro-parser-csv" }
 pro-parser-edi = { path = "../pro-parser-edi" }
 pro-npi-enrichment = { path = "../pro-npi-enrichment" }
+pro-upgrade-manager = { path = "../pro-upgrade-manager" }
 
 # Async runtime
 tokio = { workspace = true }

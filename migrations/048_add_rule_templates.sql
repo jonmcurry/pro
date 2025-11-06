@@ -61,7 +61,7 @@ BEGIN
         ),
         'BOTH',
         true
-    ) RETURNING template_id INTO v_threshold_template_id;
+    ) ON CONFLICT (template_code) DO UPDATE SET template_name = EXCLUDED.template_name RETURNING template_id INTO v_threshold_template_id;
 
     -- 2. DUPLICATE Template
     INSERT INTO claims.rule_template (
@@ -116,7 +116,7 @@ BEGIN
         ),
         'BOTH',
         true
-    ) RETURNING template_id INTO v_duplicate_template_id;
+    ) ON CONFLICT (template_code) DO UPDATE SET template_name = EXCLUDED.template_name RETURNING template_id INTO v_duplicate_template_id;
 
     -- 3. MISSING_FIELD Template
     INSERT INTO claims.rule_template (
@@ -157,7 +157,7 @@ BEGIN
         ),
         'BOTH',
         true
-    ) RETURNING template_id INTO v_missing_field_template_id;
+    ) ON CONFLICT (template_code) DO UPDATE SET template_name = EXCLUDED.template_name RETURNING template_id INTO v_missing_field_template_id;
 
     -- 4. FIELD_PATTERN Template
     INSERT INTO claims.rule_template (
@@ -217,7 +217,7 @@ BEGIN
         ),
         'BOTH',
         true
-    ) RETURNING template_id INTO v_field_pattern_template_id;
+    ) ON CONFLICT (template_code) DO UPDATE SET template_name = EXCLUDED.template_name RETURNING template_id INTO v_field_pattern_template_id;
 
     -- 5. CROSS_FIELD Template
     INSERT INTO claims.rule_template (
@@ -263,7 +263,7 @@ BEGIN
         ),
         'BOTH',
         true
-    ) RETURNING template_id INTO v_cross_field_template_id;
+    ) ON CONFLICT (template_code) DO UPDATE SET template_name = EXCLUDED.template_name RETURNING template_id INTO v_cross_field_template_id;
 
     -- Example template-based rules
 
@@ -313,7 +313,7 @@ BEGIN
         80,
         'SERVICE_LINE',
         false
-    );
+    ) ON CONFLICT (rule_code) DO NOTHING;
 
     -- Example 3: Service date range validation
     INSERT INTO claims.rule_definition (
@@ -337,7 +337,7 @@ BEGIN
         90,
         'SERVICE_LINE',
         false
-    );
+    ) ON CONFLICT (rule_code) DO NOTHING;
 
     -- Example 4: Missing required billing fields
     INSERT INTO claims.rule_definition (
@@ -361,7 +361,7 @@ BEGIN
         100,
         'ENCOUNTER',
         false
-    );
+    ) ON CONFLICT (rule_code) DO NOTHING;
 
     -- Example 5: Duplicate service line detection (template-based)
     INSERT INTO claims.rule_definition (
@@ -385,7 +385,7 @@ BEGIN
         110,
         'SERVICE_LINE',
         false
-    );
+    ) ON CONFLICT (rule_code) DO NOTHING;
 
     RAISE NOTICE 'Phase 3 complete: Added 5 rule templates and 5 example rules';
 END $$;

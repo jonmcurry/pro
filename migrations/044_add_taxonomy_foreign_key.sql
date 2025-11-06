@@ -4,12 +4,21 @@
 
 -- Add foreign key constraint to enforce referential integrity
 -- This ensures taxonomy_code values in claims.provider must exist in claims.provider_taxonomy
-ALTER TABLE claims.provider
-ADD CONSTRAINT fk_provider_taxonomy
-FOREIGN KEY (taxonomy_code)
-REFERENCES claims.provider_taxonomy(taxonomy_code)
-ON DELETE RESTRICT
-ON UPDATE CASCADE;
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_provider_taxonomy'
+        AND conrelid = 'claims.provider'::regclass
+    ) THEN
+        ALTER TABLE claims.provider
+        ADD CONSTRAINT fk_provider_taxonomy
+        FOREIGN KEY (taxonomy_code)
+        REFERENCES claims.provider_taxonomy(taxonomy_code)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE;
+    END IF;
+END $$;
 
 -- Add index on taxonomy_code for faster lookups (if not already exists)
 -- This improves performance when joining provider to provider_taxonomy

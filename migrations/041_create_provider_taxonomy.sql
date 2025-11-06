@@ -248,7 +248,7 @@ INSERT INTO claims.provider_taxonomy (taxonomy_code, provider_type, classificati
 
 -- Medical Genetics
 INSERT INTO claims.provider_taxonomy (taxonomy_code, provider_type, classification, specialization, specialty_display, definition) VALUES
-('2080S0010X', 'Individual', 'Allopathic & Osteopathic Physicians', 'Medical Genetics', 'Medical Genetics', 'A physician who specializes in medical genetics.'),
+('2080G0000X', 'Individual', 'Allopathic & Osteopathic Physicians', 'Medical Genetics', 'Medical Genetics', 'A physician who specializes in medical genetics.'),
 ('2080T0004X', 'Individual', 'Allopathic & Osteopathic Physicians', 'Medical Genetics - Medical Biochemical Genetics', 'Medical Biochemical Genetics', 'Physician specializing in biochemical genetics.');
 
 -- =============================================================================

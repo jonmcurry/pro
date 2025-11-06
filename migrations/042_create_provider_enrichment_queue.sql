@@ -5,7 +5,7 @@
 -- Provider Enrichment Queue Table
 -- Manages asynchronous enrichment of provider data from NPI Registry API
 -- Ensures claims processing is never blocked by external API calls
-CREATE TABLE claims.provider_enrichment_queue (
+CREATE TABLE IF NOT EXISTS claims.provider_enrichment_queue (
     queue_id BIGINT GENERATED ALWAYS AS IDENTITY (CACHE 100) PRIMARY KEY,
     provider_id BIGINT NOT NULL REFERENCES claims.provider(provider_id) ON DELETE CASCADE,
     npi VARCHAR(10) NOT NULL,
@@ -40,26 +40,26 @@ CREATE TABLE claims.provider_enrichment_queue (
 );
 
 -- Index for finding pending/failed items to process
-CREATE INDEX idx_enrichment_status_pending
+CREATE INDEX IF NOT EXISTS idx_enrichment_status_pending
     ON claims.provider_enrichment_queue(status, priority DESC, created_at ASC)
     WHERE status IN ('PENDING', 'FAILED');
 
 -- Index for finding items ready to retry
-CREATE INDEX idx_enrichment_retry
+CREATE INDEX IF NOT EXISTS idx_enrichment_retry
     ON claims.provider_enrichment_queue(next_retry_at, priority DESC)
     WHERE status = 'FAILED' AND next_retry_at IS NOT NULL;
 
 -- Index for finding items by NPI
-CREATE INDEX idx_enrichment_npi
+CREATE INDEX IF NOT EXISTS idx_enrichment_npi
     ON claims.provider_enrichment_queue(npi);
 
 -- Index for finding recently completed items
-CREATE INDEX idx_enrichment_completed
+CREATE INDEX IF NOT EXISTS idx_enrichment_completed
     ON claims.provider_enrichment_queue(completed_at DESC)
     WHERE status = 'COMPLETED';
 
 -- Index for monitoring worker activity
-CREATE INDEX idx_enrichment_in_progress
+CREATE INDEX IF NOT EXISTS idx_enrichment_in_progress
     ON claims.provider_enrichment_queue(started_at DESC)
     WHERE status = 'IN_PROGRESS';
 
@@ -85,6 +85,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS trigger_provider_enrichment_completed ON claims.provider_enrichment_queue;
 CREATE TRIGGER trigger_provider_enrichment_completed
     AFTER UPDATE ON claims.provider_enrichment_queue
     FOR EACH ROW
@@ -94,7 +95,7 @@ CREATE TRIGGER trigger_provider_enrichment_completed
 COMMENT ON FUNCTION claims.on_provider_enrichment_completed() IS 'Automatically updates provider.updated_at timestamp when enrichment completes successfully';
 
 -- View for monitoring enrichment queue health
-CREATE VIEW claims.v_enrichment_queue_summary AS
+CREATE OR REPLACE VIEW claims.v_enrichment_queue_summary AS
 SELECT
     status,
     COUNT(*) as count,
@@ -108,7 +109,7 @@ GROUP BY status;
 COMMENT ON VIEW claims.v_enrichment_queue_summary IS 'Summary view of enrichment queue status for monitoring and alerting';
 
 -- View for recent failures
-CREATE VIEW claims.v_enrichment_recent_failures AS
+CREATE OR REPLACE VIEW claims.v_enrichment_recent_failures AS
 SELECT
     q.npi,
     p.last_name,

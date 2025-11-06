@@ -123,9 +123,9 @@ COMMENT ON INDEX claims.idx_encounter_diagnosis_principal IS 'Phase 6: Fast prin
 -- ============================================================================
 
 -- Index for provider NPI lookups
-CREATE INDEX IF NOT EXISTS idx_provider_npi
-    ON claims.provider(provider_npi)
-    WHERE provider_npi IS NOT NULL;
+-- Index already created in migration 003_create_provider_tables.sql (line 35)
+-- CREATE INDEX idx_provider_npi ON claims.provider(npi);
+-- Skipping duplicate index creation
 
 COMMENT ON INDEX claims.idx_provider_npi IS 'Phase 6: NPI-based provider lookups';
 
@@ -143,13 +143,13 @@ COMMENT ON INDEX claims.idx_provider_specialty IS 'Phase 6: Provider specialty a
 CREATE INDEX IF NOT EXISTS idx_processing_queue_status_created
     ON staging.file_processing_queue(queue_status, created_at DESC);
 
-COMMENT ON INDEX claims.idx_processing_queue_status_created IS 'Phase 6: Queue monitoring and management';
+COMMENT ON INDEX staging.idx_processing_queue_status_created IS 'Phase 6: Queue monitoring and management';
 
 -- Index for import batch tracking
 CREATE INDEX IF NOT EXISTS idx_import_batch_org_created
     ON staging.import_batch(organization_id, created_at DESC);
 
-COMMENT ON INDEX claims.idx_import_batch_org_created IS 'Phase 6: Import history by organization';
+COMMENT ON INDEX staging.idx_import_batch_org_created IS 'Phase 6: Import history by organization';
 
 -- ============================================================================
 -- ML TABLE INDEXES (for future ML integration)
@@ -160,20 +160,20 @@ CREATE INDEX IF NOT EXISTS idx_model_registry_deployment
     ON ml.model_registry(deployment_status, model_purpose)
     WHERE is_active = true;
 
-COMMENT ON INDEX claims.idx_model_registry_deployment IS 'Phase 6: Active model lookups';
+COMMENT ON INDEX ml.idx_model_registry_deployment IS 'Phase 6: Active model lookups';
 
 -- Index for model predictions by encounter
 CREATE INDEX IF NOT EXISTS idx_model_prediction_encounter_type
     ON ml.model_prediction(encounter_id, prediction_type, predicted_at DESC);
 
-COMMENT ON INDEX claims.idx_model_prediction_encounter_type IS 'Phase 6: Prediction history queries';
+COMMENT ON INDEX ml.idx_model_prediction_encounter_type IS 'Phase 6: Prediction history queries';
 
 -- Index for high-risk predictions
 CREATE INDEX IF NOT EXISTS idx_model_prediction_risk
     ON ml.model_prediction(risk_level, predicted_at DESC)
     WHERE risk_level IN ('HIGH', 'CRITICAL');
 
-COMMENT ON INDEX claims.idx_model_prediction_risk IS 'Phase 6: High-risk claim identification';
+COMMENT ON INDEX ml.idx_model_prediction_risk IS 'Phase 6: High-risk claim identification';
 
 -- ============================================================================
 -- ANALYZE TABLES FOR STATISTICS UPDATE

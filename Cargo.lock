@@ -4273,6 +4273,7 @@ dependencies = [
  "pro-npi-enrichment",
  "pro-parser-csv",
  "pro-parser-edi",
+ "pro-upgrade-manager",
  "pro-worker",
  "rust_decimal",
  "serde",

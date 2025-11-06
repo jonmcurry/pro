@@ -26,7 +26,7 @@ WHERE line_status = 'ACTIVE';
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_provider_npi_lookup
 ON claims.provider (npi)
-INCLUDE (provider_id, provider_name, provider_type);
+INCLUDE (provider_id, last_name, first_name, provider_type);
 
 -- ============================================================================
 -- ENCOUNTER BATCH PROCESSING OPTIMIZATION
@@ -34,8 +34,8 @@ INCLUDE (provider_id, provider_name, provider_type);
 -- Supports loading diagnosis codes for multiple encounters efficiently
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_diagnosis_code_encounter_batch
-ON claims.diagnosis_code (encounter_id)
-INCLUDE (diagnosis_code, diagnosis_pointer);
+ON claims.encounter_diagnosis (encounter_id)
+INCLUDE (diagnosis_code, sequence_number);
 
 -- ============================================================================
 -- SERVICE LINE BATCH LOADING OPTIMIZATION
@@ -61,11 +61,11 @@ WHERE line_status = 'ACTIVE';
 -- ============================================================================
 -- FACILITY RULE CONFIGURATION OPTIMIZATION
 -- ============================================================================
--- Supports queries: "SELECT * FROM facility_rule_config WHERE facility_id = ? AND is_enabled = true"
+-- Supports queries: "SELECT * FROM facility_rule_assignment WHERE facility_id = ? AND is_enabled = true"
 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_facility_rule_config_lookup
-ON claims.facility_rule_config (facility_id, is_enabled)
-INCLUDE (rule_code, custom_parameters);
+ON claims.facility_rule_assignment (facility_id, is_enabled)
+INCLUDE (rule_id, parameter_overrides_encrypted);
 
 -- ============================================================================
 -- STATISTICS AND VERIFICATION
@@ -89,8 +89,8 @@ INCLUDE (raw_claim_id);
 -- Analyze tables to update statistics for query planner
 ANALYZE claims.service_line;
 ANALYZE claims.provider;
-ANALYZE claims.diagnosis_code;
-ANALYZE claims.facility_rule_config;
+ANALYZE claims.encounter_diagnosis;
+ANALYZE claims.facility_rule_assignment;
 ANALYZE staging.raw_claims;
 
 -- Display index sizes for monitoring

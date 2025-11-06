@@ -365,9 +365,10 @@ Function CreateDatabase()
 
         ' Apply all migrations using embedded migrations (no --migrations-dir needed)
         Dim applyCmd, applyResult
-        applyCmd = "cmd.exe /c """ & proUpgradeExe & """ apply-migrations 2>&1"
+        applyCmd = """" & proUpgradeExe & """ apply-migrations"
 
         LogMessage "CreateDatabase: Executing pro-upgrade apply-migrations (using embedded migrations)..."
+        LogMessage "CreateDatabase: Command: " & applyCmd
         applyResult = shell.Run(applyCmd, 0, True)
 
         If applyResult = 0 Then
@@ -395,6 +396,7 @@ Function CreateDatabase()
                 LogMessage "CreateDatabase: Retrying migration application for remaining migrations..."
 
                 ' Retry applying migrations
+                applyCmd = """" & proUpgradeExe & """ apply-migrations"
                 applyResult = shell.Run(applyCmd, 0, True)
 
                 If applyResult = 0 Then
