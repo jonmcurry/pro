@@ -33,7 +33,8 @@
       "Bash(powershell -Command:*)",
       "Bash(python3:*)",
       "Bash(./pro-upgrade.exe list-pending-migrations:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$(cat <<''EOF''\nFix fresh install migration issues - v1.8.0\n\nFixed all schema migration issues preventing fresh MSI installations.\nAll 50 migrations (001-051, skipping 040) now apply successfully.\n\nMigration Fixes:\n- 018: Fixed schema mismatches in COMMENT statements (claims/staging/ml)\n- 018: Removed duplicate index creation (idx_provider_npi)\n- 019: Disabled incompatible materialized views (references non-existent claims.flag table)\n- 041: Fixed duplicate taxonomy code 2080S0010X -> 2080G0000X for Medical Genetics\n- 046: Removed CURRENT_DATE from index predicate (not immutable)\n- 047: Removed test data inserts (facilities 1, 2, org 1 don''t exist on fresh install)\n- 048: Fixed SQL syntax - moved ON CONFLICT outside VALUES clause (4 locations)\n- 049: Fixed column references (rule_id, assignment_id, is_enabled)\n- 049: Removed non-existent rule_parameters_hash column\n- 049: Made pro_app role grants conditional\n- 050: Fixed table/column names (encounter_diagnosis, facility_rule_assignment)\n- 051: Rewrote to use existing rule_execution_stats table from migration 046\n\nInstaller Changes:\n- Version: 1.7.1.0 -> 1.8.0.0\n- All binaries rebuilt with fixed migrations embedded\n- MSI: installer/ProfessionalSMART.msi (11MB)\n\nTesting:\n- Verified all 50 migrations apply successfully on fresh database\n- 46 tables in claims schema\n- 15 tables in staging schema\n- 6 tables in ml schema\n- 383 provider taxonomy records loaded\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")"
     ],
     "deny": [],
     "ask": []
