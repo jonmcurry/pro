@@ -43,7 +43,16 @@
       "Bash(dir /s /b targetrelease*.exe 2)",
       "Bash(nul)",
       "Bash(Select-String \"Compiling|Finished|error|warning\")",
-      "Bash(Select-Object -First 50)"
+      "Bash(Select-Object -First 50)",
+      "Bash(Select-String \"Compiling pro-|Finished|error\")",
+      "Bash(cat:*)",
+      "Bash(for file in \"c:\\Users\\jonmc\\dev\\pro\\test_data\"/*.edi)",
+      "Bash(do cat \"$file\")",
+      "Bash(if [ -f \"/c/ProgramData/Professional SMART/logs/nm1_debug.log\" ])",
+      "Bash(then rm \"/c/ProgramData/Professional SMART/logs/nm1_debug.log\")",
+      "Bash(else echo \"nm1_debug.log not found (already cleaned)\")",
+      "Bash(Select-String \"provider_id\")",
+      "Bash(Select-String \"Compiling pro-|Finished|error|warning\")"
     ],
     "deny": [],
     "ask": []

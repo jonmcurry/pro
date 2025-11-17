@@ -4,38 +4,13 @@ use crate::segments::*;
 use crate::types::*;
 use pro_common::{Error, Result};
 
-use std::fs::OpenOptions;
-use std::io::Write;
-
 /// Helper function to write debug output to file
 /// Falls back to using tracing::info! if file write fails
+/// DISABLED: Debug logging removed for production performance
+#[allow(unused_variables)]
 fn debug_log(message: &str) {
-    use tracing::info;
-
-    let log_path = if cfg!(windows) {
-        r"C:\ProgramData\Professional SMART\logs\nm1_debug.log"
-    } else {
-        "/tmp/nm1_debug.log"
-    };
-
-    // Try to write to file first
-    let file_written = if let Ok(mut file) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_path)
-    {
-        let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-        writeln!(file, "[{}] {}", timestamp, message).is_ok()
-    } else {
-        false
-    };
-
-    // Always also log via tracing so it appears in service.log
-    info!("[NM1_DEBUG] {}", message);
-
-    if !file_written {
-        info!("[NM1_DEBUG] Warning: Could not write to {}", log_path);
-    }
+    // Debug logging disabled for production performance
+    // This function is a no-op but kept for code compatibility
 }
 
 /// Parse Loop 1000A - Submitter Name
@@ -327,7 +302,9 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         delay_reason_code: None,
         special_program_code: None,
         patient_amount_paid: None,
+        patient_responsibility_amount: None,
         service_authorization_code: None,
+        claim_number: None,
         claim_note: None,
 
         referring_provider_qualifier: None,
@@ -359,6 +336,17 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         other_payer_id: None,
         other_payer_name: None,
         other_payer_claim_number: None,
+
+        ambulance_transport_reason_code: None,
+        ambulance_transport_distance: None,
+        ambulance_patient_weight: None,
+        ambulance_patient_count: None,
+
+        paperwork_report_type: None,
+        paperwork_transmission_code: None,
+        paperwork_control_number: None,
+
+        condition_codes: Vec::new(),
 
         service_lines: Vec::new(),
         diagnoses: Vec::new(),
@@ -435,6 +423,15 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     }
                 } else {
                     // Claim level NM1 segments (Loop 2310)
+                    debug_log(&format!(
+                        "[CLAIM_NM1] entity_id='{}', entity_type='{}', name={:?}, qualifier={:?}, npi={:?}",
+                        nm1.entity_identifier_code,
+                        nm1.entity_type_qualifier,
+                        nm1.last_name_or_org,
+                        nm1.identification_code_qualifier,
+                        nm1.identification_code
+                    ));
+
                     last_nm1_entity = Some(nm1.entity_identifier_code.clone());
 
                     match nm1.entity_identifier_code.as_str() {
@@ -461,9 +458,12 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                             claim.rendering_provider_qualifier = nm1.identification_code_qualifier.clone();
                             if nm1.identification_code_qualifier.as_deref() == Some("XX") {
                                 claim.rendering_provider_npi = nm1.identification_code.clone();
+                                debug_log(&format!("[CLAIM] Set rendering_provider_npi = {:?}", claim.rendering_provider_npi));
                             }
                             claim.rendering_provider_last_name = nm1.last_name_or_org.clone();
                             claim.rendering_provider_first_name = nm1.first_name.clone();
+                            debug_log(&format!("[CLAIM] Set rendering_provider_last_name = {:?}, first_name = {:?}",
+                                claim.rendering_provider_last_name, claim.rendering_provider_first_name));
                         }
                         "77" => {
                             claim.service_facility_qualifier = nm1.identification_code_qualifier.clone();
@@ -607,10 +607,95 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
             }
             "REF" => {
                 let ref_seg = RefSegment::parse(segment)?;
-                match ref_seg.reference_identification_qualifier.as_str() {
-                    "EA" => claim.medical_record_number = ref_seg.reference_identification,
+
+                if let Some(ref mut line) = current_service_line {
+                    // Service line level REF segments (Loop 2420)
+                    match ref_seg.reference_identification_qualifier.as_str() {
+                        "G1" => line.prior_authorization_number = ref_seg.reference_identification,
+                        "9F" => line.referral_number = ref_seg.reference_identification,
+                        "6R" => {
+                            // Line item control number - could be used for tracking
+                            // Store in line_note if not already populated
+                            if line.line_note.is_none() {
+                                line.line_note = ref_seg.reference_identification.map(|v| format!("Line Control: {}", v));
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    // Claim level REF segments (Loop 2300)
+                    match ref_seg.reference_identification_qualifier.as_str() {
+                        "EA" => claim.medical_record_number = ref_seg.reference_identification,
+                        "D9" => claim.claim_number = ref_seg.reference_identification,
+                        _ => {}
+                    }
+                }
+            }
+            "PRV" => {
+                let prv = PrvSegment::parse(segment)?;
+                // PRV*PE*PXC - Provider specialty at Loop 2310B (Rendering Provider)
+                if prv.provider_code == "PE"
+                    && prv.reference_identification_qualifier.as_deref() == Some("PXC") {
+                    claim.rendering_provider_taxonomy = prv.reference_identification.clone();
+                }
+            }
+            "NTE" => {
+                let nte = NteSegment::parse(segment)?;
+                // NTE*ADD - Additional claim or line information
+                if nte.note_reference_code == "ADD" {
+                    if let Some(ref mut line) = current_service_line {
+                        // Service line note
+                        line.line_note = Some(nte.description);
+                    } else {
+                        // Claim note
+                        claim.claim_note = Some(nte.description);
+                    }
+                }
+            }
+            "CRC" => {
+                let crc = CrcSegment::parse(segment)?;
+                // CRC segments contain condition indicators
+                // Store all condition codes from this segment
+                claim.condition_codes.extend(crc.condition_codes);
+            }
+            "AMT" => {
+                let amt = AmtSegment::parse(segment)?;
+                match amt.amount_qualifier_code.as_str() {
+                    "D" => {
+                        // Patient amount paid
+                        claim.patient_amount_paid = amt.monetary_amount;
+                    }
+                    "F5" => {
+                        // Patient responsibility amount
+                        claim.patient_responsibility_amount = amt.monetary_amount;
+                    }
+                    "A8" => {
+                        // COB - other payer paid amount (at claim level)
+                        claim.other_payer_paid_amount = amt.monetary_amount;
+                    }
+                    "B6" => {
+                        // Allowed amount (at service line level if in service line context)
+                        if let Some(ref mut line) = current_service_line {
+                            line.allowed_amount = amt.monetary_amount;
+                        }
+                    }
                     _ => {}
                 }
+            }
+            "CR1" => {
+                let cr1 = Cr1Segment::parse(segment)?;
+                // CR1 - Ambulance Transport Information
+                claim.ambulance_transport_reason_code = cr1.ambulance_transport_reason_code;
+                claim.ambulance_transport_distance = cr1.weight; // Weight field used for distance
+                // Additional CR1 fields could be mapped if needed
+                // cr1.unit_of_measurement_code, cr1.ambulance_transport_code
+            }
+            "PWK" => {
+                let pwk = PwkSegment::parse(segment)?;
+                // PWK - Paperwork/Attachment Information
+                claim.paperwork_report_type = Some(pwk.report_type_code);
+                claim.paperwork_transmission_code = pwk.report_transmission_code;
+                claim.paperwork_control_number = pwk.identification_code;
             }
             "LX" => {
                 // Save previous service line if any
@@ -657,6 +742,8 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     line_note: None,
                     revenue_code: None,
                     other_payer_line_paid_amount: None,
+                    allowed_amount: None,
+                    saving_amount: None,
                 });
             }
             "SV1" => {
@@ -686,6 +773,37 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     if let Some(&p4) = sv1.diagnosis_code_pointer.get(3) {
                         line.diagnosis_code_pointer_4 = Some(p4);
                     }
+                }
+            }
+            "LIN" => {
+                if let Some(ref mut line) = current_service_line {
+                    let lin = LinSegment::parse(segment)?;
+                    // LIN segment - Drug Identification (NDC)
+                    // LIN*N4 is typically NDC code qualifier
+                    if lin.product_service_id_qualifier == "N4" {
+                        line.ndc_code = Some(lin.product_service_id);
+                    }
+                }
+            }
+            "CTP" => {
+                if let Some(ref mut line) = current_service_line {
+                    let ctp = CtpSegment::parse(segment)?;
+                    // CTP - Pricing Information for drug/supply lines
+                    // Store NDC quantity and unit information
+                    if let Some(qty) = ctp.quantity {
+                        line.ndc_unit_count = Some(qty);
+                    }
+                    if let Some(unit) = ctp.unit_of_measurement_code {
+                        line.ndc_measurement_unit = Some(unit);
+                    }
+                }
+            }
+            "HCP" => {
+                if let Some(ref mut line) = current_service_line {
+                    let hcp = HcpSegment::parse(segment)?;
+                    // HCP - Health Care Pricing (adjudication from other payers)
+                    line.allowed_amount = hcp.allowed_amount.or(line.allowed_amount);
+                    line.saving_amount = hcp.saving_amount;
                 }
             }
             _ => {}
@@ -747,6 +865,8 @@ pub fn parse_service_line(segments: &[EdiSegment], line_number: i16) -> Result<S
         line_note: None,
         revenue_code: None,
         other_payer_line_paid_amount: None,
+        allowed_amount: None,
+        saving_amount: None,
     };
 
     for segment in segments {

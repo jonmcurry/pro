@@ -758,7 +758,9 @@ impl IngestionPipeline {
             delay_reason_code: None,
             special_program_code: None,
             patient_amount_paid: None,
+            patient_responsibility_amount: None,
             service_authorization_code: None,
+            claim_number: None,
             claim_note: None,
             referring_provider_qualifier: None,
             referring_provider_last_name: None,
@@ -787,6 +789,14 @@ impl IngestionPipeline {
             related_causes_code_3: None,
             auto_accident_state: None,
             auto_accident_country: None,
+            ambulance_transport_reason_code: None,
+            ambulance_transport_distance: None,
+            ambulance_patient_weight: None,
+            ambulance_patient_count: None,
+            paperwork_report_type: None,
+            paperwork_transmission_code: None,
+            paperwork_control_number: None,
+            condition_codes: Vec::new(),
         };
 
         Ok(claim)
@@ -954,6 +964,10 @@ impl IngestionPipeline {
 
             // Other payer line adjudication
             other_payer_line_paid_amount: None,
+
+            // HCP - Health Care Pricing
+            allowed_amount: None,
+            saving_amount: None,
         };
 
         Ok(vec![service_line])

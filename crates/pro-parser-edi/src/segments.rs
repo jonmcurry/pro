@@ -493,6 +493,196 @@ impl PrvSegment {
     }
 }
 
+/// NTE - Note/Comment Segment
+#[derive(Debug, Clone)]
+pub struct NteSegment {
+    pub note_reference_code: String,
+    pub description: String,
+}
+
+impl NteSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "NTE" {
+            return Err(Error::Parse(format!("Expected NTE segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            note_reference_code: segment.get_or_empty(0).to_string(),
+            description: segment.get_or_empty(1).to_string(),
+        })
+    }
+}
+
+/// CRC - Conditions Indicator Segment
+#[derive(Debug, Clone)]
+pub struct CrcSegment {
+    pub code_category: String,
+    pub certification_condition_indicator: String,
+    pub condition_codes: Vec<String>,
+}
+
+impl CrcSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "CRC" {
+            return Err(Error::Parse(format!("Expected CRC segment, got {}", segment.segment_id)));
+        }
+
+        let mut condition_codes = Vec::new();
+        for i in 2..segment.elements.len() {
+            if let Some(code) = segment.get_optional(i) {
+                if !code.is_empty() {
+                    condition_codes.push(code);
+                }
+            }
+        }
+
+        Ok(Self {
+            code_category: segment.get_or_empty(0).to_string(),
+            certification_condition_indicator: segment.get_or_empty(1).to_string(),
+            condition_codes,
+        })
+    }
+}
+
+/// AMT - Monetary Amount Segment
+#[derive(Debug, Clone)]
+pub struct AmtSegment {
+    pub amount_qualifier_code: String,
+    pub monetary_amount: Option<Decimal>,
+}
+
+impl AmtSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "AMT" {
+            return Err(Error::Parse(format!("Expected AMT segment, got {}", segment.segment_id)));
+        }
+
+        let monetary_amount = segment.get_optional(1)
+            .and_then(|s| parse_edi_decimal(&s).ok());
+
+        Ok(Self {
+            amount_qualifier_code: segment.get_or_empty(0).to_string(),
+            monetary_amount,
+        })
+    }
+}
+
+/// LIN - Drug Identification Segment
+#[derive(Debug, Clone)]
+pub struct LinSegment {
+    pub product_service_id_qualifier: String,
+    pub product_service_id: String,
+}
+
+impl LinSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "LIN" {
+            return Err(Error::Parse(format!("Expected LIN segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            product_service_id_qualifier: segment.get_or_empty(1).to_string(),
+            product_service_id: segment.get_or_empty(2).to_string(),
+        })
+    }
+}
+
+/// CTP - Pricing Information Segment
+#[derive(Debug, Clone)]
+pub struct CtpSegment {
+    pub unit_price: Option<Decimal>,
+    pub quantity: Option<Decimal>,
+    pub unit_of_measurement_code: Option<String>,
+}
+
+impl CtpSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "CTP" {
+            return Err(Error::Parse(format!("Expected CTP segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            unit_price: segment.get_optional(3).and_then(|s| parse_edi_decimal(&s).ok()),
+            quantity: segment.get_optional(4).and_then(|s| parse_edi_decimal(&s).ok()),
+            unit_of_measurement_code: segment.get_optional(5),
+        })
+    }
+}
+
+/// CR1 - Ambulance Transport Information Segment
+#[derive(Debug, Clone)]
+pub struct Cr1Segment {
+    pub unit_of_measurement_code: Option<String>,
+    pub weight: Option<Decimal>,
+    pub ambulance_transport_code: Option<String>,
+    pub ambulance_transport_reason_code: Option<String>,
+}
+
+impl Cr1Segment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "CR1" {
+            return Err(Error::Parse(format!("Expected CR1 segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            unit_of_measurement_code: segment.get_optional(0),
+            weight: segment.get_optional(1).and_then(|s| parse_edi_decimal(&s).ok()),
+            ambulance_transport_code: segment.get_optional(2),
+            ambulance_transport_reason_code: segment.get_optional(3),
+        })
+    }
+}
+
+/// PWK - Paperwork Segment
+#[derive(Debug, Clone)]
+pub struct PwkSegment {
+    pub report_type_code: String,
+    pub report_transmission_code: Option<String>,
+    pub identification_code: Option<String>,
+}
+
+impl PwkSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "PWK" {
+            return Err(Error::Parse(format!("Expected PWK segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            report_type_code: segment.get_or_empty(0).to_string(),
+            report_transmission_code: segment.get_optional(1),
+            identification_code: segment.get_optional(4),
+        })
+    }
+}
+
+/// HCP - Health Care Pricing Segment
+#[derive(Debug, Clone)]
+pub struct HcpSegment {
+    pub pricing_methodology: Option<String>,
+    pub allowed_amount: Option<Decimal>,
+    pub saving_amount: Option<Decimal>,
+    pub reprice_organization_id: Option<String>,
+    pub reprice_rate: Option<Decimal>,
+    pub approved_ambulatory_payment_classification_amount: Option<Decimal>,
+}
+
+impl HcpSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "HCP" {
+            return Err(Error::Parse(format!("Expected HCP segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            pricing_methodology: segment.get_optional(0),
+            allowed_amount: segment.get_optional(1).and_then(|s| parse_edi_decimal(&s).ok()),
+            saving_amount: segment.get_optional(2).and_then(|s| parse_edi_decimal(&s).ok()),
+            reprice_organization_id: segment.get_optional(3),
+            reprice_rate: segment.get_optional(4).and_then(|s| parse_edi_decimal(&s).ok()),
+            approved_ambulatory_payment_classification_amount: segment.get_optional(5).and_then(|s| parse_edi_decimal(&s).ok()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

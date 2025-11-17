@@ -196,7 +196,11 @@ pub struct ParsedClaim {
     pub delay_reason_code: Option<String>,
     pub special_program_code: Option<String>,
     pub patient_amount_paid: Option<Decimal>,
+    pub patient_responsibility_amount: Option<Decimal>,
     pub service_authorization_code: Option<String>,
+
+    // Loop 2300 - Claim Identifiers
+    pub claim_number: Option<String>,
 
     // Loop 2300 - Claim Note
     pub claim_note: Option<String>,
@@ -235,6 +239,20 @@ pub struct ParsedClaim {
     pub other_payer_id: Option<String>,
     pub other_payer_name: Option<String>,
     pub other_payer_claim_number: Option<String>,
+
+    // Loop 2300 - Ambulance Information (CR1)
+    pub ambulance_transport_reason_code: Option<String>,
+    pub ambulance_transport_distance: Option<Decimal>,
+    pub ambulance_patient_weight: Option<Decimal>,
+    pub ambulance_patient_count: Option<i32>,
+
+    // Loop 2300 - Paperwork/Attachments (PWK)
+    pub paperwork_report_type: Option<String>,
+    pub paperwork_transmission_code: Option<String>,
+    pub paperwork_control_number: Option<String>,
+
+    // Loop 2300 - Condition Indicators (CRC)
+    pub condition_codes: Vec<String>,
 
     // Loop 2400 - Service Lines
     pub service_lines: Vec<ServiceLine>,
@@ -316,6 +334,10 @@ pub struct ServiceLine {
 
     // Loop 2430 - Line Adjudication (from other payers)
     pub other_payer_line_paid_amount: Option<Decimal>,
+
+    // Loop 2400 HCP - Health Care Pricing
+    pub allowed_amount: Option<Decimal>,
+    pub saving_amount: Option<Decimal>,
 }
 
 /// Diagnosis Code from HI segment

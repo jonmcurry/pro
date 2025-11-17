@@ -807,7 +807,7 @@ fn init_service_logging() -> Result<tracing_appender::non_blocking::WorkerGuard>
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+                .unwrap_or_else(|_| "error".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
         .init();

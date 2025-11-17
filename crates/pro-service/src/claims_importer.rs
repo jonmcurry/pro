@@ -743,8 +743,69 @@ impl ClaimsImporter {
             encounter_fields.insert("patient_control_number".to_string(), serde_json::json!(claim.patient_control_number));
             encounter_fields.insert("total_claim_charge_amount".to_string(), serde_json::json!(claim.total_claim_charge_amount.to_string()));
             encounter_fields.insert("place_of_service_code".to_string(), serde_json::json!(claim.place_of_service_code.clone().unwrap_or_default()));
+            encounter_fields.insert("claim_frequency_code".to_string(), serde_json::json!(claim.claim_frequency_code.clone().unwrap_or_default()));
+            encounter_fields.insert("signature_indicator".to_string(), serde_json::json!(claim.provider_signature_indicator.clone().unwrap_or_default()));
+            encounter_fields.insert("assignment_indicator".to_string(), serde_json::json!(claim.assignment_indicator.clone().unwrap_or_default()));
+            encounter_fields.insert("benefits_assignment_indicator".to_string(), serde_json::json!(claim.benefits_assignment_indicator.clone().unwrap_or_default()));
+            encounter_fields.insert("release_of_information_code".to_string(), serde_json::json!(claim.release_of_information_code.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_signature_code".to_string(), serde_json::json!(claim.patient_signature_code.clone().unwrap_or_default()));
             encounter_fields.insert("date_of_service_from".to_string(), serde_json::json!(claim.date_of_service_from.format("%Y-%m-%d").to_string()));
             encounter_fields.insert("date_of_service_to".to_string(), serde_json::json!(claim.date_of_service_to.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+
+            // Claim dates (Loop 2300 DTP segments)
+            encounter_fields.insert("onset_of_illness_date".to_string(), serde_json::json!(claim.onset_of_illness_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("initial_treatment_date".to_string(), serde_json::json!(claim.initial_treatment_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("last_seen_date".to_string(), serde_json::json!(claim.last_seen_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("acute_manifestation_date".to_string(), serde_json::json!(claim.acute_manifestation_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("accident_date".to_string(), serde_json::json!(claim.accident_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("last_menstrual_period_date".to_string(), serde_json::json!(claim.last_menstrual_period_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("last_xray_date".to_string(), serde_json::json!(claim.last_xray_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("disability_from_date".to_string(), serde_json::json!(claim.disability_from_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("disability_to_date".to_string(), serde_json::json!(claim.disability_to_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("last_worked_date".to_string(), serde_json::json!(claim.last_worked_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("authorized_return_to_work_date".to_string(), serde_json::json!(claim.authorized_return_to_work_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("admission_date".to_string(), serde_json::json!(claim.admission_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("discharge_date".to_string(), serde_json::json!(claim.discharge_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+
+            // Claim supplemental information
+            encounter_fields.insert("delay_reason_code".to_string(), serde_json::json!(claim.delay_reason_code.clone().unwrap_or_default()));
+            encounter_fields.insert("special_program_code".to_string(), serde_json::json!(claim.special_program_code.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_amount_paid".to_string(), serde_json::json!(claim.patient_amount_paid.map(|d| d.to_string()).unwrap_or_default()));
+            encounter_fields.insert("patient_responsibility_amount".to_string(), serde_json::json!(claim.patient_responsibility_amount.map(|d| d.to_string()).unwrap_or_default()));
+            encounter_fields.insert("service_authorization_code".to_string(), serde_json::json!(claim.service_authorization_code.clone().unwrap_or_default()));
+
+            // Claim identifiers
+            encounter_fields.insert("claim_number".to_string(), serde_json::json!(claim.claim_number.clone().unwrap_or_default()));
+
+            // Claim note (will be inserted into encounter_note table separately)
+            encounter_fields.insert("claim_note".to_string(), serde_json::json!(claim.claim_note.clone().unwrap_or_default()));
+
+            // Related causes and accident information
+            encounter_fields.insert("related_causes_code_1".to_string(), serde_json::json!(claim.related_causes_code_1.clone().unwrap_or_default()));
+            encounter_fields.insert("related_causes_code_2".to_string(), serde_json::json!(claim.related_causes_code_2.clone().unwrap_or_default()));
+            encounter_fields.insert("related_causes_code_3".to_string(), serde_json::json!(claim.related_causes_code_3.clone().unwrap_or_default()));
+            encounter_fields.insert("auto_accident_state".to_string(), serde_json::json!(claim.auto_accident_state.clone().unwrap_or_default()));
+            encounter_fields.insert("auto_accident_country".to_string(), serde_json::json!(claim.auto_accident_country.clone().unwrap_or_default()));
+
+            // COB (Coordination of Benefits) information
+            encounter_fields.insert("other_payer_paid_amount".to_string(), serde_json::json!(claim.other_payer_paid_amount.map(|d| d.to_string()).unwrap_or_default()));
+            encounter_fields.insert("other_payer_id".to_string(), serde_json::json!(claim.other_payer_id.clone().unwrap_or_default()));
+            encounter_fields.insert("other_payer_name".to_string(), serde_json::json!(claim.other_payer_name.clone().unwrap_or_default()));
+            encounter_fields.insert("other_payer_claim_number".to_string(), serde_json::json!(claim.other_payer_claim_number.clone().unwrap_or_default()));
+
+            // Ambulance Information (CR1 segment)
+            encounter_fields.insert("ambulance_transport_reason_code".to_string(), serde_json::json!(claim.ambulance_transport_reason_code.clone().unwrap_or_default()));
+            encounter_fields.insert("ambulance_transport_distance".to_string(), serde_json::json!(claim.ambulance_transport_distance.map(|d| d.to_string()).unwrap_or_default()));
+            encounter_fields.insert("ambulance_patient_weight".to_string(), serde_json::json!(claim.ambulance_patient_weight.map(|d| d.to_string()).unwrap_or_default()));
+            encounter_fields.insert("ambulance_patient_count".to_string(), serde_json::json!(claim.ambulance_patient_count.map(|i| i.to_string()).unwrap_or_default()));
+
+            // Paperwork/Attachments (PWK segment)
+            encounter_fields.insert("paperwork_report_type".to_string(), serde_json::json!(claim.paperwork_report_type.clone().unwrap_or_default()));
+            encounter_fields.insert("paperwork_transmission_code".to_string(), serde_json::json!(claim.paperwork_transmission_code.clone().unwrap_or_default()));
+            encounter_fields.insert("paperwork_control_number".to_string(), serde_json::json!(claim.paperwork_control_number.clone().unwrap_or_default()));
+
+            // Condition Indicators (CRC segments)
+            encounter_fields.insert("condition_codes".to_string(), serde_json::json!(claim.condition_codes.join(",")));
 
             // Provider NPIs and Names
             encounter_fields.insert("rendering_provider_npi".to_string(), serde_json::json!(claim.rendering_provider_npi.clone().unwrap_or_default()));
@@ -818,15 +879,45 @@ impl ClaimsImporter {
             let mut service_line_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
             for (i, line) in claim.service_lines.iter().enumerate() {
                 let prefix = format!("service_line_{}", i + 1);
+
+                // Basic service line information
                 service_line_map.insert(format!("{}_date_from", prefix), line.service_date_from.format("%Y-%m-%d").to_string());
                 service_line_map.insert(format!("{}_date_to", prefix), line.service_date_to.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default());
                 service_line_map.insert(format!("{}_procedure_code", prefix), line.procedure_code.clone());
+                service_line_map.insert(format!("{}_product_service_id_qualifier", prefix), line.product_service_id_qualifier.clone());
                 service_line_map.insert(format!("{}_modifier_1", prefix), line.procedure_modifier_1.clone().unwrap_or_default());
                 service_line_map.insert(format!("{}_modifier_2", prefix), line.procedure_modifier_2.clone().unwrap_or_default());
                 service_line_map.insert(format!("{}_modifier_3", prefix), line.procedure_modifier_3.clone().unwrap_or_default());
                 service_line_map.insert(format!("{}_modifier_4", prefix), line.procedure_modifier_4.clone().unwrap_or_default());
                 service_line_map.insert(format!("{}_charge_amount", prefix), line.line_item_charge_amount.to_string());
                 service_line_map.insert(format!("{}_units", prefix), line.service_unit_count.to_string());
+                service_line_map.insert(format!("{}_unit_basis_measurement_code", prefix), line.unit_basis_measurement_code.clone());
+                service_line_map.insert(format!("{}_place_of_service_code", prefix), line.place_of_service_code.clone().unwrap_or_default());
+
+                // Service line indicators
+                service_line_map.insert(format!("{}_emergency_indicator", prefix), line.emergency_indicator.map(|b| if b { "Y" } else { "N" }).unwrap_or("N").to_string());
+                service_line_map.insert(format!("{}_epsdt_indicator", prefix), line.epsdt_indicator.map(|b| if b { "Y" } else { "N" }).unwrap_or("N").to_string());
+                service_line_map.insert(format!("{}_family_planning_indicator", prefix), line.family_planning_indicator.map(|b| if b { "Y" } else { "N" }).unwrap_or("N").to_string());
+
+                // NDC (drug) information
+                service_line_map.insert(format!("{}_ndc_code", prefix), line.ndc_code.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_ndc_unit_count", prefix), line.ndc_unit_count.map(|d| d.to_string()).unwrap_or_default());
+                service_line_map.insert(format!("{}_ndc_measurement_unit", prefix), line.ndc_measurement_unit.clone().unwrap_or_default());
+
+                // Authorization and referral
+                service_line_map.insert(format!("{}_prior_authorization_number", prefix), line.prior_authorization_number.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_referral_number", prefix), line.referral_number.clone().unwrap_or_default());
+
+                // Line note and revenue code
+                service_line_map.insert(format!("{}_line_note", prefix), line.line_note.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_revenue_code", prefix), line.revenue_code.clone().unwrap_or_default());
+
+                // COB (Other payer information)
+                service_line_map.insert(format!("{}_other_payer_line_paid_amount", prefix), line.other_payer_line_paid_amount.map(|d| d.to_string()).unwrap_or_default());
+
+                // HCP - Health Care Pricing (adjudication)
+                service_line_map.insert(format!("{}_allowed_amount", prefix), line.allowed_amount.map(|d| d.to_string()).unwrap_or_default());
+                service_line_map.insert(format!("{}_saving_amount", prefix), line.saving_amount.map(|d| d.to_string()).unwrap_or_default());
 
                 // Diagnosis pointers
                 let mut pointers = Vec::new();
@@ -843,6 +934,16 @@ impl ClaimsImporter {
                     pointers.push(p4.to_string());
                 }
                 service_line_map.insert(format!("{}_diagnosis_pointers", prefix), pointers.join(","));
+
+                // Provider NPIs and names at service line level (Loop 2420)
+                service_line_map.insert(format!("{}_rendering_provider_npi", prefix), line.rendering_provider_npi.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_rendering_provider_last_name", prefix), line.rendering_provider_last_name.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_rendering_provider_first_name", prefix), line.rendering_provider_first_name.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_ordering_provider_npi", prefix), line.ordering_provider_npi.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_ordering_provider_last_name", prefix), line.ordering_provider_last_name.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_ordering_provider_first_name", prefix), line.ordering_provider_first_name.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_supervising_provider_npi", prefix), line.supervising_provider_npi.clone().unwrap_or_default());
+                service_line_map.insert(format!("{}_referring_provider_npi", prefix), line.referring_provider_npi.clone().unwrap_or_default());
             }
             let service_line_fields_json = serde_json::to_value(&service_line_map)
                 .context("Failed to serialize service line fields")?;

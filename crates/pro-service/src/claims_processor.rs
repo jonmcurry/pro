@@ -442,6 +442,151 @@ impl ClaimsProcessor {
         let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
         let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
 
+        // Extract provider NPIs and names (with empty string filtering)
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_last_name = encounter_fields.get("rendering_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_first_name = encounter_fields.get("rendering_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_last_name = encounter_fields.get("referring_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_first_name = encounter_fields.get("referring_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let supervising_provider_last_name = encounter_fields.get("supervising_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        // Ensure providers exist in claims.provider table and get their provider_ids
+        let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Rendering",
+                rendering_provider_last_name,
+                rendering_provider_first_name,
+                None,
+                rendering_provider_taxonomy,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find rendering provider: NPI={}, Name={} {}",
+                            npi,
+                            rendering_provider_first_name.unwrap_or(""),
+                            rendering_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring rendering provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let referring_provider_id = if let Some(npi) = referring_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Referring",
+                referring_provider_last_name,
+                referring_provider_first_name,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find referring provider: NPI={}, Name={} {}",
+                            npi,
+                            referring_provider_first_name.unwrap_or(""),
+                            referring_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring referring provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let supervising_provider_id = if let Some(npi) = supervising_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Supervising",
+                supervising_provider_last_name,
+                supervising_provider_first_name,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find supervising provider: NPI={}, Name={} {}",
+                            npi,
+                            supervising_provider_first_name.unwrap_or(""),
+                            supervising_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring supervising provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let billing_provider_id = if let Some(npi) = billing_provider_npi {
+            // For billing provider, we may only have organization name (not first/last)
+            // Split billing_provider_name into last/first if it contains a comma
+            let (last, first) = if let Some(name) = billing_provider_name {
+                if name.contains(',') {
+                    let parts: Vec<&str> = name.splitn(2, ',').collect();
+                    (Some(parts[0].trim()), parts.get(1).map(|s| s.trim()))
+                } else {
+                    (Some(name), None)
+                }
+            } else {
+                (None, None)
+            };
+
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Billing",
+                last,
+                first,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find billing provider: NPI={}, Name={:?}",
+                            npi, billing_provider_name);
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring billing provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Insert encounter and get generated ID (ONE record for all service lines)
         let encounter_id: i64 = sqlx::query_scalar(
             r#"
@@ -463,9 +608,13 @@ impl ClaimsProcessor {
                 payer_responsibility_code,
                 place_of_service_code,
                 medical_record_number,
+                rendering_provider_id,
+                referring_provider_id,
+                supervising_provider_id,
+                billing_provider_id,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
             RETURNING encounter_id
             "#
         )
@@ -486,6 +635,10 @@ impl ClaimsProcessor {
         .bind(payer_responsibility_code)
         .bind(place_of_service)
         .bind(medical_record_number)
+        .bind(rendering_provider_id)
+        .bind(referring_provider_id)
+        .bind(supervising_provider_id)
+        .bind(billing_provider_id)
         .bind("NEW")
         .fetch_one(&mut **tx)
         .await
@@ -494,7 +647,7 @@ impl ClaimsProcessor {
         // Insert all service lines for this encounter
         let mut line_number = 1;
         for service_line in &service_lines {
-            self.import_service_line(tx, encounter_id, service_line, line_number).await?;
+            self.import_service_line(tx, encounter_id, organization_id, service_line, line_number).await?;
             line_number += 1;
         }
 
@@ -605,21 +758,21 @@ impl ClaimsProcessor {
         let subscriber_country = encounter_fields.get("subscriber_country").map(|s| s.as_str());
 
         // Provider information
-        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str());
-        let rendering_provider_name = encounter_fields.get("rendering_provider_name").map(|s| s.as_str());
-        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str());
-        let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str());
-        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str());
-        let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str());
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_name = encounter_fields.get("rendering_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str());
         let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str());
         let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str());
         let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str());
         let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str());
-        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str());
-        let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str());
-        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str());
-        let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str());
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let billing_provider_tax_id = encounter_fields.get("billing_provider_tax_id").map(|s| s.as_str());
         let billing_provider_address_line1 = encounter_fields.get("billing_provider_address_line1").map(|s| s.as_str());
         let billing_provider_city = encounter_fields.get("billing_provider_city").map(|s| s.as_str());
@@ -679,7 +832,7 @@ impl ClaimsProcessor {
 
         // Ensure providers exist in claims.provider table and get their provider_ids
         let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
-            self.ensure_provider_exists(
+            match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Rendering",
@@ -688,13 +841,27 @@ impl ClaimsProcessor {
                 None,
                 rendering_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find rendering provider: NPI={}, Name={} {}",
+                            npi,
+                            rendering_provider_first_name.unwrap_or(""),
+                            rendering_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring rendering provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
         } else {
             None
         };
 
         let referring_provider_id = if let Some(npi) = referring_provider_npi {
-            self.ensure_provider_exists(
+            match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Referring",
@@ -703,13 +870,27 @@ impl ClaimsProcessor {
                 None,
                 referring_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find referring provider: NPI={}, Name={} {}",
+                            npi,
+                            referring_provider_first_name.unwrap_or(""),
+                            referring_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring referring provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
         } else {
             None
         };
 
         let supervising_provider_id = if let Some(npi) = supervising_provider_npi {
-            self.ensure_provider_exists(
+            match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Supervising",
@@ -718,7 +899,21 @@ impl ClaimsProcessor {
                 None,
                 supervising_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find supervising provider: NPI={}, Name={} {}",
+                            npi,
+                            supervising_provider_first_name.unwrap_or(""),
+                            supervising_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring supervising provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -737,7 +932,7 @@ impl ClaimsProcessor {
                 (None, None)
             };
 
-            self.ensure_provider_exists(
+            match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Billing",
@@ -746,7 +941,19 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find billing provider: NPI={}, Name={:?}",
+                            npi, billing_provider_name);
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring billing provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
         } else {
             None
         };
@@ -1031,7 +1238,7 @@ impl ClaimsProcessor {
         }
 
         // Import service line (use line number 1 for single-line processing)
-        self.import_service_line(tx, encounter_id, raw_claim, 1).await?;
+        self.import_service_line(tx, encounter_id, organization_id, raw_claim, 1).await?;
 
         // Import diagnoses
         self.import_diagnoses(tx, encounter_id, raw_claim).await?;
@@ -1044,6 +1251,7 @@ impl ClaimsProcessor {
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         encounter_id: i64,
+        organization_id: i64,
         raw_claim: &RawClaim,
         line_number: i32,
     ) -> Result<()> {
@@ -1055,8 +1263,10 @@ impl ClaimsProcessor {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        // Build field name prefix using line_number (e.g., "service_line_1_")
-        let prefix = format!("service_line_{}_", line_number);
+        // IMPORTANT: Each RawClaim from staging represents ONE service line, so service_line_fields
+        // always uses "service_line_1_" prefix. The line_number parameter is only used for the
+        // INSERT statement to set the correct line_number column value.
+        let prefix = "service_line_1_";
 
         // Extract required service line fields using line number prefix
         let procedure_code = service_line_fields.get(&format!("{}procedure_code", prefix))
@@ -1107,71 +1317,228 @@ impl ClaimsProcessor {
             .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
-        // Extract additional service line fields
-        let product_service_id_qualifier = service_line_fields.get("product_service_id_qualifier")
+        // Extract additional service line fields with prefix
+        let product_service_id_qualifier = service_line_fields.get(&format!("{}product_service_id_qualifier", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str())
             .unwrap_or("HC"); // Default to HCPCS
-        let unit_basis_measurement_code = service_line_fields.get("unit_basis_measurement_code")
+        let unit_basis_measurement_code = service_line_fields.get(&format!("{}unit_basis_measurement_code", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let service_date_to = service_line_fields.get("service_date_to")
+        let service_date_to = service_line_fields.get(&format!("{}date_to", prefix))
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
-        let place_of_service_code = service_line_fields.get("place_of_service_code")
+        let place_of_service_code = service_line_fields.get(&format!("{}place_of_service_code", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
         // Convert EDI Y/N indicators to boolean values
-        let emergency_indicator = service_line_fields.get("emergency_indicator")
+        let emergency_indicator = service_line_fields.get(&format!("{}emergency_indicator", prefix))
             .map(|s| s.trim().eq_ignore_ascii_case("Y"))
             .unwrap_or(false);
-        let epsdt_indicator = service_line_fields.get("epsdt_indicator")
+        let epsdt_indicator = service_line_fields.get(&format!("{}epsdt_indicator", prefix))
             .map(|s| s.trim().eq_ignore_ascii_case("Y"))
             .unwrap_or(false);
-        let family_planning_indicator = service_line_fields.get("family_planning_indicator")
+        let family_planning_indicator = service_line_fields.get(&format!("{}family_planning_indicator", prefix))
             .map(|s| s.trim().eq_ignore_ascii_case("Y"))
             .unwrap_or(false);
 
         // Phase 3: Service line level fields
         // Phase 3.1: Provider NPIs at service line level (Loop 2420)
-        let sl_rendering_provider_npi = service_line_fields.get("rendering_provider_npi")
+        let sl_rendering_provider_npi = service_line_fields.get(&format!("{}rendering_provider_npi", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_ordering_provider_npi = service_line_fields.get("ordering_provider_npi")
+        let sl_ordering_provider_npi = service_line_fields.get(&format!("{}ordering_provider_npi", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_supervising_provider_npi = service_line_fields.get("supervising_provider_npi")
+        let sl_supervising_provider_npi = service_line_fields.get(&format!("{}supervising_provider_npi", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_referring_provider_npi = service_line_fields.get("referring_provider_npi")
+        let sl_referring_provider_npi = service_line_fields.get(&format!("{}referring_provider_npi", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
-        // Phase 3.2: Rendering provider taxonomy at service line level
-        let sl_rendering_provider_taxonomy = service_line_fields.get("rendering_provider_taxonomy")
+        // Phase 3.2: Provider names at service line level
+        let sl_rendering_provider_last_name = service_line_fields.get(&format!("{}rendering_provider_last_name", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
+        let sl_rendering_provider_first_name = service_line_fields.get(&format!("{}rendering_provider_first_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_ordering_provider_last_name = service_line_fields.get(&format!("{}ordering_provider_last_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_ordering_provider_first_name = service_line_fields.get(&format!("{}ordering_provider_first_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_supervising_provider_last_name = service_line_fields.get(&format!("{}supervising_provider_last_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_supervising_provider_first_name = service_line_fields.get(&format!("{}supervising_provider_first_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_referring_provider_last_name = service_line_fields.get(&format!("{}referring_provider_last_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+        let sl_referring_provider_first_name = service_line_fields.get(&format!("{}referring_provider_first_name", prefix))
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+
+        // Phase 3.3: Rendering provider taxonomy (from encounter level, not service line level)
+        let sl_rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy")
+            .filter(|s| !s.is_empty())
+            .map(|s| s.as_str());
+
+        // Phase 3.4: Ensure service line providers exist and get their IDs
+        let sl_rendering_provider_id = if let Some(npi) = sl_rendering_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Rendering",
+                sl_rendering_provider_last_name,
+                sl_rendering_provider_first_name,
+                None,
+                sl_rendering_provider_taxonomy,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find service line rendering provider: NPI={}, Name={} {}",
+                            npi,
+                            sl_rendering_provider_first_name.unwrap_or(""),
+                            sl_rendering_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring service line rendering provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let sl_ordering_provider_id = if let Some(npi) = sl_ordering_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Ordering",
+                sl_ordering_provider_last_name,
+                sl_ordering_provider_first_name,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find service line ordering provider: NPI={}, Name={} {}",
+                            npi,
+                            sl_ordering_provider_first_name.unwrap_or(""),
+                            sl_ordering_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring service line ordering provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let sl_supervising_provider_id = if let Some(npi) = sl_supervising_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Supervising",
+                sl_supervising_provider_last_name,
+                sl_supervising_provider_first_name,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find service line supervising provider: NPI={}, Name={} {}",
+                            npi,
+                            sl_supervising_provider_first_name.unwrap_or(""),
+                            sl_supervising_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring service line supervising provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        let sl_referring_provider_id = if let Some(npi) = sl_referring_provider_npi {
+            match self.ensure_provider_exists(
+                tx,
+                npi,
+                "Referring",
+                sl_referring_provider_last_name,
+                sl_referring_provider_first_name,
+                None,
+                None,
+                Some(organization_id),
+            ).await {
+                Ok(provider_id) => {
+                    if provider_id.is_none() {
+                        warn!("Failed to create/find service line referring provider: NPI={}, Name={} {}",
+                            npi,
+                            sl_referring_provider_first_name.unwrap_or(""),
+                            sl_referring_provider_last_name.unwrap_or(""));
+                    }
+                    provider_id
+                },
+                Err(e) => {
+                    error!("Error ensuring service line referring provider exists: NPI={}, Error={:?}", npi, e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         // Phase 3.5: Supplemental amounts at service line level
-        let sl_approved_amount = service_line_fields.get("approved_amount")
+        let sl_approved_amount = service_line_fields.get(&format!("{}approved_amount", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
-        let sl_non_covered_charges = service_line_fields.get("non_covered_charges")
+        let sl_non_covered_charges = service_line_fields.get(&format!("{}non_covered_charges", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
 
         // Phase 3.6: NDC information (drug codes)
-        let sl_ndc_code = service_line_fields.get("ndc_code")
+        let sl_ndc_code = service_line_fields.get(&format!("{}ndc_code", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_ndc_unit_count = service_line_fields.get("ndc_unit_count")
+        let sl_ndc_unit_count = service_line_fields.get(&format!("{}ndc_unit_count", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
-        let sl_ndc_measurement_unit = service_line_fields.get("ndc_measurement_unit")
+        let sl_ndc_measurement_unit = service_line_fields.get(&format!("{}ndc_measurement_unit", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
         // Phase 3.7: Authorization and referral information
-        let sl_prior_authorization = service_line_fields.get("prior_authorization_number")
+        let sl_prior_authorization = service_line_fields.get(&format!("{}prior_authorization_number", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_referral_number = service_line_fields.get("referral_number")
+        let sl_referral_number = service_line_fields.get(&format!("{}referral_number", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
         // Phase 3.8: Line note and revenue code
-        let sl_line_note = service_line_fields.get("line_note")
+        let sl_line_note = service_line_fields.get(&format!("{}line_note", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
-        let sl_revenue_code = service_line_fields.get("revenue_code")
+        let sl_revenue_code = service_line_fields.get(&format!("{}revenue_code", prefix))
+            .filter(|s| !s.is_empty())
             .map(|s| s.as_str());
 
         // Phase 3.9: Other payer line amount (COB)
-        let sl_other_payer_paid = service_line_fields.get("other_payer_line_paid_amount")
+        let sl_other_payer_paid = service_line_fields.get(&format!("{}other_payer_line_paid_amount", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
 
         // Insert service line and get generated ID
@@ -1199,9 +1566,13 @@ impl ClaimsProcessor {
                 diagnosis_code_pointer_2,
                 diagnosis_code_pointer_3,
                 diagnosis_code_pointer_4,
+                rendering_provider_id,
                 rendering_provider_npi,
+                ordering_provider_id,
                 ordering_provider_npi,
+                supervising_provider_id,
                 supervising_provider_npi,
+                referring_provider_id,
                 referring_provider_npi,
                 rendering_provider_taxonomy,
                 approved_amount,
@@ -1216,7 +1587,7 @@ impl ClaimsProcessor {
                 other_payer_line_paid_amount,
                 line_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
             RETURNING service_line_id
             "#
         )
@@ -1241,9 +1612,13 @@ impl ClaimsProcessor {
         .bind(pointer_2)
         .bind(pointer_3)
         .bind(pointer_4)
+        .bind(sl_rendering_provider_id)
         .bind(sl_rendering_provider_npi)
+        .bind(sl_ordering_provider_id)
         .bind(sl_ordering_provider_npi)
+        .bind(sl_supervising_provider_id)
         .bind(sl_supervising_provider_npi)
+        .bind(sl_referring_provider_id)
         .bind(sl_referring_provider_npi)
         .bind(sl_rendering_provider_taxonomy)
         .bind(sl_approved_amount)
@@ -1659,105 +2034,177 @@ impl ClaimsProcessor {
             return Ok(None);
         }
 
-        // Check if provider already exists
-        let existing_provider: Option<i64> = sqlx::query_scalar(
-            r#"
-            SELECT provider_id
-            FROM claims.provider
-            WHERE npi = $1
-            "#
-        )
-        .bind(npi)
-        .fetch_optional(&mut **tx)
-        .await
-        .context("Failed to query existing provider")?;
+        // Retry logic to handle deadlocks from concurrent provider creation
+        const MAX_RETRIES: u32 = 5;
+        let mut retry_count = 0;
 
-        if let Some(provider_id) = existing_provider {
-            // Provider exists, return the ID
-            return Ok(Some(provider_id));
-        }
-
-        // Provider doesn't exist, create it
-        // Use "Unknown" for last_name if not provided, and empty string for first_name
-        let last_name_value = last_name.unwrap_or("Unknown");
-        let first_name_value = first_name.unwrap_or("");
-
-        // Lookup specialty from taxonomy code if provided
-        let specialty = if let Some(tax_code) = taxonomy_code {
-            sqlx::query_scalar::<_, String>(
+        loop {
+            // Check if provider already exists
+            let existing_provider: Option<i64> = sqlx::query_scalar(
                 r#"
-                SELECT specialty_display
-                FROM claims.provider_taxonomy
-                WHERE taxonomy_code = $1 AND is_active = true
+                SELECT provider_id
+                FROM claims.provider
+                WHERE npi = $1
                 "#
             )
-            .bind(tax_code)
+            .bind(npi)
             .fetch_optional(&mut **tx)
             .await
-            .unwrap_or(None)
-        } else {
-            None
-        };
+            .context("Failed to query existing provider")?;
 
-        // Log if taxonomy lookup succeeded
-        if let Some(ref spec) = specialty {
-            debug!("Mapped taxonomy {} to specialty: {}", taxonomy_code.unwrap_or(""), spec);
-        } else if taxonomy_code.is_some() && !taxonomy_code.unwrap().is_empty() {
-            warn!("No specialty mapping found for taxonomy code: {}", taxonomy_code.unwrap());
-        }
+            if let Some(provider_id) = existing_provider {
+                // Provider exists, return the ID
+                return Ok(Some(provider_id));
+            }
 
-        let provider_id: i64 = sqlx::query_scalar(
-            r#"
-            INSERT INTO claims.provider (
-                npi,
-                provider_type,
-                last_name,
-                first_name,
-                middle_name,
-                taxonomy_code,
-                specialty,
-                organization_id,
-                is_active,
-                created_at,
-                updated_at
+            // Provider doesn't exist, create it
+            // Use "Unknown" for last_name if not provided, and empty string for first_name
+            let last_name_value = last_name.unwrap_or("Unknown");
+            let first_name_value = first_name.unwrap_or("");
+
+            // Lookup specialty from taxonomy code if provided
+            let specialty = if let Some(tax_code) = taxonomy_code {
+                sqlx::query_scalar::<_, String>(
+                    r#"
+                    SELECT specialty_display
+                    FROM claims.provider_taxonomy
+                    WHERE taxonomy_code = $1 AND is_active = true
+                    "#
+                )
+                .bind(tax_code)
+                .fetch_optional(&mut **tx)
+                .await
+                .unwrap_or(None)
+            } else {
+                None
+            };
+
+            // Log if taxonomy lookup succeeded
+            if let Some(ref spec) = specialty {
+                debug!("Mapped taxonomy {} to specialty: {}", taxonomy_code.unwrap_or(""), spec);
+            } else if taxonomy_code.is_some() && !taxonomy_code.unwrap().is_empty() {
+                warn!("No specialty mapping found for taxonomy code: {}", taxonomy_code.unwrap());
+            }
+
+            // Try to insert the provider. Use DO NOTHING to reduce lock contention.
+            // Note: When ON CONFLICT DO NOTHING is triggered, RETURNING returns nothing,
+            // so fetch_optional will return Ok(None)
+            let insert_result = sqlx::query_scalar::<_, i64>(
+                r#"
+                INSERT INTO claims.provider (
+                    npi,
+                    provider_type,
+                    last_name,
+                    first_name,
+                    middle_name,
+                    taxonomy_code,
+                    specialty,
+                    organization_id,
+                    is_active,
+                    created_at,
+                    updated_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT (npi) DO NOTHING
+                RETURNING provider_id
+                "#
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (npi) DO UPDATE
-            SET updated_at = CURRENT_TIMESTAMP
-            RETURNING provider_id
-            "#
-        )
-        .bind(npi)
-        .bind(provider_type)
-        .bind(last_name_value)
-        .bind(first_name_value)
-        .bind(middle_name)
-        .bind(taxonomy_code)
-        .bind(specialty.as_deref())
-        .bind(organization_id)
-        .fetch_one(&mut **tx)
-        .await
-        .context("Failed to insert provider")?;
+            .bind(npi)
+            .bind(provider_type)
+            .bind(last_name_value)
+            .bind(first_name_value)
+            .bind(middle_name)
+            .bind(taxonomy_code)
+            .bind(specialty.as_deref())
+            .bind(organization_id)
+            .fetch_optional(&mut **tx)
+            .await;
 
-        debug!("Created new provider: NPI={}, Type={}, Name={} {}, Specialty={:?}",
-            npi, provider_type, first_name_value, last_name_value, specialty);
+            match insert_result {
+                Ok(Some(provider_id)) => {
+                    // Successfully inserted, return the new provider_id
+                    debug!("Created new provider: NPI={}, Type={}, Name={} {}, Specialty={:?}",
+                        npi, provider_type, first_name_value, last_name_value, specialty);
 
-        // Enqueue provider for background NPI enrichment (fire-and-forget)
-        // This does not block claim processing if it fails
-        let _ = sqlx::query(
-            r#"
-            INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (provider_id) DO NOTHING
-            "#
-        )
-        .bind(provider_id)
-        .bind(npi)
-        .bind(5) // Default priority
-        .execute(&mut **tx)
-        .await;
+                    // Enqueue provider for background NPI enrichment (fire-and-forget)
+                    // This does not block claim processing if it fails
+                    let _ = sqlx::query(
+                        r#"
+                        INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (provider_id) DO NOTHING
+                        "#
+                    )
+                    .bind(provider_id)
+                    .bind(npi)
+                    .bind(5) // Default priority
+                    .execute(&mut **tx)
+                    .await;
 
-        Ok(Some(provider_id))
+                    return Ok(Some(provider_id));
+                }
+                Ok(None) => {
+                    // ON CONFLICT DO NOTHING was triggered - provider was created by another transaction
+                    // Query again to get the provider_id
+                    let existing_id: Option<i64> = sqlx::query_scalar(
+                        r#"
+                        SELECT provider_id
+                        FROM claims.provider
+                        WHERE npi = $1
+                        "#
+                    )
+                    .bind(npi)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .context("Failed to query provider after conflict")?;
+
+                    if let Some(id) = existing_id {
+                        debug!("Provider already exists (concurrent creation): NPI={}, provider_id={}",
+                            npi, id);
+                        return Ok(Some(id));
+                    } else {
+                        // Very rare: provider was deleted between INSERT and SELECT
+                        // Retry the whole operation
+                        if retry_count < MAX_RETRIES {
+                            retry_count += 1;
+                            let backoff_ms = 10u64 * 2u64.pow(retry_count - 1); // 10ms, 20ms, 40ms, 80ms, 160ms
+                            warn!("Provider disappeared after conflict, retrying ({}/{}): NPI={}, backoff={}ms",
+                                retry_count, MAX_RETRIES, npi, backoff_ms);
+                            tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
+                            continue;
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "Provider creation failed after {} retries: NPI={}",
+                                MAX_RETRIES, npi
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Check if this is a deadlock error (PostgreSQL error code 40P01)
+                    let error_string = e.to_string();
+                    let is_deadlock = error_string.contains("deadlock detected")
+                        || error_string.contains("40P01");
+
+                    if is_deadlock && retry_count < MAX_RETRIES {
+                        retry_count += 1;
+                        // Exponential backoff with jitter: 10ms, 20ms, 40ms, 80ms, 160ms
+                        let backoff_ms = 10u64 * 2u64.pow(retry_count - 1);
+                        let jitter = (rand::random::<u64>() % 10) as u64; // 0-9ms jitter
+                        let total_backoff = backoff_ms + jitter;
+
+                        warn!("Deadlock detected creating provider, retrying ({}/{}): NPI={}, backoff={}ms",
+                            retry_count, MAX_RETRIES, npi, total_backoff);
+
+                        tokio::time::sleep(tokio::time::Duration::from_millis(total_backoff)).await;
+                        continue;
+                    } else {
+                        // Not a deadlock or max retries exceeded
+                        return Err(e).context("Failed to insert provider");
+                    }
+                }
+            }
+        }
     }
 }
 
