@@ -41,7 +41,9 @@
       "Bash(done)",
       "Bash(tokei:*)",
       "Bash(dir /s /b targetrelease*.exe 2)",
-      "Bash(nul)"
+      "Bash(nul)",
+      "Bash(Select-String \"Compiling|Finished|error|warning\")",
+      "Bash(Select-Object -First 50)"
     ],
     "deny": [],
     "ask": []

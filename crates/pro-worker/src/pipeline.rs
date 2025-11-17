@@ -1071,6 +1071,17 @@ impl IngestionPipeline {
         encounter_ctx.date_of_service_from = Some(claim.date_of_service_from);
         encounter_ctx.date_of_service_to = claim.date_of_service_to;
 
+        // Load facility data for rules
+        if let Ok(Some((state_code, facility_type))) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT state_code, facility_type FROM core.facility WHERE facility_id = $1"
+        )
+        .bind(encounter.facility_id)
+        .fetch_optional(&self.pool)
+        .await {
+            encounter_ctx.facility_state_code = state_code;
+            encounter_ctx.facility_type = facility_type;
+        }
+
         // Add diagnosis codes
         encounter_ctx.diagnosis_codes = claim.diagnoses.iter()
             .map(|d| d.diagnosis_code.clone())
@@ -1114,6 +1125,10 @@ impl IngestionPipeline {
             line_ctx.line_item_charge_amount = Some(parsed_line.line_item_charge_amount);
             line_ctx.date_of_service = Some(parsed_line.service_date_from);
             line_ctx.place_of_service_code = parsed_line.place_of_service_code.clone();
+
+            // Load facility data for rules (reuse from encounter_ctx to avoid duplicate query)
+            line_ctx.facility_state_code = encounter_ctx.facility_state_code.clone();
+            line_ctx.facility_type = encounter_ctx.facility_type.clone();
 
             // Add modifiers
             let mut modifiers = Vec::new();
@@ -1321,6 +1336,17 @@ impl IngestionPipeline {
         encounter_ctx.date_of_service_from = Some(claim.date_of_service_from);
         encounter_ctx.date_of_service_to = claim.date_of_service_to;
 
+        // Load facility data for rules
+        if let Ok(Some((state_code, facility_type))) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT state_code, facility_type FROM core.facility WHERE facility_id = $1"
+        )
+        .bind(encounter.facility_id)
+        .fetch_optional(&self.pool)
+        .await {
+            encounter_ctx.facility_state_code = state_code;
+            encounter_ctx.facility_type = facility_type;
+        }
+
         // Add diagnosis codes
         encounter_ctx.diagnosis_codes = claim.diagnoses.iter()
             .map(|d| d.diagnosis_code.clone())
@@ -1363,6 +1389,10 @@ impl IngestionPipeline {
             line_ctx.line_item_charge_amount = Some(parsed_line.line_item_charge_amount);
             line_ctx.date_of_service = Some(parsed_line.service_date_from);
             line_ctx.place_of_service_code = parsed_line.place_of_service_code.clone();
+
+            // Load facility data for rules (reuse from encounter_ctx)
+            line_ctx.facility_state_code = encounter_ctx.facility_state_code.clone();
+            line_ctx.facility_type = encounter_ctx.facility_type.clone();
 
             // Add modifiers
             let mut modifiers = Vec::new();
@@ -1569,6 +1599,17 @@ impl IngestionPipeline {
         encounter_ctx.date_of_service_to = claim.date_of_service_to;
         encounter_ctx.subscriber_id = Some(claim.subscriber_id.clone()); // PHASE 3
 
+        // Load facility data for rules
+        if let Ok(Some((state_code, facility_type))) = sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT state_code, facility_type FROM core.facility WHERE facility_id = $1"
+        )
+        .bind(encounter.facility_id)
+        .fetch_optional(&self.pool)
+        .await {
+            encounter_ctx.facility_state_code = state_code;
+            encounter_ctx.facility_type = facility_type;
+        }
+
         // Add diagnosis codes
         encounter_ctx.diagnosis_codes = claim.diagnoses.iter()
             .map(|d| d.diagnosis_code.clone())
@@ -1612,6 +1653,10 @@ impl IngestionPipeline {
             line_ctx.date_of_service = Some(parsed_line.service_date_from);
             line_ctx.place_of_service_code = parsed_line.place_of_service_code.clone();
             line_ctx.subscriber_id = Some(claim.subscriber_id.clone()); // PHASE 3
+
+            // Load facility data for rules (reuse from encounter_ctx)
+            line_ctx.facility_state_code = encounter_ctx.facility_state_code.clone();
+            line_ctx.facility_type = encounter_ctx.facility_type.clone();
 
             // Add modifiers
             let mut modifiers = Vec::new();

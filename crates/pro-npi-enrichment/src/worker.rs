@@ -209,6 +209,9 @@ impl EnrichmentWorker {
             .and_then(|a| a.postal_code.as_ref())
             .map(|pc| pc.replace("-", "").chars().take(9).collect::<String>());
 
+        // Generate NPI Registry link
+        let npi_registry_link = format!("https://nppesapi.cms.hhs.gov/api/?version=2.1&number={}", npi);
+
         // Update provider record with COALESCE to preserve existing non-null values
         sqlx::query(
             r#"
@@ -228,6 +231,7 @@ impl EnrichmentWorker {
                 state_code = COALESCE($13, state_code),
                 postal_code = COALESCE($14, postal_code),
                 phone = COALESCE($15, phone),
+                npi_registry_link = $16,
                 updated_at = CURRENT_TIMESTAMP,
                 updated_by = 'NPI_ENRICHMENT'
             WHERE provider_id = $1
@@ -248,6 +252,7 @@ impl EnrichmentWorker {
         .bind(location_address.and_then(|a| a.state.as_deref()))
         .bind(postal_code.as_deref())
         .bind(location_address.and_then(|a| a.telephone_number.as_deref()))
+        .bind(&npi_registry_link)
         .execute(&mut *tx)
         .await
         .context("Failed to update provider record")?;

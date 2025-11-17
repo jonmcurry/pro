@@ -78,6 +78,10 @@ pub struct RuleExecutionContext {
     pub provider_type: Option<String>,
     pub provider_specialty: Option<String>,
 
+    // Facility data
+    pub facility_state_code: Option<String>,
+    pub facility_type: Option<String>,
+
     // Patient/subscriber data (PHASE 3 - needed for cache lookups)
     pub subscriber_id: Option<String>,
 
@@ -106,6 +110,8 @@ impl RuleExecutionContext {
             date_of_service_to: None,
             provider_type: None,
             provider_specialty: None,
+            facility_state_code: None,
+            facility_type: None,
             subscriber_id: None,
             custom_data: HashMap::new(),
         }

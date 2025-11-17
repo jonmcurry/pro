@@ -284,10 +284,21 @@ impl EdiParser {
     fn parse_claims(&self, segments: &[EdiSegment]) -> Result<Vec<ParsedClaim>> {
         let mut claims = Vec::new();
         let mut current_claim_segments = Vec::new();
+        let mut in_subscriber_loop = false;
         let mut in_claim = false;
 
         for segment in segments {
             match segment.segment_id.as_str() {
+                "HL" => {
+                    // Check if this is a subscriber hierarchical level (HL*...*23)
+                    // HL segment format: HL*id*parent_id*level_code
+                    if let Some(level_code) = segment.get_optional(2) {
+                        if level_code == "23" {
+                            // This is a subscriber level - start collecting segments
+                            in_subscriber_loop = true;
+                        }
+                    }
+                }
                 "CLM" => {
                     // Start of new claim
                     if in_claim && !current_claim_segments.is_empty() {
@@ -297,6 +308,7 @@ impl EdiParser {
                         current_claim_segments.clear();
                     }
                     in_claim = true;
+                    in_subscriber_loop = false; // No longer in subscriber loop
                     current_claim_segments.push(segment.clone());
                 }
                 "SE" => {
@@ -307,6 +319,17 @@ impl EdiParser {
                         current_claim_segments.clear();
                     }
                     in_claim = false;
+                    in_subscriber_loop = false;
+                }
+                // Collect subscriber-level segments (SBR, NM1, DMG, etc.) that appear before CLM
+                "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" => {
+                    if in_subscriber_loop && !in_claim {
+                        // Subscriber-level segment before CLM - collect it
+                        current_claim_segments.push(segment.clone());
+                    } else if in_claim {
+                        // Already in claim - collect it
+                        current_claim_segments.push(segment.clone());
+                    }
                 }
                 _ => {
                     if in_claim {
@@ -361,10 +384,19 @@ impl EdiParser {
 
             // Stream claims one at a time
             let mut current_claim_segments = Vec::new();
+            let mut in_subscriber_loop = false;
             let mut in_claim = false;
 
             for segment in segments {
                 match segment.segment_id.as_str() {
+                    "HL" => {
+                        // Check if this is a subscriber hierarchical level (HL*...*23)
+                        if let Some(level_code) = segment.get_optional(2) {
+                            if level_code == "23" {
+                                in_subscriber_loop = true;
+                            }
+                        }
+                    }
                     "CLM" => {
                         // Start of new claim
                         if in_claim && !current_claim_segments.is_empty() {
@@ -376,6 +408,7 @@ impl EdiParser {
                             current_claim_segments.clear();
                         }
                         in_claim = true;
+                        in_subscriber_loop = false;
                         current_claim_segments.push(segment.clone());
                     }
                     "SE" => {
@@ -388,6 +421,15 @@ impl EdiParser {
                             current_claim_segments.clear();
                         }
                         in_claim = false;
+                        in_subscriber_loop = false;
+                    }
+                    // Collect subscriber-level segments (SBR, NM1, DMG, etc.) that appear before CLM
+                    "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" => {
+                        if in_subscriber_loop && !in_claim {
+                            current_claim_segments.push(segment.clone());
+                        } else if in_claim {
+                            current_claim_segments.push(segment.clone());
+                        }
                     }
                     _ => {
                         if in_claim {

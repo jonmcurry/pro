@@ -45,6 +45,8 @@ impl RuleTemplate for FieldPatternRuleTemplate {
                     "place_of_service_code".to_string(),
                     "provider_type".to_string(),
                     "provider_specialty".to_string(),
+                    "facility_state_code".to_string(),
+                    "facility_type".to_string(),
                 ]),
             },
             ParameterSchema {
@@ -200,6 +202,8 @@ impl FieldPatternRule {
             "place_of_service_code" => ctx.place_of_service_code.clone(),
             "provider_type" => ctx.provider_type.clone(),
             "provider_specialty" => ctx.provider_specialty.clone(),
+            "facility_state_code" => ctx.facility_state_code.clone(),
+            "facility_type" => ctx.facility_type.clone(),
             _ => None,
         }
     }

@@ -611,6 +611,11 @@ impl ClaimsProcessor {
         let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str());
         let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str());
         let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str());
+        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str());
+        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str());
+        let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str());
+        let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str());
+        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str());
         let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str());
         let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str());
         let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str());
@@ -838,6 +843,11 @@ impl ClaimsProcessor {
                 referring_provider_name,
                 service_facility_npi,
                 service_facility_name,
+                service_facility_address_line1,
+                service_facility_address_line2,
+                service_facility_city,
+                service_facility_state,
+                service_facility_postal_code,
                 supervising_provider_id,
                 supervising_provider_npi,
                 supervising_provider_name,
@@ -888,7 +898,7 @@ impl ClaimsProcessor {
                 medical_record_number,
                 claim_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80, $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98, $99, $100)
             "#
         )
         .bind(encounter_id)
@@ -934,6 +944,11 @@ impl ClaimsProcessor {
         .bind(referring_provider_name)
         .bind(service_facility_npi)
         .bind(service_facility_name)
+        .bind(service_facility_address_line1)
+        .bind(service_facility_address_line2)
+        .bind(service_facility_city)
+        .bind(service_facility_state)
+        .bind(service_facility_postal_code)
         .bind(supervising_provider_id)
         .bind(supervising_provider_npi)
         .bind(supervising_provider_name)
@@ -988,6 +1003,32 @@ impl ClaimsProcessor {
         .context("Failed to insert encounter")?;
 
         debug!("Inserted encounter {} for patient {}", encounter_id, patient_control_number);
+
+        // Insert claim note if present
+        if let Some(claim_note) = encounter_fields.get("claim_note") {
+            if !claim_note.is_empty() {
+                sqlx::query(
+                    r#"
+                    INSERT INTO claims.encounter_note (
+                        encounter_id,
+                        note_type,
+                        note_text,
+                        created_by
+                    )
+                    VALUES ($1, $2, $3, $4)
+                    "#
+                )
+                .bind(encounter_id)
+                .bind("CLAIM")
+                .bind(claim_note.as_str())
+                .bind("SYSTEM")
+                .execute(&mut **tx)
+                .await
+                .context("Failed to insert claim note")?;
+
+                debug!("Inserted claim note for encounter {}", encounter_id);
+            }
+        }
 
         // Import service line (use line number 1 for single-line processing)
         self.import_service_line(tx, encounter_id, raw_claim, 1).await?;
@@ -1089,6 +1130,16 @@ impl ClaimsProcessor {
             .unwrap_or(false);
 
         // Phase 3: Service line level fields
+        // Phase 3.1: Provider NPIs at service line level (Loop 2420)
+        let sl_rendering_provider_npi = service_line_fields.get("rendering_provider_npi")
+            .map(|s| s.as_str());
+        let sl_ordering_provider_npi = service_line_fields.get("ordering_provider_npi")
+            .map(|s| s.as_str());
+        let sl_supervising_provider_npi = service_line_fields.get("supervising_provider_npi")
+            .map(|s| s.as_str());
+        let sl_referring_provider_npi = service_line_fields.get("referring_provider_npi")
+            .map(|s| s.as_str());
+
         // Phase 3.2: Rendering provider taxonomy at service line level
         let sl_rendering_provider_taxonomy = service_line_fields.get("rendering_provider_taxonomy")
             .map(|s| s.as_str());
@@ -1097,6 +1148,30 @@ impl ClaimsProcessor {
         let sl_approved_amount = service_line_fields.get("approved_amount")
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
         let sl_non_covered_charges = service_line_fields.get("non_covered_charges")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Phase 3.6: NDC information (drug codes)
+        let sl_ndc_code = service_line_fields.get("ndc_code")
+            .map(|s| s.as_str());
+        let sl_ndc_unit_count = service_line_fields.get("ndc_unit_count")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        let sl_ndc_measurement_unit = service_line_fields.get("ndc_measurement_unit")
+            .map(|s| s.as_str());
+
+        // Phase 3.7: Authorization and referral information
+        let sl_prior_authorization = service_line_fields.get("prior_authorization_number")
+            .map(|s| s.as_str());
+        let sl_referral_number = service_line_fields.get("referral_number")
+            .map(|s| s.as_str());
+
+        // Phase 3.8: Line note and revenue code
+        let sl_line_note = service_line_fields.get("line_note")
+            .map(|s| s.as_str());
+        let sl_revenue_code = service_line_fields.get("revenue_code")
+            .map(|s| s.as_str());
+
+        // Phase 3.9: Other payer line amount (COB)
+        let sl_other_payer_paid = service_line_fields.get("other_payer_line_paid_amount")
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
 
         // Insert service line and get generated ID
@@ -1124,12 +1199,24 @@ impl ClaimsProcessor {
                 diagnosis_code_pointer_2,
                 diagnosis_code_pointer_3,
                 diagnosis_code_pointer_4,
+                rendering_provider_npi,
+                ordering_provider_npi,
+                supervising_provider_npi,
+                referring_provider_npi,
                 rendering_provider_taxonomy,
                 approved_amount,
                 non_covered_charges,
+                ndc_code,
+                ndc_unit_count,
+                ndc_measurement_unit,
+                prior_authorization_number,
+                referral_number,
+                line_note,
+                revenue_code,
+                other_payer_line_paid_amount,
                 line_status
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)
             RETURNING service_line_id
             "#
         )
@@ -1154,9 +1241,21 @@ impl ClaimsProcessor {
         .bind(pointer_2)
         .bind(pointer_3)
         .bind(pointer_4)
+        .bind(sl_rendering_provider_npi)
+        .bind(sl_ordering_provider_npi)
+        .bind(sl_supervising_provider_npi)
+        .bind(sl_referring_provider_npi)
         .bind(sl_rendering_provider_taxonomy)
         .bind(sl_approved_amount)
         .bind(sl_non_covered_charges)
+        .bind(sl_ndc_code)
+        .bind(sl_ndc_unit_count)
+        .bind(sl_ndc_measurement_unit)
+        .bind(sl_prior_authorization)
+        .bind(sl_referral_number)
+        .bind(sl_line_note)
+        .bind(sl_revenue_code)
+        .bind(sl_other_payer_paid)
         .bind("IMPORTED")
         .fetch_one(&mut **tx)
         .await

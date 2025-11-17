@@ -382,60 +382,114 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
             }
             "NM1" => {
                 let nm1 = Nm1Segment::parse(segment)?;
-                last_nm1_entity = Some(nm1.entity_identifier_code.clone());
 
-                match nm1.entity_identifier_code.as_str() {
-                    "IL" => {
-                        claim.subscriber_entity_identifier = nm1.entity_identifier_code;
-                        claim.subscriber_entity_type = nm1.entity_type_qualifier;
-                        claim.subscriber_last_name = nm1.last_name_or_org.clone().unwrap_or_default();
-                        claim.subscriber_first_name = nm1.first_name.clone().unwrap_or_default();
-                        claim.subscriber_middle_name = nm1.middle_name.clone();
-                        claim.subscriber_name_suffix = nm1.name_suffix.clone();
-                        if nm1.identification_code_qualifier.as_deref() == Some("MI") {
-                            claim.subscriber_id_code_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
-                            claim.subscriber_id = nm1.identification_code.clone().unwrap_or_default();
+                // If we're inside a service line (Loop 2400), handle at service line level
+                // Otherwise, handle at claim level (Loop 2300/2310)
+                if let Some(ref mut line) = current_service_line {
+                    // Service line level NM1 segments (Loop 2420)
+                    debug_log(&format!(
+                        "[SERVICE_LINE_NM1] entity_id='{}', entity_type='{}', name={:?}, qualifier={:?}, npi={:?}",
+                        nm1.entity_identifier_code,
+                        nm1.entity_type_qualifier,
+                        nm1.last_name_or_org,
+                        nm1.identification_code_qualifier,
+                        nm1.identification_code
+                    ));
+
+                    match nm1.entity_identifier_code.as_str() {
+                        "82" => {
+                            // Loop 2420A - Rendering Provider at service line level
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                line.rendering_provider_npi = nm1.identification_code.clone();
+                                debug_log(&format!("[SERVICE_LINE] Set rendering_provider_npi = {:?}", line.rendering_provider_npi));
+                            }
+                            line.rendering_provider_last_name = nm1.last_name_or_org.clone();
+                            line.rendering_provider_first_name = nm1.first_name.clone();
+                        }
+                        "DK" => {
+                            // Loop 2420E - Ordering Provider at service line level
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                line.ordering_provider_npi = nm1.identification_code.clone();
+                                debug_log(&format!("[SERVICE_LINE] Set ordering_provider_npi = {:?}", line.ordering_provider_npi));
+                            }
+                            line.ordering_provider_last_name = nm1.last_name_or_org.clone();
+                            line.ordering_provider_first_name = nm1.first_name.clone();
+                        }
+                        "DQ" => {
+                            // Loop 2420D - Supervising Provider at service line level
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                line.supervising_provider_npi = nm1.identification_code.clone();
+                                debug_log(&format!("[SERVICE_LINE] Set supervising_provider_npi = {:?}", line.supervising_provider_npi));
+                            }
+                        }
+                        "DN" => {
+                            // Loop 2420F - Referring Provider at service line level
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                line.referring_provider_npi = nm1.identification_code.clone();
+                                debug_log(&format!("[SERVICE_LINE] Set referring_provider_npi = {:?}", line.referring_provider_npi));
+                            }
+                        }
+                        _ => {
+                            // Ignore other entity identifiers at service line level
                         }
                     }
-                    "PR" => {
-                        claim.payer_entity_identifier = nm1.entity_identifier_code;
-                        claim.payer_entity_type = nm1.entity_type_qualifier;
-                        claim.payer_name = nm1.last_name_or_org.clone().unwrap_or_default();
-                        claim.payer_id_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
-                        claim.payer_id = nm1.identification_code.clone().unwrap_or_default();
-                    }
-                    "82" => {
-                        claim.rendering_provider_qualifier = nm1.identification_code_qualifier.clone();
-                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
-                            claim.rendering_provider_npi = nm1.identification_code.clone();
+                } else {
+                    // Claim level NM1 segments (Loop 2310)
+                    last_nm1_entity = Some(nm1.entity_identifier_code.clone());
+
+                    match nm1.entity_identifier_code.as_str() {
+                        "IL" => {
+                            claim.subscriber_entity_identifier = nm1.entity_identifier_code;
+                            claim.subscriber_entity_type = nm1.entity_type_qualifier;
+                            claim.subscriber_last_name = nm1.last_name_or_org.clone().unwrap_or_default();
+                            claim.subscriber_first_name = nm1.first_name.clone().unwrap_or_default();
+                            claim.subscriber_middle_name = nm1.middle_name.clone();
+                            claim.subscriber_name_suffix = nm1.name_suffix.clone();
+                            if nm1.identification_code_qualifier.as_deref() == Some("MI") {
+                                claim.subscriber_id_code_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
+                                claim.subscriber_id = nm1.identification_code.clone().unwrap_or_default();
+                            }
                         }
-                        claim.rendering_provider_last_name = nm1.last_name_or_org.clone();
-                        claim.rendering_provider_first_name = nm1.first_name.clone();
-                    }
-                    "77" => {
-                        claim.service_facility_qualifier = nm1.identification_code_qualifier.clone();
-                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
-                            claim.service_facility_npi = nm1.identification_code.clone();
+                        "PR" => {
+                            claim.payer_entity_identifier = nm1.entity_identifier_code;
+                            claim.payer_entity_type = nm1.entity_type_qualifier;
+                            claim.payer_name = nm1.last_name_or_org.clone().unwrap_or_default();
+                            claim.payer_id_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
+                            claim.payer_id = nm1.identification_code.clone().unwrap_or_default();
                         }
-                        claim.service_facility_name = nm1.last_name_or_org.clone();
-                    }
-                    "DN" => {
-                        claim.referring_provider_qualifier = nm1.identification_code_qualifier.clone();
-                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
-                            claim.referring_provider_npi = nm1.identification_code.clone();
+                        "82" => {
+                            claim.rendering_provider_qualifier = nm1.identification_code_qualifier.clone();
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                claim.rendering_provider_npi = nm1.identification_code.clone();
+                            }
+                            claim.rendering_provider_last_name = nm1.last_name_or_org.clone();
+                            claim.rendering_provider_first_name = nm1.first_name.clone();
                         }
-                        claim.referring_provider_last_name = nm1.last_name_or_org.clone();
-                        claim.referring_provider_first_name = nm1.first_name.clone();
-                    }
-                    "DQ" => {
-                        claim.supervising_provider_qualifier = nm1.identification_code_qualifier.clone();
-                        if nm1.identification_code_qualifier.as_deref() == Some("XX") {
-                            claim.supervising_provider_npi = nm1.identification_code.clone();
+                        "77" => {
+                            claim.service_facility_qualifier = nm1.identification_code_qualifier.clone();
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                claim.service_facility_npi = nm1.identification_code.clone();
+                            }
+                            claim.service_facility_name = nm1.last_name_or_org.clone();
                         }
-                        claim.supervising_provider_last_name = nm1.last_name_or_org.clone();
-                        claim.supervising_provider_first_name = nm1.first_name.clone();
+                        "DN" => {
+                            claim.referring_provider_qualifier = nm1.identification_code_qualifier.clone();
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                claim.referring_provider_npi = nm1.identification_code.clone();
+                            }
+                            claim.referring_provider_last_name = nm1.last_name_or_org.clone();
+                            claim.referring_provider_first_name = nm1.first_name.clone();
+                        }
+                        "DQ" => {
+                            claim.supervising_provider_qualifier = nm1.identification_code_qualifier.clone();
+                            if nm1.identification_code_qualifier.as_deref() == Some("XX") {
+                                claim.supervising_provider_npi = nm1.identification_code.clone();
+                            }
+                            claim.supervising_provider_last_name = nm1.last_name_or_org.clone();
+                            claim.supervising_provider_first_name = nm1.first_name.clone();
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
             "N3" => {
@@ -641,6 +695,14 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
     // Don't forget to push the last service line
     if let Some(line) = current_service_line {
         claim.service_lines.push(line);
+    }
+
+    // If claim-level dates are still default (1900-01-01), copy from first service line
+    // This handles cases where DTP*472 appears only at service line level
+    let default_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
+    if claim.date_of_service_from == default_date && !claim.service_lines.is_empty() {
+        claim.date_of_service_from = claim.service_lines[0].service_date_from;
+        claim.date_of_service_to = claim.service_lines[0].service_date_to;
     }
 
     Ok(claim)
