@@ -1646,6 +1646,90 @@ impl ClaimsProcessor {
 
         debug!("Inserted service line {} for encounter {}", service_line_id, encounter_id);
 
+        // Now populate the service_line_diagnosis_pointer junction table
+        // This links the service line to its diagnosis codes via the diagnosis pointers
+        self.import_service_line_diagnosis_pointers(
+            tx,
+            service_line_id,
+            encounter_id,
+            pointer_1,
+            pointer_2,
+            pointer_3,
+            pointer_4
+        ).await?;
+
+        Ok(())
+    }
+
+    /// Import service line diagnosis pointers (junction table)
+    /// Links service lines to encounter diagnoses based on diagnosis code pointers
+    async fn import_service_line_diagnosis_pointers(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        service_line_id: i64,
+        encounter_id: i64,
+        pointer_1: Option<i16>,
+        pointer_2: Option<i16>,
+        pointer_3: Option<i16>,
+        pointer_4: Option<i16>,
+    ) -> Result<()> {
+        // Collect all non-null pointers with their sequence positions
+        let pointers = vec![
+            (1, pointer_1),
+            (2, pointer_2),
+            (3, pointer_3),
+            (4, pointer_4),
+        ];
+
+        for (pointer_sequence, pointer_value) in pointers {
+            if let Some(diagnosis_pointer) = pointer_value {
+                // Find the diagnosis_id for this encounter and sequence number
+                let diagnosis_id: Option<i64> = sqlx::query_scalar(
+                    r#"
+                    SELECT diagnosis_id
+                    FROM claims.encounter_diagnosis
+                    WHERE encounter_id = $1
+                    AND sequence_number = $2
+                    "#
+                )
+                .bind(encounter_id)
+                .bind(diagnosis_pointer)
+                .fetch_optional(&mut **tx)
+                .await?;
+
+                if let Some(diag_id) = diagnosis_id {
+                    // Insert the junction record
+                    sqlx::query(
+                        r#"
+                        INSERT INTO claims.service_line_diagnosis_pointer (
+                            service_line_id,
+                            diagnosis_id,
+                            pointer_sequence
+                        )
+                        VALUES ($1, $2, $3)
+                        ON CONFLICT (service_line_id, diagnosis_id, pointer_sequence) DO NOTHING
+                        "#
+                    )
+                    .bind(service_line_id)
+                    .bind(diag_id)
+                    .bind(pointer_sequence as i16)
+                    .execute(&mut **tx)
+                    .await
+                    .context("Failed to insert service line diagnosis pointer")?;
+
+                    debug!(
+                        "Linked service line {} to diagnosis {} (pointer {} -> sequence {})",
+                        service_line_id, diag_id, pointer_sequence, diagnosis_pointer
+                    );
+                } else {
+                    warn!(
+                        "Service line {} references diagnosis pointer {} for encounter {}, but no diagnosis with that sequence exists",
+                        service_line_id, diagnosis_pointer, encounter_id
+                    );
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1662,36 +1746,57 @@ impl ClaimsProcessor {
             None => return Ok(()), // No diagnoses to import
         };
 
-        // Get all diagnosis codes
+        // Collect all diagnosis codes from diagnosis_code_1, diagnosis_code_2, etc.
+        let mut all_diagnoses: Vec<(usize, String)> = Vec::new();
+
         for (field_name, codes) in &diagnosis_fields {
-            if field_name == "diagnosis_code" {
-                for (idx, code) in codes.iter().enumerate() {
-                    let sequence_number = (idx + 1) as i16;
-
-                    let diagnosis_id: i64 = sqlx::query_scalar(
-                        r#"
-                        INSERT INTO claims.encounter_diagnosis (
-                            encounter_id,
-                            sequence_number,
-                            diagnosis_code,
-                            is_principal
-                        )
-                        VALUES ($1, $2, $3, $4)
-                        RETURNING diagnosis_id
-                        "#
-                    )
-                    .bind(encounter_id)
-                    .bind(sequence_number)
-                    .bind(code)
-                    .bind(idx == 0)
-                    .fetch_one(&mut **tx)
-                    .await
-                    .context("Failed to insert diagnosis")?;
-
-                    debug!("Inserted diagnosis {} ({}) for encounter {}",
-                        sequence_number, code, encounter_id);
+            // Match field names like "diagnosis_code_1", "diagnosis_code_2", etc.
+            if field_name.starts_with("diagnosis_code_") {
+                if let Some(seq_str) = field_name.strip_prefix("diagnosis_code_") {
+                    if let Ok(sequence) = seq_str.parse::<usize>() {
+                        for code in codes {
+                            all_diagnoses.push((sequence, code.clone()));
+                        }
+                    }
                 }
             }
+            // Also support legacy format "diagnosis_code" (single field with array)
+            else if field_name == "diagnosis_code" {
+                for (idx, code) in codes.iter().enumerate() {
+                    all_diagnoses.push((idx + 1, code.clone()));
+                }
+            }
+        }
+
+        // Sort by sequence number to maintain proper order
+        all_diagnoses.sort_by_key(|(seq, _)| *seq);
+
+        // Insert diagnoses in order
+        for (idx, (sequence, code)) in all_diagnoses.iter().enumerate() {
+            let sequence_number = *sequence as i16;
+
+            let diagnosis_id: i64 = sqlx::query_scalar(
+                r#"
+                INSERT INTO claims.encounter_diagnosis (
+                    encounter_id,
+                    sequence_number,
+                    diagnosis_code,
+                    is_principal
+                )
+                VALUES ($1, $2, $3, $4)
+                RETURNING diagnosis_id
+                "#
+            )
+            .bind(encounter_id)
+            .bind(sequence_number)
+            .bind(code)
+            .bind(idx == 0)  // First diagnosis is principal
+            .fetch_one(&mut **tx)
+            .await
+            .context("Failed to insert diagnosis")?;
+
+            debug!("Inserted diagnosis {} ({}) for encounter {}, diagnosis_id={}",
+                sequence_number, code, encounter_id, diagnosis_id);
         }
 
         Ok(())

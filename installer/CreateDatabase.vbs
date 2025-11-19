@@ -207,17 +207,17 @@ Function CreateDatabase()
     customData = Session.Property("CustomActionData")
     LogMessage "CreateDatabase: CustomActionData = " & customData
 
-    ' Parse the custom action data (formatted as: host|port|name|user|password|installdir)
+    ' Parse the custom action data (formatted as: host|port|name|user|password|installdir|version)
     Dim parts
     parts = Split(customData, "|")
 
     If UBound(parts) < 5 Then
-        LogMessage "CreateDatabase: ERROR - Not enough parameters. Expected 6, got " & (UBound(parts) + 1)
+        LogMessage "CreateDatabase: ERROR - Not enough parameters. Expected at least 6, got " & (UBound(parts) + 1)
         CreateDatabase = 1  ' Return success to not block install
         Exit Function
     End If
 
-    Dim dbHost, dbPort, dbName, dbUser, dbPassword, installFolder
+    Dim dbHost, dbPort, dbName, dbUser, dbPassword, installFolder, installerVersion
     dbHost = parts(0)
     dbPort = parts(1)
     dbName = parts(2)
@@ -225,8 +225,17 @@ Function CreateDatabase()
     dbPassword = parts(4)
     installFolder = parts(5)
 
+    ' Get installer version (parameter 7, optional for backwards compatibility)
+    If UBound(parts) >= 6 Then
+        installerVersion = parts(6)
+    Else
+        installerVersion = "0.0.0.0"
+        LogMessage "CreateDatabase: WARNING - InstallerVersion not provided, defaulting to 0.0.0.0"
+    End If
+
     LogMessage "CreateDatabase: DB_HOST = " & dbHost
     LogMessage "CreateDatabase: DB_PORT = " & dbPort
+    LogMessage "CreateDatabase: INSTALLER_VERSION = " & installerVersion
     LogMessage "CreateDatabase: DB_NAME = " & dbName
     LogMessage "CreateDatabase: DB_USER = " & dbUser
     LogMessage "CreateDatabase: DB_PASSWORD = " & String(Len(dbPassword), "*")
@@ -346,12 +355,16 @@ Function CreateDatabase()
         installFolder = installFolder & "\"
     End If
 
+    ' Note: installerVersion is already set from CustomActionData parsing above
+    LogMessage "CreateDatabase: Using installer version from CustomActionData: " & installerVersion
+
     ' Set environment variables for pro-upgrade
     env("DB_HOST") = dbHost
     env("DB_PORT") = dbPort
     env("DB_NAME") = dbName
     env("DB_USER") = dbUser
     env("DB_PASSWORD") = dbPassword
+    env("INSTALLER_VERSION") = installerVersion
 
     ' Path to pro-upgrade.exe
     Dim proUpgradeExe
@@ -365,11 +378,31 @@ Function CreateDatabase()
 
         ' Apply all migrations using embedded migrations (no --migrations-dir needed)
         Dim applyCmd, applyResult
-        applyCmd = """" & proUpgradeExe & """ apply-migrations"
+        ' Create a temporary batch file to set environment variables and run pro-upgrade
+        Dim batFilePath, batFile
+        batFilePath = installFolder & "bin\apply_migrations_temp.bat"
+
+        Set batFile = fso.CreateTextFile(batFilePath, True)
+        batFile.WriteLine "@echo off"
+        batFile.WriteLine "set DB_HOST=" & dbHost
+        batFile.WriteLine "set DB_PORT=" & dbPort
+        batFile.WriteLine "set DB_NAME=" & dbName
+        batFile.WriteLine "set DB_USER=" & dbUser
+        batFile.WriteLine "set DB_PASSWORD=" & dbPassword
+        batFile.WriteLine "set INSTALLER_VERSION=" & installerVersion
+        batFile.WriteLine """" & proUpgradeExe & """ apply-migrations"
+        batFile.Close
 
         LogMessage "CreateDatabase: Executing pro-upgrade apply-migrations (using embedded migrations)..."
-        LogMessage "CreateDatabase: Command: " & applyCmd
+        LogMessage "CreateDatabase: INSTALLER_VERSION=" & installerVersion
+        LogMessage "CreateDatabase: Batch file created at: " & batFilePath
+        applyCmd = """" & batFilePath & """"
         applyResult = shell.Run(applyCmd, 0, True)
+
+        ' Clean up batch file
+        If fso.FileExists(batFilePath) Then
+            fso.DeleteFile(batFilePath)
+        End If
 
         If applyResult = 0 Then
             LogMessage "CreateDatabase: SUCCESS - All migrations applied successfully"
@@ -395,9 +428,27 @@ Function CreateDatabase()
                 LogMessage "CreateDatabase: Successfully marked migrations 018-019 as skipped"
                 LogMessage "CreateDatabase: Retrying migration application for remaining migrations..."
 
-                ' Retry applying migrations
-                applyCmd = """" & proUpgradeExe & """ apply-migrations"
+                ' Retry applying migrations with environment variables
+                batFilePath = installFolder & "bin\apply_migrations_temp.bat"
+
+                Set batFile = fso.CreateTextFile(batFilePath, True)
+                batFile.WriteLine "@echo off"
+                batFile.WriteLine "set DB_HOST=" & dbHost
+                batFile.WriteLine "set DB_PORT=" & dbPort
+                batFile.WriteLine "set DB_NAME=" & dbName
+                batFile.WriteLine "set DB_USER=" & dbUser
+                batFile.WriteLine "set DB_PASSWORD=" & dbPassword
+                batFile.WriteLine "set INSTALLER_VERSION=" & installerVersion
+                batFile.WriteLine """" & proUpgradeExe & """ apply-migrations"
+                batFile.Close
+
+                applyCmd = """" & batFilePath & """"
                 applyResult = shell.Run(applyCmd, 0, True)
+
+                ' Clean up batch file
+                If fso.FileExists(batFilePath) Then
+                    fso.DeleteFile(batFilePath)
+                End If
 
                 If applyResult = 0 Then
                     LogMessage "CreateDatabase: SUCCESS - All critical migrations (020-024) applied successfully"

@@ -266,5 +266,20 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_rule_execution_stats",
             sql: include_str!("../../../migrations/051_add_rule_execution_stats.sql"),
         },
+        EmbeddedMigration {
+            version: "052",
+            name: "add_npi_registry_link",
+            sql: include_str!("../../../migrations/052_add_npi_registry_link.sql"),
+        },
+        EmbeddedMigration {
+            version: "053",
+            name: "add_837p_v2_fields",
+            sql: include_str!("../../../migrations/053_add_837p_v2_fields.sql"),
+        },
+        EmbeddedMigration {
+            version: "054",
+            name: "create_specialty_table",
+            sql: include_str!("../../../migrations/054_create_specialty_table.sql"),
+        },
     ]
 }

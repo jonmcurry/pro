@@ -257,6 +257,26 @@ async fn apply_migrations(pool: &sqlx::PgPool, migrations_dir: &Option<PathBuf>)
         MigrationManager::new_embedded(pool.clone())
     };
 
+    // Get version manager to track version changes
+    let version_manager = VersionManager::new(pool.clone());
+
+    // Detect installation type and get previous version if upgrading
+    let installation_type = version_manager.detect_installation_type().await?;
+    let previous_version = match &installation_type {
+        pro_upgrade_manager::version::InstallationType::Upgrade(version_info) => {
+            info!("Detected upgrade from version: {}", version_info.version);
+            Some(version_info.version.clone())
+        }
+        pro_upgrade_manager::version::InstallationType::Legacy => {
+            info!("Detected legacy installation (pre-version-tracking)");
+            Some("1.0.0".to_string()) // Legacy installations are considered 1.0.0
+        }
+        pro_upgrade_manager::version::InstallationType::Fresh => {
+            info!("Detected fresh installation");
+            None
+        }
+    };
+
     info!("Applying pending migrations...");
     let applied = migration_manager.apply_pending_migrations().await?;
 
@@ -264,10 +284,41 @@ async fn apply_migrations(pool: &sqlx::PgPool, migrations_dir: &Option<PathBuf>)
         println!("No migrations to apply");
     } else {
         println!("Successfully applied {} migrations:", applied.len());
-        for migration in applied {
+        for migration in &applied {
             println!("  - {}", migration);
         }
     }
+
+    // Always record version after applying migrations (even if no new migrations)
+    // This ensures version tracking is updated during upgrades
+    let new_version = std::env::var("INSTALLER_VERSION")
+        .unwrap_or_else(|_| {
+            // Fallback to workspace version from Cargo.toml
+            env!("CARGO_PKG_VERSION").to_string()
+        });
+
+    let notes = if applied.is_empty() {
+        if previous_version.is_some() {
+            "Upgraded to new version. No new database migrations required.".to_string()
+        } else {
+            "Fresh installation. All migrations up to date.".to_string()
+        }
+    } else {
+        if previous_version.is_some() {
+            format!("Upgraded from previous version. Applied {} migration(s).", applied.len())
+        } else {
+            format!("Fresh installation. Applied {} migration(s).", applied.len())
+        }
+    };
+
+    info!("Recording version {} in database", new_version);
+    version_manager.record_version(
+        &new_version,
+        previous_version.as_deref(),
+        Some(&notes),
+    ).await?;
+
+    println!("Version {} recorded successfully", new_version);
 
     Ok(())
 }

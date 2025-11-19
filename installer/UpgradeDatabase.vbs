@@ -115,7 +115,22 @@ Function UpgradeDatabase()
     LogMessage "UpgradeDatabase: INSTALLFOLDER = " & installFolder
     LogMessage "UpgradeDatabase: BACKUP_ENABLED = " & backupEnabled
 
-    ' Set environment variable for password
+    ' Get the installer version from the session property
+    Dim installerVersion
+    installerVersion = Session.Property("ProductVersion")
+    If Len(installerVersion) = 0 Then
+        ' Fallback to reading from registry if property not available
+        On Error Resume Next
+        installerVersion = shell.RegRead("HKLM\SOFTWARE\ProfessionalSMART\Version")
+        If Err.Number <> 0 Or Len(installerVersion) = 0 Then
+            installerVersion = "0.0.0.0"
+        End If
+        Err.Clear
+        On Error Goto 0
+    End If
+    LogMessage "UpgradeDatabase: Installer Version = " & installerVersion
+
+    ' Set environment variable for password and version
     Set env = shell.Environment("Process")
     env("PGPASSWORD") = dbPassword
     env("DB_HOST") = dbHost
@@ -123,6 +138,7 @@ Function UpgradeDatabase()
     env("DB_NAME") = dbName
     env("DB_USER") = dbUser
     env("DB_PASSWORD") = dbPassword
+    env("INSTALLER_VERSION") = installerVersion
 
     ' Ensure installFolder ends with a backslash
     If Right(installFolder, 1) <> "\" Then
@@ -146,7 +162,14 @@ Function UpgradeDatabase()
 
     ' Check current version
     LogMessage "UpgradeDatabase: Checking current database version..."
-    applyCmd = """" & proUpgradeExe & """ check-version"
+    applyCmd = "cmd.exe /c """ & _
+               "set DB_HOST=" & dbHost & " && " & _
+               "set DB_PORT=" & dbPort & " && " & _
+               "set DB_NAME=" & dbName & " && " & _
+               "set DB_USER=" & dbUser & " && " & _
+               "set DB_PASSWORD=" & dbPassword & " && " & _
+               "set INSTALLER_VERSION=" & installerVersion & " && " & _
+               Chr(34) & proUpgradeExe & Chr(34) & " check-version"""
 
     applyResult = shell.Run(applyCmd, 0, True)
 
@@ -168,7 +191,14 @@ Function UpgradeDatabase()
             LogMessage "UpgradeDatabase: Created backup directory: " & programDataFolder
         End If
 
-        applyCmd = """" & proUpgradeExe & """ backup-database --backup-dir """ & programDataFolder & """"
+        applyCmd = "cmd.exe /c """ & _
+                   "set DB_HOST=" & dbHost & " && " & _
+                   "set DB_PORT=" & dbPort & " && " & _
+                   "set DB_NAME=" & dbName & " && " & _
+                   "set DB_USER=" & dbUser & " && " & _
+                   "set DB_PASSWORD=" & dbPassword & " && " & _
+                   "set INSTALLER_VERSION=" & installerVersion & " && " & _
+                   Chr(34) & proUpgradeExe & Chr(34) & " backup-database --backup-dir " & Chr(34) & programDataFolder & Chr(34) & """"
 
         LogMessage "UpgradeDatabase: Executing backup..."
         applyResult = shell.Run(applyCmd, 0, True)
@@ -188,10 +218,31 @@ Function UpgradeDatabase()
     ' Apply pending migrations (using embedded migrations in pro-upgrade.exe)
     LogMessage "UpgradeDatabase: Applying pending database migrations using embedded migrations..."
 
-    applyCmd = """" & proUpgradeExe & """ apply-migrations"
+    ' Create a temporary batch file to set environment variables and run pro-upgrade
+    Dim batFilePath, batFile
+    batFilePath = installFolder & "bin\apply_migrations_temp.bat"
+
+    Set batFile = fso.CreateTextFile(batFilePath, True)
+    batFile.WriteLine "@echo off"
+    batFile.WriteLine "set DB_HOST=" & dbHost
+    batFile.WriteLine "set DB_PORT=" & dbPort
+    batFile.WriteLine "set DB_NAME=" & dbName
+    batFile.WriteLine "set DB_USER=" & dbUser
+    batFile.WriteLine "set DB_PASSWORD=" & dbPassword
+    batFile.WriteLine "set INSTALLER_VERSION=" & installerVersion
+    batFile.WriteLine """" & proUpgradeExe & """ apply-migrations"
+    batFile.Close
 
     LogMessage "UpgradeDatabase: Executing: pro-upgrade apply-migrations (using embedded migrations)"
+    LogMessage "UpgradeDatabase: INSTALLER_VERSION=" & installerVersion
+    LogMessage "UpgradeDatabase: Batch file created at: " & batFilePath
+    applyCmd = """" & batFilePath & """"
     applyResult = shell.Run(applyCmd, 0, True)
+
+    ' Clean up batch file
+    If fso.FileExists(batFilePath) Then
+        fso.DeleteFile(batFilePath)
+    End If
 
     If applyResult = 0 Then
         LogMessage "UpgradeDatabase: SUCCESS - All migrations applied successfully"
