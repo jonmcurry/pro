@@ -179,13 +179,14 @@ impl SequencedBatchAcquirer {
         for (claim_id, batch_id, patient_control_number, date_of_service, _ingested_at) in raw_claims {
             batch_id_set.insert(batch_id);
 
-            // Handle missing encounter fields
-            if patient_control_number.is_empty() || date_of_service.is_empty() {
-                warn!("Claim {} has missing encounter fields, skipping grouping", claim_id);
-                continue;
-            }
-
-            let encounter_key = (patient_control_number, date_of_service);
+            // Handle missing encounter fields - group them together under a special key
+            // This ensures they still get processed and marked as FAILED with proper error messages
+            let encounter_key = if patient_control_number.is_empty() || date_of_service.is_empty() {
+                warn!("Claim {} has missing encounter fields - will process and fail loudly", claim_id);
+                (format!("MISSING_FIELDS_{}", claim_id), "INVALID".to_string())
+            } else {
+                (patient_control_number, date_of_service)
+            };
 
             // Track encounter order for FIFO
             if !encounter_groups.contains_key(&encounter_key) {
