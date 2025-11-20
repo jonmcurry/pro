@@ -281,5 +281,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "create_specialty_table",
             sql: include_str!("../../../migrations/054_create_specialty_table.sql"),
         },
+        EmbeddedMigration {
+            version: "055",
+            name: "add_partial_status_to_import_batch",
+            sql: include_str!("../../../migrations/055_add_partial_status_to_import_batch.sql"),
+        },
     ]
 }
