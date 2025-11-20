@@ -2026,11 +2026,10 @@ impl ClaimsProcessor {
                     }
 
                     // Bulk insert error logs
-                    for (error_log_id, batch_id, record_number, error_message, raw_data) in error_log_inserts {
+                    for (_error_log_id, batch_id, record_number, error_message, raw_data) in error_log_inserts {
                         sqlx::query(
                             r#"
                             INSERT INTO staging.import_error_log (
-                                error_id,
                                 batch_id,
                                 record_number,
                                 error_type,
@@ -2038,10 +2037,9 @@ impl ClaimsProcessor {
                                 error_message,
                                 raw_data
                             )
-                            VALUES ($1, $2, $3, 'VALIDATION', 'ERROR', $4, $5)
+                            VALUES ($1, $2, 'VALIDATION', 'ERROR', $3, $4)
                             "#
                         )
-                        .bind(error_log_id)
                         .bind(batch_id)
                         .bind(record_number)
                         .bind(&error_message)

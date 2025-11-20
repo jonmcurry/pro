@@ -1519,7 +1519,6 @@ impl ClaimsImporter {
         sqlx::query(
             r#"
             INSERT INTO staging.import_error_log (
-                error_id,
                 batch_id,
                 record_number,
                 field_name,
@@ -1528,10 +1527,9 @@ impl ClaimsImporter {
                 error_message,
                 raw_data
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             "#
         )
-        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(record_number as i32)
         .bind(field_name)
