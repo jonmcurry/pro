@@ -210,7 +210,7 @@ impl EnrichmentWorker {
             .map(|pc| pc.replace("-", "").chars().take(9).collect::<String>());
 
         // Generate NPI Registry link
-        let npi_registry_link = format!("https://nppesapi.cms.hhs.gov/api/?version=2.1&number={}", npi);
+        let npi_registry_link = format!("https://npiregistry.cms.hhs.gov/api/?version=2.1&number={}", npi);
 
         // Update provider record with COALESCE to preserve existing non-null values
         sqlx::query(

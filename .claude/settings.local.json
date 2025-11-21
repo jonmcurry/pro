@@ -76,7 +76,13 @@
       "Bash(export DB_PASSWORD=ClearToFly1)",
       "Bash(cmd.exe /c c:Usersjonmcdevprotest_env.bat)",
       "Bash(cmd.exe /c C:temptest_installer_batch.bat)",
-      "Bash(cscript //nologo installer/CreateDatabase.vbs)"
+      "Bash(cscript //nologo installer/CreateDatabase.vbs)",
+      "Bash(Select-String \"Compiling pro-|Finished|error|warning: unused\")",
+      "Bash(cmd.exe /c build.bat)",
+      "Bash(git commit:*)",
+      "Bash(cmd.exe:*)",
+      "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\candle.exe\" -ext WixUtilExtension -dSolutionDir=\"c:/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
+      "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)"
     ],
     "deny": [],
     "ask": []
