@@ -4268,6 +4268,7 @@ dependencies = [
  "dotenvy",
  "futures",
  "notify",
+ "once_cell",
  "pro-common",
  "pro-db",
  "pro-npi-enrichment",

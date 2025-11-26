@@ -82,7 +82,9 @@
       "Bash(git commit:*)",
       "Bash(cmd.exe:*)",
       "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\candle.exe\" -ext WixUtilExtension -dSolutionDir=\"c:/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
-      "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)"
+      "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
+      "Bash(\"C:\\Program Files (x86)\\WiX Toolset v3.14\\bin\\candle.exe\":*)",
+      "Bash(cargo check:*)"
     ],
     "deny": [],
     "ask": []

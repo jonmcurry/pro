@@ -489,5 +489,5 @@ The system is designed to prioritize claims processing speed while still enrichi
 
 ---
 
-**Last Updated**: 2025-11-05
-**Version**: v1.6.8.0
+**Last Updated**: 2025-11-26
+**Version**: v2.8.4.0

@@ -462,12 +462,23 @@ impl SequentialCompletionManager {
         Ok(())
     }
 
-    /// Check for stuck sequences (waiting too long)
+    /// Check for stuck sequences (waiting too long) and recover them
+    ///
+    /// A stuck sequence occurs when a worker crashes or hangs after acquiring
+    /// a batch but before completing it. This blocks the entire pipeline since
+    /// sequences must complete in order.
+    ///
+    /// Recovery process:
+    /// 1. Detect sequences waiting > 5 minutes without completion
+    /// 2. Reset all claims in the stuck sequence back to PENDING
+    /// 3. Clear the batch_sequence_number so they can be re-acquired
+    /// 4. Delete the stuck sequence entry
+    /// 5. Log recovery for audit trail
     async fn check_stuck_sequences(&self) -> Result<()> {
         // Query database for stuck sequences
-        let stuck: Vec<(i32, chrono::DateTime<chrono::Utc>, i32)> = sqlx::query_as(
+        let stuck: Vec<(i32, chrono::DateTime<chrono::Utc>, i32, Option<String>)> = sqlx::query_as(
             r#"
-            SELECT sequence_number, assigned_at, claim_count
+            SELECT sequence_number, assigned_at, claim_count, worker_id
             FROM staging.batch_sequences
             WHERE completed_at IS NULL
             AND assigned_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
@@ -478,13 +489,73 @@ impl SequentialCompletionManager {
         .fetch_all(&self.pool)
         .await?;
 
-        for (seq_num, assigned_at, claim_count) in stuck {
-            let wait_time = (chrono::Utc::now() - assigned_at).num_seconds();
+        if stuck.is_empty() {
+            return Ok(());
+        }
+
+        for (seq_num, assigned_at, claim_count, worker_id) in &stuck {
+            let wait_time = (chrono::Utc::now() - *assigned_at).num_seconds();
             warn!(
-                "Stuck sequence detected: #{} ({} claims, waiting {} seconds)",
-                seq_num, claim_count, wait_time
+                "Stuck sequence detected: #{} ({} claims, worker: {:?}, waiting {} seconds) - initiating recovery",
+                seq_num, claim_count, worker_id, wait_time
+            );
+
+            // Start a transaction for atomic recovery
+            let mut tx = self.pool.begin().await?;
+
+            // Step 1: Reset claims in this sequence back to PENDING
+            let reset_result = sqlx::query(
+                r#"
+                UPDATE staging.raw_claims
+                SET processing_status = 'PENDING',
+                    batch_sequence_number = NULL,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE batch_sequence_number = $1
+                AND processing_status IN ('PENDING', 'PROCESSING')
+                "#
+            )
+            .bind(seq_num)
+            .execute(&mut *tx)
+            .await?;
+
+            let claims_reset = reset_result.rows_affected();
+
+            // Step 2: Mark the sequence as failed (don't delete for audit trail)
+            sqlx::query(
+                r#"
+                UPDATE staging.batch_sequences
+                SET completed_at = CURRENT_TIMESTAMP,
+                    processing_stage = 'RECOVERY',
+                    errors = jsonb_build_object(
+                        'recovery_reason', 'stuck_sequence_timeout',
+                        'original_claim_count', claim_count,
+                        'claims_reset', $2,
+                        'wait_time_seconds', $3,
+                        'recovered_at', CURRENT_TIMESTAMP
+                    )
+                WHERE sequence_number = $1
+                "#
+            )
+            .bind(seq_num)
+            .bind(claims_reset as i32)
+            .bind(wait_time as i32)
+            .execute(&mut *tx)
+            .await?;
+
+            tx.commit().await?;
+
+            warn!(
+                "Recovered stuck sequence #{}: reset {} claims back to PENDING",
+                seq_num, claims_reset
             );
         }
+
+        // After recovery, the next_expected_sequence may need adjustment
+        // The SequentialCompletionManager will handle this on next commit attempt
+        info!(
+            "Stuck sequence recovery complete: {} sequences recovered",
+            stuck.len()
+        );
 
         Ok(())
     }

@@ -9,6 +9,7 @@
 //! - Stage 2: staging.raw_claims -> encounters/errors (validated processing) - THIS MODULE
 
 use anyhow::{Context, Result};
+use pro_common::DEFAULT_DATE;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -434,7 +435,7 @@ impl ClaimsProcessor {
         let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
         let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()); // Fallback to 1900-01-01
+            .unwrap_or(*DEFAULT_DATE); // Fallback to 1900-01-01
 
         // Optional fields
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
@@ -739,7 +740,7 @@ impl ClaimsProcessor {
         let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
         let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-            .unwrap_or_else(|_| chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap()); // Fallback to 1900-01-01
+            .unwrap_or(*DEFAULT_DATE); // Fallback to 1900-01-01
 
         // Optional fields - subscriber demographics
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());

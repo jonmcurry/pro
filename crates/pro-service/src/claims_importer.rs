@@ -73,7 +73,7 @@ impl ClaimsImporter {
         };
 
         // Calculate file hash for deduplication
-        let file_hash = self.calculate_file_hash(file_path)?;
+        let file_hash = self.calculate_file_hash(file_path).await?;
 
         // Get facility info from file
         let (facility_id, org_id) = self.extract_facility_info(file_path, &file_ext_lower).await?;
@@ -225,28 +225,50 @@ impl ClaimsImporter {
     }
 
     /// Calculate SHA-256 hash of file for deduplication
-    fn calculate_file_hash(&self, file_path: &Path) -> Result<String> {
+    ///
+    /// Uses async sleep for retry delays to avoid blocking the tokio runtime.
+    /// File I/O is performed in a blocking task to avoid blocking the async executor.
+    async fn calculate_file_hash(&self, file_path: &Path) -> Result<String> {
         use sha2::{Sha256, Digest};
 
+        let file_path_owned = file_path.to_path_buf();
+
         // Retry logic for file access (handles cases where file is still being written or locked)
-        let mut last_error = None;
-        for attempt in 1..=5 {
-            match std::fs::File::open(file_path) {
-                Ok(mut file) => {
-                    let mut hasher = Sha256::new();
-                    std::io::copy(&mut file, &mut hasher)
-                        .with_context(|| format!("Failed to read file for hashing: {}", file_path.display()))?;
-                    let hash = hasher.finalize();
+        let mut last_error: Option<String> = None;
+        for attempt in 1..=5u64 {
+            let path_clone = file_path_owned.clone();
+
+            // Perform blocking file I/O in a dedicated thread pool
+            let result = tokio::task::spawn_blocking(move || -> Result<String> {
+                let mut file = std::fs::File::open(&path_clone)
+                    .with_context(|| format!("Failed to open file: {}", path_clone.display()))?;
+                let mut hasher = Sha256::new();
+                std::io::copy(&mut file, &mut hasher)
+                    .with_context(|| format!("Failed to read file for hashing: {}", path_clone.display()))?;
+                let hash = hasher.finalize();
+                Ok(format!("{:x}", hash))
+            }).await;
+
+            match result {
+                Ok(Ok(hash)) => {
                     if attempt > 1 {
                         info!("Successfully opened file on attempt {}: {}", attempt, file_path.display());
                     }
-                    return Ok(format!("{:x}", hash));
+                    return Ok(hash);
+                }
+                Ok(Err(e)) => {
+                    warn!("Failed to open file (attempt {}): {} - Error: {}", attempt, file_path.display(), e);
+                    last_error = Some(e.to_string());
+                    if attempt < 5 {
+                        // Use async sleep to avoid blocking the tokio runtime
+                        tokio::time::sleep(std::time::Duration::from_millis(1000 * attempt)).await;
+                    }
                 }
                 Err(e) => {
-                    warn!("Failed to open file (attempt {}): {} - Error: {}", attempt, file_path.display(), e);
-                    last_error = Some(e);
+                    warn!("Task join error (attempt {}): {} - Error: {}", attempt, file_path.display(), e);
+                    last_error = Some(e.to_string());
                     if attempt < 5 {
-                        std::thread::sleep(std::time::Duration::from_millis(1000 * attempt));
+                        tokio::time::sleep(std::time::Duration::from_millis(1000 * attempt)).await;
                     }
                 }
             }
@@ -628,11 +650,14 @@ impl ClaimsImporter {
 
         info!("====== STAGE 1: Starting EDI file ingestion to staging: {} ======", file_path_str);
 
+        // Validate queue_id once at the start - required for EDI ingestion
+        let queue_id = queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?;
+
         // Get batch_id from queue (it was created during enqueue_file)
         let batch_id: i64 = sqlx::query_scalar(
             "SELECT import_batch_id FROM staging.file_processing_queue WHERE queue_id = $1"
         )
-        .bind(queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?)
+        .bind(queue_id)
         .fetch_one(&self.pool)
         .await
         .context("Failed to get batch_id from queue")?;
@@ -663,7 +688,7 @@ impl ClaimsImporter {
 
         // Log PARSE metric
         if let Err(e) = self.log_processing_metric_with_stage(
-            queue_id.unwrap(),
+            queue_id,
             "FILE_PROCESSING",
             "PARSE",
             parse_start,
@@ -965,7 +990,7 @@ impl ClaimsImporter {
                 "#
             )
             .bind(batch_id)
-            .bind(queue_id.unwrap())
+            .bind(queue_id)
             .bind(&encounter_fields_json)
             .bind(&service_line_fields_json)
             .bind(&diagnosis_fields_json)
@@ -1002,7 +1027,7 @@ impl ClaimsImporter {
 
         // Log INGEST metric
         if let Err(e) = self.log_processing_metric_with_stage(
-            queue_id.unwrap(),
+            queue_id,
             "FILE_PROCESSING",
             "INGEST",
             ingest_start,

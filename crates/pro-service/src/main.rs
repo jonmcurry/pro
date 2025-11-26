@@ -26,6 +26,12 @@ mod claims_importer;  // Stage 1: File -> staging.raw_claims
 mod claims_processor; // Stage 2: staging.raw_claims -> encounters/errors
 mod batch_sequencer;  // Sequential completion for strict FIFO ordering
 
+// Extracted modules from god object refactoring
+mod builders;        // Entity builders (encounter, service line, diagnosis, provider)
+mod raw_claim_reader; // Raw claim reading and status management
+mod batch_manager;   // Batch status and metrics management
+mod metrics;         // Comprehensive metrics collection
+
 // Constants for service metadata
 #[cfg(windows)]
 const SERVICE_DISPLAY_NAME: &str = "Professional SMART Claims Processing Service";
@@ -322,8 +328,12 @@ async fn run_console_mode() -> Result<()> {
         .to_string();
 
     // Set up processed and error directories
-    let processed_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("processed");
-    let error_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("error");
+    // Handle case where input_dir might not have a parent (e.g., root directory)
+    let input_path = std::path::PathBuf::from(&input_dir);
+    let parent_dir = input_path.parent()
+        .ok_or_else(|| anyhow::anyhow!("Input directory '{}' has no parent directory", input_dir))?;
+    let processed_dir = parent_dir.join("processed");
+    let error_dir = parent_dir.join("error");
 
     // Create directories if they don't exist
     std::fs::create_dir_all(&processed_dir)?;

@@ -286,5 +286,25 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "add_partial_status_to_import_batch",
             sql: include_str!("../../../migrations/055_add_partial_status_to_import_batch.sql"),
         },
+        EmbeddedMigration {
+            version: "056",
+            name: "create_archive_system",
+            sql: include_str!("../../../migrations/056_create_archive_system.sql"),
+        },
+        EmbeddedMigration {
+            version: "057",
+            name: "create_dashboard_materialized_views",
+            sql: include_str!("../../../migrations/057_create_dashboard_materialized_views.sql"),
+        },
+        EmbeddedMigration {
+            version: "058",
+            name: "change_cascade_to_restrict",
+            sql: include_str!("../../../migrations/058_change_cascade_to_restrict.sql"),
+        },
+        EmbeddedMigration {
+            version: "059",
+            name: "fifo_optimization_and_recovery",
+            sql: include_str!("../../../migrations/059_fifo_optimization_and_recovery.sql"),
+        },
     ]
 }

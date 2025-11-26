@@ -1,7 +1,7 @@
 # Migration Status Report
 
-**Date**: 2025-11-06
-**MSI Version**: 1.7.0
+**Date**: 2025-11-26
+**MSI Version**: 2.8.2.0
 **Status**: ✅ All migrations embedded in MSI
 
 ---
@@ -104,7 +104,7 @@ light.exe -out ProfessionalSMART.msi *.wixobj
 **Size**: 11 MB
 **Build Time**: 09:06 AM
 **SHA256**: `4316101F52C1A910993F180D845B8911379B6B3C5D23EE42549404CFE6E22F6C`
-**Version**: 1.7.0
+**Version**: 2.8.2.0
 
 **Included Migrations**: 001-051 (all embedded)
 
@@ -245,7 +245,7 @@ See [RULE_CONFIGURATION_GUIDE.md](RULE_CONFIGURATION_GUIDE.md) for complete docu
 
 **Impact**: Rule configuration features unavailable until upgrade
 
-**Resolution**: Install MSI 1.7.0 - migrations apply automatically
+**Resolution**: Install MSI 2.8.2.0 - migrations apply automatically
 
 ---
 
@@ -277,7 +277,7 @@ See [RULE_CONFIGURATION_GUIDE.md](RULE_CONFIGURATION_GUIDE.md) for complete docu
 **Option 1**: Revert to previous version
 ```powershell
 msiexec /x ProfessionalSMART.msi /qn
-msiexec /i ProfessionalSMART-1.6.8.msi /qn
+# Install previous version MSI if available
 ```
 
 **Option 2**: Manually rollback migrations
@@ -320,12 +320,12 @@ DELETE FROM staging.schema_migrations WHERE migration_name IN (
 
 ✅ **Fixed**: Added migrations 050-051 to embedded_migrations.rs
 ✅ **Rebuilt**: Binary and MSI now include all migrations (001-051)
-✅ **Ready**: MSI 1.7.0 can be deployed
+**Ready**: MSI 2.8.2.0 can be deployed
 ⏳ **Next**: Deploy to development for testing
 
 **MSI Location**: `installer/ProfessionalSMART.msi`
 **SHA256**: `4316101F52C1A910993F180D845B8911379B6B3C5D23EE42549404CFE6E22F6C`
-**Version**: 1.7.0
+**Version**: 2.8.2.0
 
 On next deployment, all pending migrations (041-051) will apply automatically, enabling:
 - Rule configuration without recompilation

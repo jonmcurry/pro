@@ -2,8 +2,8 @@
 
 Complete guide to rules storage, facility assignment, and creating ad-hoc flags without recompilation.
 
-**Last Updated**: 2025-11-06
-**Version**: 1.7.0
+**Last Updated**: 2025-11-26
+**Version**: 2.8.2.0
 
 ---
 

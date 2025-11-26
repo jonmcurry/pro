@@ -2,7 +2,7 @@
 
 use crate::segments::*;
 use crate::types::*;
-use pro_common::{Error, Result};
+use pro_common::{Error, Result, DEFAULT_DATE};
 
 /// Helper function to write debug output to file
 /// Falls back to using tracing::info! if file write fails
@@ -283,7 +283,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         auto_accident_state: None,
         auto_accident_country: None,
 
-        date_of_service_from: chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+        date_of_service_from: *DEFAULT_DATE,
         date_of_service_to: None,
         onset_of_illness_date: None,
         initial_treatment_date: None,
@@ -716,7 +716,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     line_item_charge_amount: rust_decimal::Decimal::ZERO,
                     unit_basis_measurement_code: String::new(),
                     service_unit_count: rust_decimal::Decimal::ZERO,
-                    service_date_from: chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+                    service_date_from: *DEFAULT_DATE,
                     service_date_to: None,
                     place_of_service_code: None,
                     emergency_indicator: None,
@@ -817,8 +817,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
 
     // If claim-level dates are still default (1900-01-01), copy from first service line
     // This handles cases where DTP*472 appears only at service line level
-    let default_date = chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap();
-    if claim.date_of_service_from == default_date && !claim.service_lines.is_empty() {
+    if claim.date_of_service_from == *DEFAULT_DATE && !claim.service_lines.is_empty() {
         claim.date_of_service_from = claim.service_lines[0].service_date_from;
         claim.date_of_service_to = claim.service_lines[0].service_date_to;
     }
@@ -839,7 +838,7 @@ pub fn parse_service_line(segments: &[EdiSegment], line_number: i16) -> Result<S
         line_item_charge_amount: rust_decimal::Decimal::ZERO,
         unit_basis_measurement_code: String::new(),
         service_unit_count: rust_decimal::Decimal::ZERO,
-        service_date_from: chrono::NaiveDate::from_ymd_opt(1900, 1, 1).unwrap(),
+        service_date_from: *DEFAULT_DATE,
         service_date_to: None,
         place_of_service_code: None,
         emergency_indicator: None,

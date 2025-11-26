@@ -1,6 +1,6 @@
 # Professional SMART
 
-**Version**: 1.5.30.0 | **Release Date**: November 4, 2025
+**Version**: 2.8.7.0 | **Release Date**: November 26, 2025
 
 A comprehensive healthcare claims auditing and analytics system for processing 837p professional claims and CSV files with automated flagging, rules engine, RVU-based reimbursement estimation, and denial tracking.
 
@@ -24,21 +24,15 @@ Professional SMART is a Windows-based application designed to help healthcare or
 ```
 pro/
 ├── Cargo.toml                    # Workspace configuration
-├── migrations/                   # PostgreSQL migration files
-│   ├── 001_create_schemas.sql
-│   ├── 002_create_organization_tables.sql
-│   ├── 003_create_provider_tables.sql
-│   ├── 004_create_encounter_tables.sql
-│   ├── 005_create_diagnosis_procedure_tables.sql
-│   ├── 006_create_flag_tables.sql
-│   ├── 007_create_staging_tables.sql
-│   ├── 008_create_audit_tables.sql
-│   ├── 009_create_rvu_tables.sql
-│   ├── 010_create_denial_tables.sql
-│   ├── 011_create_schedule_tables.sql
-│   ├── 012_create_ml_tables.sql
-│   ├── 013_create_dashboard_views.sql
-│   └── 014_create_utility_functions.sql
+├── migrations/                   # PostgreSQL migration files (59 total)
+│   ├── 001_create_schemas.sql           # Schema definitions
+│   ├── 002-010_*.sql                    # Core tables
+│   ├── 012-014_*.sql                    # ML, views, functions
+│   ├── 015-024_*.sql                    # FIFO queue, performance
+│   ├── 030-039_*.sql                    # Advanced features
+│   ├── 041-051_*.sql                    # Rules, enrichment
+│   ├── 052-059_*.sql                    # NPI, archive, optimization
+│   └── (See DATABASE_SCHEMA_REFERENCE.md for complete list)
 ├── crates/
 │   ├── pro-common/              # Shared types, errors, validation
 │   ├── pro-db/                  # Database access layer
@@ -46,14 +40,16 @@ pro/
 │   ├── pro-parser-csv/          # Dynamic CSV parser
 │   ├── pro-rules/               # Rules engine and flagging
 │   ├── pro-rvu/                 # RVU calculation and reimbursement
-│   ├── pro-api/                 # REST API with Axum
 │   ├── pro-worker/              # Background processing worker
-│   └── pro-ml/                  # Machine learning models
+│   ├── pro-ml/                  # Machine learning models
+│   ├── pro-service/             # Windows service with WebSocket API
+│   ├── pro-upgrade/             # Database upgrade tool
+│   ├── pro-upgrade-manager/     # Migration management
+│   ├── pro-npi-enrichment/      # NPI registry lookup
+│   └── pro-setup/               # First-time setup tool
 ├── docs/
 │   ├── CLAUDE.md                # Project rules and guidelines
 │   ├── INSTALLATION.md          # Installation guide (MSI and manual)
-│   ├── EDI_PARSING.md          # 837P EDI parser documentation
-│   ├── CHANGELOG.md            # Version history and release notes
 │   ├── CONFIGURATION.md        # System configuration guide
 │   ├── DATABASE_SETUP.md       # Database setup and migration guide
 │   ├── srd.md                  # Software Requirements Document
@@ -66,7 +62,7 @@ pro/
 
 ## Database Schema
 
-The application uses PostgreSQL with three schemas:
+The application uses PostgreSQL with five schemas:
 
 ### staging
 - **import_batch**: File import tracking and processing metrics
@@ -180,8 +176,8 @@ SERVER_PORT=3000
 ## Current Status
 
 ### Completed
-- [x] Database schema design with 14 migration files
-- [x] Three-schema architecture (staging, claims, ml)
+- [x] Database schema design with 59 migration files
+- [x] Five-schema architecture (staging, claims, ml, analytics, archive)
 - [x] Comprehensive views for dashboards
 - [x] Utility functions and performance indexes
 - [x] Rust workspace structure
@@ -198,13 +194,18 @@ SERVER_PORT=3000
 - [x] File watcher and batch processing
 - [x] MSI installer with automated setup
 
+### Completed
+- [x] Rules engine implementation (pro-rules)
+- [x] Flagging system (11 categories)
+- [x] RVU calculation engine (pro-rvu)
+- [x] WebSocket API endpoints (pro-service)
+- [x] Background worker service (pro-worker)
+- [x] ML model integration (pro-ml)
+- [x] FIFO processing with strict ordering
+- [x] Stuck sequence recovery
+- [x] NPI enrichment (pro-npi-enrichment)
+
 ### Pending
-- [ ] Rules engine implementation
-- [ ] Flagging system
-- [ ] RVU calculation engine
-- [ ] REST API endpoints
-- [ ] Background worker service
-- [ ] ML model integration
 - [ ] Windows GUI installer
 - [ ] Comprehensive test suite
 - [ ] Deployment documentation

@@ -1,7 +1,7 @@
 # Facility Rule Configuration Guide
 
-**Date**: 2025-11-05
-**Version**: v1.6.9.0
+**Date**: 2025-11-26
+**Version**: v2.8.4.0
 **Status**: Phase 2 Complete
 
 ---

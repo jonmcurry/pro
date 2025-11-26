@@ -311,8 +311,17 @@ pub fn run_service() -> Result<()> {
         // Initialize file watcher and claims importer
         let input_dir = std::env::var("INPUT_DIR")
             .unwrap_or_else(|_| "C:\\Program Files\\Professional SMART\\data\\input".to_string());
-        let processed_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("processed");
-        let error_dir = std::path::PathBuf::from(&input_dir).parent().unwrap().join("error");
+        // Handle case where input_dir might not have a parent (e.g., root directory)
+        let input_path = std::path::PathBuf::from(&input_dir);
+        let parent_dir = match input_path.parent() {
+            Some(p) => p,
+            None => {
+                error!("Input directory '{}' has no parent directory - cannot create processed/error directories", input_dir);
+                return;
+            }
+        };
+        let processed_dir = parent_dir.join("processed");
+        let error_dir = parent_dir.join("error");
 
         info!("Initializing claims processing...");
         info!("Input directory: {}", input_dir);

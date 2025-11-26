@@ -4,6 +4,7 @@ pub mod connection;
 pub mod repositories;
 pub mod models;
 pub mod models_interned; // PHASE 6: String interning optimization
+pub mod traits;
 pub mod validation;
 
 // Re-export commonly used items
@@ -14,3 +15,4 @@ pub use validation::{
     BusinessRuleValidator, ValidationResult, DuplicateStatus,
     EncounterValidation, ServiceLineValidation,
 };
+pub use traits::{Repository, EncounterRepositoryTrait, ProviderRepositoryTrait};

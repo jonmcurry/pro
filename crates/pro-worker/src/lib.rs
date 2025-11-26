@@ -18,12 +18,17 @@
 // 6. Persist to database
 // 7. Update processing statistics
 
+pub mod claim_processor;
+pub mod converters;
+pub mod file_processor;
 pub mod pipeline;
+pub mod progress; // PHASE 5: Real-time progress tracking
 pub mod queue_manager;
 pub mod types;
-pub mod progress; // PHASE 5: Real-time progress tracking
 
 // Re-export commonly used items
+pub use claim_processor::ClaimProcessor;
+pub use file_processor::FileProcessor;
 pub use pipeline::IngestionPipeline;
 pub use queue_manager::{QueueManager, QueueStatus, QueuedFile};
 pub use types::{

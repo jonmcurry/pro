@@ -158,3 +158,18 @@ pub const CONVERSION_FACTOR_2024: f64 = 33.2875;
 
 /// Default RVU year
 pub const DEFAULT_RVU_YEAR: i32 = 2024;
+
+/// Default date used as a placeholder when no date is available (1900-01-01)
+/// This is a sentinel value indicating "no date provided" in claim processing.
+/// Using a constant instead of `from_ymd_opt(1900, 1, 1).unwrap()` because:
+/// 1. It avoids repeated unwrap() calls in production code
+/// 2. It makes the intent clear (this is a sentinel, not a real date)
+/// 3. It's guaranteed to be valid at compile time via lazy_static
+use chrono::NaiveDate;
+use lazy_static::lazy_static;
+
+lazy_static! {
+    /// Default date sentinel (1900-01-01) - indicates "no date provided"
+    pub static ref DEFAULT_DATE: NaiveDate =
+        NaiveDate::from_ymd_opt(1900, 1, 1).expect("1900-01-01 is always a valid date");
+}

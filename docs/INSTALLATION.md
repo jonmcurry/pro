@@ -2,8 +2,8 @@
 
 This guide provides step-by-step instructions for installing the Professional SMART claims processing system on Windows.
 
-**Current Version**: 1.5.30.0
-**Release Date**: November 4, 2025
+**Current Version**: 2.8.2.0
+**Release Date**: November 26, 2025
 
 ## Quick Start (MSI Installer)
 
@@ -206,20 +206,43 @@ C:\Users\YourUsername\pro\.env
 ```
 
 ### Add Configuration
+Copy from `.env.example` and customize. Key settings:
+
 ```env
-# Database Configuration
+# Database Configuration (required)
 DATABASE_URL=postgres://pro_user:your_secure_password@localhost:5432/professional_smart
-DATABASE_MAX_CONNECTIONS=50
-DATABASE_MIN_CONNECTIONS=5
 
-# Application Configuration
+# Database pool settings
+DB_MAX_CONNECTIONS=100
+DB_MIN_CONNECTIONS=10
+DB_ACQUIRE_TIMEOUT=30
+DB_IDLE_TIMEOUT=600
+DB_MAX_LIFETIME=1800
+
+# Logging (optional)
 RUST_LOG=info
-RUST_BACKTRACE=1
+LOG_FORMAT=pretty
 
-# Performance Settings
-BATCH_SIZE=1000
-MAX_WORKERS=4
+# Environment
+ENVIRONMENT=production
+
+# Worker Configuration
+BATCH_SIZE=100
+MAX_CONCURRENT_BATCHES=4
+
+# File processing paths (used by Windows service)
+INPUT_DIR=C:\Program Files\Professional SMART\data\input
+
+# Performance Tuning
+RULE_CACHE_TTL=3600
+ENABLE_PARALLEL_RULES=true
 ```
+
+See `.env.example` for complete configuration options including:
+- Streaming processing (ENABLE_STREAMING)
+- WebSocket server (WEBSOCKET_HOST)
+- Security settings (JWT_SECRET, rate limiting)
+- Development settings (SQLX_LOGGING, DEV_DISABLE_AUTH)
 
 ## Step 7: Build the Application
 

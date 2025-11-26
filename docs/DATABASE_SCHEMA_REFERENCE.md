@@ -2,8 +2,8 @@
 
 **Professional Smart Claims Processing System**
 **Database: PostgreSQL 14+**
-**Version: 1.0 (45 Migrations Applied)**
-**Generated: 2025-11-05**
+**Version: 2.8.3.0 (56 Migrations Applied)**
+**Generated: 2025-11-26**
 
 ---
 
@@ -26,13 +26,13 @@
 
 | Metric | Count |
 |--------|-------|
-| **Total Schemas** | 4 (claims, staging, ml, analytics) |
-| **Total Tables** | 60+ |
-| **Total Columns** | 800+ |
-| **Total Indexes** | 200+ |
-| **Total Views** | 20+ |
+| **Total Schemas** | 5 (claims, staging, ml, analytics, archive) |
+| **Total Tables** | 70+ |
+| **Total Columns** | 850+ |
+| **Total Indexes** | 220+ |
+| **Total Views** | 25+ |
 | **Materialized Views** | 6 |
-| **Functions/Procedures** | 15+ |
+| **Functions/Procedures** | 20+ |
 
 ### Key Design Decisions
 
@@ -2312,12 +2312,23 @@ Examples:
 | 043 | FK indexes | 2025-11-05 | Missing foreign key indexes (CONCURRENTLY) |
 | 044 | Taxonomy FK | 2025-11-05 | Foreign key from provider to provider_taxonomy |
 | 045 | Staging FKs | 2025-11-05 | Foreign keys for import tracking columns |
+| 046 | Rule configuration | 2025-11-06 | Rule configuration system (staging.rules_configuration) |
+| 047 | Test facility rules | 2025-11-06 | Test data for facility rule assignments |
+| 048 | Rule templates | 2025-11-06 | Rule template definitions |
+| 049 | Flag issue helpers | 2025-11-06 | Helper functions for flag creation |
+| 050 | Performance indexes | 2025-11-06 | Additional indexes for query optimization |
+| 051 | Rule execution stats | 2025-11-06 | Rule execution statistics tracking |
+| 052 | NPI Registry link | 2025-11-13 | Direct NPPES API link column on provider |
+| 053 | 837p v2 fields | 2025-11-18 | Additional 837p fields (REF*D9, AMT*F5, CR1, PWK, CRC, HCP) |
+| 054 | Specialty table | 2025-11-18 | Medicare specialty codes (150+ codes) with taxonomy mapping |
+| 055 | PARTIAL status | 2025-11-20 | Added PARTIAL status to import_batch constraint |
+| 056 | Archive system | 2025-11-26 | Archive schema with procedures for data archival |
 
-**Migration Count**: 45 migrations applied
+**Migration Count**: 56 migrations applied (001-056, excluding 040)
 
-**Database Version**: 1.0
+**Database Version**: 2.8.3.0
 
-**Schema Evolution**: Stable (20+ migrations since October 2024)
+**Schema Evolution**: Active (11 migrations added in November 2025)
 
 ---
 
@@ -2325,13 +2336,14 @@ Examples:
 
 ### Table Count by Schema
 
-| Schema | Tables | Views | Materialized Views |
-|--------|--------|-------|-------------------|
-| claims | 35 | 15+ | 0 |
-| staging | 15 | 5+ | 0 |
-| ml | 6 | 0 | 0 |
-| analytics | 0 | 0 | 6 |
-| **Total** | **56** | **20+** | **6** |
+| Schema | Tables | Views | Materialized Views | Functions |
+|--------|--------|-------|-------------------|-----------|
+| claims | 36 | 16+ | 0 | 2 |
+| staging | 15 | 5+ | 0 | 0 |
+| ml | 6 | 0 | 0 | 0 |
+| analytics | 0 | 0 | 6 | 0 |
+| archive | 8 | 1 | 0 | 3 |
+| **Total** | **65** | **22+** | **6** | **5** |
 
 ### Primary Key Data Type
 
@@ -2378,4 +2390,39 @@ All primary keys: **BIGINT GENERATED ALWAYS AS IDENTITY**
 **Database Platform**: PostgreSQL 14+
 **Application**: Professional Smart Claims Processing System
 **Maintained By**: Development Team
-**Last Updated**: 2025-11-05
+**Last Updated**: 2025-11-26
+
+---
+
+## Recent Schema Changes (November 2025)
+
+### Migration 052: NPI Registry Link
+- Added `npi_registry_link` column to `claims.provider`
+- Stores direct NPPES API link for each provider
+- Auto-populated during NPI enrichment
+
+### Migration 053: 837p v2 Fields
+Added comprehensive 837p parsing support:
+- **Encounter fields**: `claim_number`, `patient_responsibility_amount`, ambulance transport info (CR1), paperwork info (PWK), condition codes (CRC)
+- **Service line fields**: `allowed_amount`, `saving_amount` (HCP segment)
+
+### Migration 054: Specialty Table
+- Created `claims.specialty` table with 150+ Medicare specialty codes
+- Added `specialty_id` FK to `claims.provider_taxonomy`
+- Created `claims.provider_specialty_view` for convenient lookups
+- Deprecated direct `claims.provider.specialty` column
+
+### Migration 055: PARTIAL Import Status
+- Added 'PARTIAL' to import_batch status constraint
+- Handles batches where some claims succeed and some fail
+
+### Migration 056: Archive System
+Created complete archive infrastructure:
+- **Schema**: `archive`
+- **Archive tables**: encounter, service_line, encounter_diagnosis, encounter_flag, service_line_flag, import_batch, raw_claims, archive_log
+- **Functions**:
+  - `archive.archive_encounters(cutoff_date, org_id, facility_id)` - Archives encounters older than cutoff
+  - `archive.archive_import_batches(cutoff_date, org_id)` - Archives import batches
+  - `archive.restore_encounters(encounter_ids)` - Restores archived encounters
+- **Views**: `archive.v_archive_statistics` - Summary of archived data
+- **Safety**: Requires 90-day minimum age, won't archive active claims
