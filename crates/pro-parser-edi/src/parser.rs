@@ -284,18 +284,31 @@ impl EdiParser {
     fn parse_claims(&self, segments: &[EdiSegment]) -> Result<Vec<ParsedClaim>> {
         let mut claims = Vec::new();
         let mut current_claim_segments = Vec::new();
+        let mut subscriber_segments: Vec<EdiSegment> = Vec::new(); // Segments from HL*22 (subscriber level)
         let mut in_subscriber_loop = false;
+        let mut in_patient_loop = false;
         let mut in_claim = false;
 
         for segment in segments {
             match segment.segment_id.as_str() {
                 "HL" => {
-                    // Check if this is a subscriber hierarchical level (HL*...*23)
-                    // HL segment format: HL*id*parent_id*level_code
+                    // HL segment format: HL*id*parent_id*level_code*child_code
                     if let Some(level_code) = segment.get_optional(2) {
-                        if level_code == "23" {
-                            // This is a subscriber level - start collecting segments
-                            in_subscriber_loop = true;
+                        match level_code.as_str() {
+                            "22" => {
+                                // Subscriber level (2000B) - contains NM1*IL, NM1*PR, SBR, etc.
+                                // Reset subscriber segments for new subscriber
+                                subscriber_segments.clear();
+                                in_subscriber_loop = true;
+                                in_patient_loop = false;
+                                in_claim = false;
+                            }
+                            "23" => {
+                                // Patient level (2000C) - claims follow under this
+                                in_subscriber_loop = false;
+                                in_patient_loop = true;
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -308,7 +321,9 @@ impl EdiParser {
                         current_claim_segments.clear();
                     }
                     in_claim = true;
-                    in_subscriber_loop = false; // No longer in subscriber loop
+                    in_subscriber_loop = false;
+                    // Prepend subscriber-level segments (NM1*PR, NM1*IL, SBR, etc.) to this claim
+                    current_claim_segments = subscriber_segments.clone();
                     current_claim_segments.push(segment.clone());
                 }
                 "SE" => {
@@ -320,14 +335,19 @@ impl EdiParser {
                     }
                     in_claim = false;
                     in_subscriber_loop = false;
+                    in_patient_loop = false;
                 }
                 // Collect subscriber-level segments (SBR, NM1, DMG, etc.) that appear before CLM
-                "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" => {
+                "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" | "PAT" => {
                     if in_subscriber_loop && !in_claim {
-                        // Subscriber-level segment before CLM - collect it
-                        current_claim_segments.push(segment.clone());
+                        // Subscriber-level segment (Loop 2000B/2010BA/2010BB) - save for all claims under this subscriber
+                        subscriber_segments.push(segment.clone());
+                    } else if in_patient_loop && !in_claim {
+                        // Patient-level segment (Loop 2000C/2010CA) - also save to subscriber segments
+                        // These apply to claims under this patient
+                        subscriber_segments.push(segment.clone());
                     } else if in_claim {
-                        // Already in claim - collect it
+                        // Already in claim - collect it (claim-level NM1 like NM1*82 rendering provider)
                         current_claim_segments.push(segment.clone());
                     }
                 }
@@ -384,16 +404,31 @@ impl EdiParser {
 
             // Stream claims one at a time
             let mut current_claim_segments = Vec::new();
+            let mut subscriber_segments: Vec<EdiSegment> = Vec::new(); // Segments from HL*22 (subscriber level)
             let mut in_subscriber_loop = false;
+            let mut in_patient_loop = false;
             let mut in_claim = false;
 
             for segment in segments {
                 match segment.segment_id.as_str() {
                     "HL" => {
-                        // Check if this is a subscriber hierarchical level (HL*...*23)
+                        // HL segment format: HL*id*parent_id*level_code*child_code
                         if let Some(level_code) = segment.get_optional(2) {
-                            if level_code == "23" {
-                                in_subscriber_loop = true;
+                            match level_code.as_str() {
+                                "22" => {
+                                    // Subscriber level (2000B) - contains NM1*IL, NM1*PR, SBR, etc.
+                                    // Reset subscriber segments for new subscriber
+                                    subscriber_segments.clear();
+                                    in_subscriber_loop = true;
+                                    in_patient_loop = false;
+                                    in_claim = false;
+                                }
+                                "23" => {
+                                    // Patient level (2000C) - claims follow under this
+                                    in_subscriber_loop = false;
+                                    in_patient_loop = true;
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -409,6 +444,8 @@ impl EdiParser {
                         }
                         in_claim = true;
                         in_subscriber_loop = false;
+                        // Prepend subscriber-level segments (NM1*PR, NM1*IL, SBR, etc.) to this claim
+                        current_claim_segments = subscriber_segments.clone();
                         current_claim_segments.push(segment.clone());
                     }
                     "SE" => {
@@ -422,12 +459,18 @@ impl EdiParser {
                         }
                         in_claim = false;
                         in_subscriber_loop = false;
+                        in_patient_loop = false;
                     }
                     // Collect subscriber-level segments (SBR, NM1, DMG, etc.) that appear before CLM
-                    "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" => {
+                    "SBR" | "DMG" | "NM1" | "N3" | "N4" | "REF" | "PER" | "PAT" => {
                         if in_subscriber_loop && !in_claim {
-                            current_claim_segments.push(segment.clone());
+                            // Subscriber-level segment (Loop 2000B/2010BA/2010BB) - save for all claims under this subscriber
+                            subscriber_segments.push(segment.clone());
+                        } else if in_patient_loop && !in_claim {
+                            // Patient-level segment (Loop 2000C/2010CA) - also save to subscriber segments
+                            subscriber_segments.push(segment.clone());
                         } else if in_claim {
+                            // Already in claim - collect it (claim-level NM1 like NM1*82 rendering provider)
                             current_claim_segments.push(segment.clone());
                         }
                     }

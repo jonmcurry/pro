@@ -983,10 +983,11 @@ impl ClaimsImporter {
                     service_line_fields,
                     diagnosis_fields,
                     row_number,
+                    facility_code,
                     processing_status,
                     date_of_service_from
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'PENDING', $8)
                 "#
             )
             .bind(batch_id)
@@ -995,6 +996,7 @@ impl ClaimsImporter {
             .bind(&service_line_fields_json)
             .bind(&diagnosis_fields_json)
             .bind(row_number)
+            .bind(&facility_code)
             .bind(claim.date_of_service_from)
             .execute(&mut *tx)
             .await
