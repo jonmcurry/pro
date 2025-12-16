@@ -89,7 +89,19 @@
       "Bash(\"C:/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -sice:ICE03 -sice:ICE17 -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
       "Bash(Select-String \"Compiling|Finished|error|warning: unused\")",
       "Bash(\"C:/Program Files (x86)/WiX Toolset v3.14/bin/candle.exe\" -ext WixUtilExtension -dSolutionDir=\"c:/Users/jonmc/dev/pro/\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
-      "Bash(\"C:/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\":*)"
+      "Bash(\"C:/Program Files (x86)/WiX Toolset v3.14/bin/light.exe\":*)",
+      "Bash(cargo test:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"\"\"=== {} ===\"\"\"\" && tail -5 {}')",
+      "Bash(while read f)",
+      "Bash(do if grep -q '/\\*' \"$f\")",
+      "Bash(then echo \"$f\")",
+      "Bash(for:*)",
+      "Bash(do tail -5 \"$f\")",
+      "Bash(do if tail -10 \"$f\")",
+      "Bash(sort:*)",
+      "Bash(git push:*)"
     ],
     "deny": [],
     "ask": []
