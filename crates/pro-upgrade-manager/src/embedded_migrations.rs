@@ -306,5 +306,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "fifo_optimization_and_recovery",
             sql: include_str!("../../../migrations/059_fifo_optimization_and_recovery.sql"),
         },
+        EmbeddedMigration {
+            version: "060",
+            name: "add_patient_fields",
+            sql: include_str!("../../../migrations/060_add_patient_fields.sql"),
+        },
+        EmbeddedMigration {
+            version: "061",
+            name: "fix_patient_relationship_code_length",
+            sql: include_str!("../../../migrations/061_fix_patient_relationship_code_length.sql"),
+        },
     ]
 }

@@ -414,8 +414,11 @@ impl ClaimsProcessor {
 
         // Optional fields
         let submitter_id = encounter_fields.get("submitter_id").unwrap_or(facility_code);
+        // Truncate payer_responsibility_code to 1 char (CHAR(1) in DB, must be 'P' or 'S')
         let payer_responsibility_code = encounter_fields.get("payer_responsibility_code")
-            .map(|s| s.as_str()).unwrap_or("P");
+            .map(|s| s.as_str())
+            .map(|s| if s.len() > 1 { &s[..1] } else { s })
+            .unwrap_or("P");
 
         // Calculate total claim charge from ALL service lines
         let mut total_claim_charge = rust_decimal::Decimal::ZERO;
@@ -440,8 +443,38 @@ impl ClaimsProcessor {
         // Optional fields
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
         let payer_name = encounter_fields.get("payer_name").map(|s| s.as_str());
-        let place_of_service = encounter_fields.get("place_of_service_code").map(|s| s.as_str());
+        // Truncate place_of_service to 2 chars (VARCHAR(2) in DB)
+        let place_of_service = encounter_fields.get("place_of_service_code")
+            .map(|s| s.as_str())
+            .map(|s| if s.len() > 2 { &s[..2] } else { s });
         let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
+
+        // Patient fields (when patient is different from subscriber)
+        let patient_last_name = encounter_fields.get("patient_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_first_name = encounter_fields.get("patient_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_middle_name = encounter_fields.get("patient_middle_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_name_suffix = encounter_fields.get("patient_name_suffix").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_dob_str = encounter_fields.get("patient_date_of_birth").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_dob = patient_dob_str.and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        // Truncate patient_gender to 1 char (CHAR(1) in DB)
+        let patient_gender = encounter_fields.get("patient_gender")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| if s.len() > 1 { &s[..1] } else { s });
+        let patient_address_line1 = encounter_fields.get("patient_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_address_line2 = encounter_fields.get("patient_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_city = encounter_fields.get("patient_city").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        // Truncate patient_state to 2 chars (CHAR(2) in DB)
+        let patient_state = encounter_fields.get("patient_state")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| if s.len() > 2 { &s[..2] } else { s });
+        let patient_postal_code = encounter_fields.get("patient_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        // Truncate patient_relationship_code to 3 chars (VARCHAR(3) in DB after migration 061)
+        let patient_relationship_code = encounter_fields.get("patient_relationship_code")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| if s.len() > 3 { &s[..3] } else { s });
 
         // Extract provider NPIs and names (with empty string filtering)
         let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
@@ -459,6 +492,20 @@ impl ClaimsProcessor {
 
         let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        // Service Facility information (Loop 2310C - NM1*77, N3, N4)
+        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        // Log service facility fields for debugging
+        info!("Service facility from encounter_fields: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
+            service_facility_npi, service_facility_name, service_facility_address_line1,
+            service_facility_city, service_facility_state);
 
         // Ensure providers exist in claims.provider table and get their provider_ids
         let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
@@ -613,9 +660,29 @@ impl ClaimsProcessor {
                 referring_provider_id,
                 supervising_provider_id,
                 billing_provider_id,
-                claim_status
+                claim_status,
+                patient_last_name,
+                patient_first_name,
+                patient_middle_name,
+                patient_name_suffix,
+                patient_date_of_birth,
+                patient_gender,
+                patient_address_line1,
+                patient_address_line2,
+                patient_city,
+                patient_state,
+                patient_postal_code,
+                patient_relationship_code,
+                service_facility_npi,
+                service_facility_name,
+                service_facility_address_line1,
+                service_facility_address_line2,
+                service_facility_city,
+                service_facility_state,
+                service_facility_postal_code
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
             RETURNING encounter_id
             "#
         )
@@ -641,8 +708,42 @@ impl ClaimsProcessor {
         .bind(supervising_provider_id)
         .bind(billing_provider_id)
         .bind("NEW")
+        .bind(patient_last_name)
+        .bind(patient_first_name)
+        .bind(patient_middle_name)
+        .bind(patient_name_suffix)
+        .bind(patient_dob)
+        .bind(patient_gender)
+        .bind(patient_address_line1)
+        .bind(patient_address_line2)
+        .bind(patient_city)
+        .bind(patient_state)
+        .bind(patient_postal_code)
+        .bind(patient_relationship_code)
+        .bind(service_facility_npi)
+        .bind(service_facility_name)
+        .bind(service_facility_address_line1)
+        .bind(service_facility_address_line2)
+        .bind(service_facility_city)
+        .bind(service_facility_state)
+        .bind(service_facility_postal_code)
         .fetch_one(&mut **tx)
         .await
+        .map_err(|e| {
+            error!("Database error inserting encounter: {:?}", e);
+            error!("  patient_control_number={}, facility_id={:?}, organization_id={}",
+                patient_control_number, facility_id, organization_id);
+            // Log all VARCHAR(2) and CHAR fields to identify which is too long
+            error!("  DEBUG field lengths: place_of_service={:?}(len={}), payer_responsibility={:?}(len={})",
+                place_of_service, place_of_service.map(|s| s.len()).unwrap_or(0),
+                payer_responsibility_code, payer_responsibility_code.len());
+            error!("  DEBUG patient fields: gender={:?}(len={}), state={:?}(len={}), relationship={:?}(len={})",
+                patient_gender, patient_gender.map(|s| s.len()).unwrap_or(0),
+                patient_state, patient_state.map(|s| s.len()).unwrap_or(0),
+                patient_relationship_code, patient_relationship_code.map(|s| s.len()).unwrap_or(0));
+            error!("  DEBUG service_facility: npi={:?}, name={:?}", service_facility_npi, service_facility_name);
+            e
+        })
         .context("Failed to insert encounter")?;
 
         // Insert all service lines for this encounter
@@ -722,8 +823,10 @@ impl ClaimsProcessor {
         // Optional fields with defaults
         let submitter_id = encounter_fields.get("submitter_id")
             .unwrap_or(facility_code);
+        // Truncate payer_responsibility_code to 1 char (CHAR(1) in DB, must be 'P' or 'S')
         let payer_responsibility_code = encounter_fields.get("payer_responsibility_code")
             .map(|s| s.as_str())
+            .map(|s| if s.len() > 1 { &s[..1] } else { s })
             .unwrap_or("P");
 
         // Parse service line fields if present
@@ -765,11 +868,16 @@ impl ClaimsProcessor {
         let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str());
-        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str());
-        let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str());
-        let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str());
-        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str());
+        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+
+        // Debug: Log service facility fields from raw_claims
+        info!("Service facility from raw_claims: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
+            service_facility_npi, service_facility_name, service_facility_address_line1,
+            service_facility_city, service_facility_state);
         let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
@@ -1304,33 +1412,38 @@ impl ClaimsProcessor {
         let pointer_3 = pointers.get(2).and_then(|s| s.trim().parse::<i16>().ok());
         let pointer_4 = pointers.get(3).and_then(|s| s.trim().parse::<i16>().ok());
 
-        // Extract procedure modifiers (filter out empty strings)
+        // Helper function to truncate to 2 chars for VARCHAR(2) columns
+        fn truncate_2(s: &str) -> &str {
+            if s.len() > 2 { &s[..2] } else { s }
+        }
+
+        // Extract procedure modifiers (filter out empty strings) - truncate to 2 chars (VARCHAR(2))
         let modifier_1 = service_line_fields.get(&format!("{}modifier_1", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
         let modifier_2 = service_line_fields.get(&format!("{}modifier_2", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
         let modifier_3 = service_line_fields.get(&format!("{}modifier_3", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
         let modifier_4 = service_line_fields.get(&format!("{}modifier_4", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
 
-        // Extract additional service line fields with prefix
+        // Extract additional service line fields with prefix - truncate VARCHAR(2) fields
         let product_service_id_qualifier = service_line_fields.get(&format!("{}product_service_id_qualifier", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
+            .map(|s| truncate_2(s.as_str()))
             .unwrap_or("HC"); // Default to HCPCS
         let unit_basis_measurement_code = service_line_fields.get(&format!("{}unit_basis_measurement_code", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
         let service_date_to = service_line_fields.get(&format!("{}date_to", prefix))
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
         let place_of_service_code = service_line_fields.get(&format!("{}place_of_service_code", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
 
         // Convert EDI Y/N indicators to boolean values
         let emergency_indicator = service_line_fields.get(&format!("{}emergency_indicator", prefix))
@@ -1518,9 +1631,10 @@ impl ClaimsProcessor {
             .map(|s| s.as_str());
         let sl_ndc_unit_count = service_line_fields.get(&format!("{}ndc_unit_count", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        // Truncate ndc_measurement_unit to 2 chars (VARCHAR(2) in DB)
         let sl_ndc_measurement_unit = service_line_fields.get(&format!("{}ndc_measurement_unit", prefix))
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+            .map(|s| truncate_2(s.as_str()));
 
         // Phase 3.7: Authorization and referral information
         let sl_prior_authorization = service_line_fields.get(&format!("{}prior_authorization_number", prefix))
@@ -2166,28 +2280,42 @@ impl ClaimsProcessor {
             let last_name_value = last_name.unwrap_or("Unknown");
             let first_name_value = first_name.unwrap_or("");
 
-            // Lookup specialty from taxonomy code if provided
-            let specialty = if let Some(tax_code) = taxonomy_code {
-                sqlx::query_scalar::<_, String>(
-                    r#"
-                    SELECT specialty_display
-                    FROM claims.provider_taxonomy
-                    WHERE taxonomy_code = $1 AND is_active = true
-                    "#
-                )
-                .bind(tax_code)
-                .fetch_optional(&mut **tx)
-                .await
-                .unwrap_or(None)
+            // Lookup specialty from taxonomy code if provided AND validate taxonomy exists in reference table
+            // If taxonomy code doesn't exist in provider_taxonomy, we must NOT insert it (FK constraint)
+            let (validated_taxonomy_code, specialty) = if let Some(tax_code) = taxonomy_code {
+                if tax_code.is_empty() {
+                    (None, None)
+                } else {
+                    // Check if taxonomy exists and get specialty in one query
+                    let result: Option<String> = sqlx::query_scalar(
+                        r#"
+                        SELECT specialty_display
+                        FROM claims.provider_taxonomy
+                        WHERE taxonomy_code = $1 AND is_active = true
+                        "#
+                    )
+                    .bind(tax_code)
+                    .fetch_optional(&mut **tx)
+                    .await
+                    .unwrap_or(None);
+
+                    if result.is_some() {
+                        // Taxonomy exists, use it
+                        (Some(tax_code), result)
+                    } else {
+                        // Taxonomy doesn't exist in reference table - set to NULL to avoid FK violation
+                        warn!("Taxonomy code '{}' not found in provider_taxonomy table, setting to NULL for provider NPI={}",
+                            tax_code, npi);
+                        (None, None)
+                    }
+                }
             } else {
-                None
+                (None, None)
             };
 
             // Log if taxonomy lookup succeeded
             if let Some(ref spec) = specialty {
-                debug!("Mapped taxonomy {} to specialty: {}", taxonomy_code.unwrap_or(""), spec);
-            } else if taxonomy_code.is_some() && !taxonomy_code.unwrap().is_empty() {
-                warn!("No specialty mapping found for taxonomy code: {}", taxonomy_code.unwrap());
+                debug!("Mapped taxonomy {} to specialty: {}", validated_taxonomy_code.unwrap_or(""), spec);
             }
 
             // Try to insert the provider. Use DO NOTHING to reduce lock contention.
@@ -2218,7 +2346,7 @@ impl ClaimsProcessor {
             .bind(last_name_value)
             .bind(first_name_value)
             .bind(middle_name)
-            .bind(taxonomy_code)
+            .bind(validated_taxonomy_code) // Use validated taxonomy (NULL if not in reference table)
             .bind(specialty.as_deref())
             .bind(organization_id)
             .fetch_optional(&mut **tx)

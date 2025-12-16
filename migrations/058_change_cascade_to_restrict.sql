@@ -6,11 +6,11 @@
 -- Critical tables affected:
 -- - encounter_diagnosis (child of encounter)
 -- - service_line (child of encounter)
--- - service_line_diagnosis (child of service_line and diagnosis)
+-- - service_line_diagnosis_pointer (child of service_line and diagnosis)
 -- - encounter_flag (child of encounter)
 -- - service_line_flag (child of service_line)
 -- - denial_event (child of encounter)
--- - rvu_calculation (child of service_line)
+-- - service_line_adjustment (child of service_line)
 --
 -- NOTE: Some CASCADE relationships are intentionally kept:
 -- - staging tables (import_batch children) - temporary data, OK to cascade
@@ -38,20 +38,20 @@ ADD CONSTRAINT service_line_encounter_id_fkey
 FOREIGN KEY (encounter_id) REFERENCES claims.encounter(encounter_id) ON DELETE RESTRICT;
 
 -- ============================================================================
--- CLAIMS.SERVICE_LINE_DIAGNOSIS - Links service lines to diagnoses
+-- CLAIMS.SERVICE_LINE_DIAGNOSIS_POINTER - Links service lines to diagnoses
 -- ============================================================================
-ALTER TABLE claims.service_line_diagnosis
-DROP CONSTRAINT IF EXISTS service_line_diagnosis_service_line_id_fkey;
+ALTER TABLE claims.service_line_diagnosis_pointer
+DROP CONSTRAINT IF EXISTS service_line_diagnosis_pointer_service_line_id_fkey;
 
-ALTER TABLE claims.service_line_diagnosis
-ADD CONSTRAINT service_line_diagnosis_service_line_id_fkey
+ALTER TABLE claims.service_line_diagnosis_pointer
+ADD CONSTRAINT service_line_diagnosis_pointer_service_line_id_fkey
 FOREIGN KEY (service_line_id) REFERENCES claims.service_line(service_line_id) ON DELETE RESTRICT;
 
-ALTER TABLE claims.service_line_diagnosis
-DROP CONSTRAINT IF EXISTS service_line_diagnosis_diagnosis_id_fkey;
+ALTER TABLE claims.service_line_diagnosis_pointer
+DROP CONSTRAINT IF EXISTS service_line_diagnosis_pointer_diagnosis_id_fkey;
 
-ALTER TABLE claims.service_line_diagnosis
-ADD CONSTRAINT service_line_diagnosis_diagnosis_id_fkey
+ALTER TABLE claims.service_line_diagnosis_pointer
+ADD CONSTRAINT service_line_diagnosis_pointer_diagnosis_id_fkey
 FOREIGN KEY (diagnosis_id) REFERENCES claims.encounter_diagnosis(diagnosis_id) ON DELETE RESTRICT;
 
 -- ============================================================================
@@ -93,23 +93,13 @@ ADD CONSTRAINT denial_event_service_line_id_fkey
 FOREIGN KEY (service_line_id) REFERENCES claims.service_line(service_line_id) ON DELETE RESTRICT;
 
 -- ============================================================================
--- CLAIMS.RVU_CALCULATION - Important: Financial/billing data
+-- CLAIMS.SERVICE_LINE_ADJUSTMENT - Important: Financial/billing data
 -- ============================================================================
-ALTER TABLE claims.rvu_calculation
-DROP CONSTRAINT IF EXISTS rvu_calculation_service_line_id_fkey;
+ALTER TABLE claims.service_line_adjustment
+DROP CONSTRAINT IF EXISTS service_line_adjustment_service_line_id_fkey;
 
-ALTER TABLE claims.rvu_calculation
-ADD CONSTRAINT rvu_calculation_service_line_id_fkey
-FOREIGN KEY (service_line_id) REFERENCES claims.service_line(service_line_id) ON DELETE RESTRICT;
-
--- ============================================================================
--- CLAIMS.SERVICE_LINE_MODIFIER - Service line child
--- ============================================================================
-ALTER TABLE claims.service_line_modifier
-DROP CONSTRAINT IF EXISTS service_line_modifier_service_line_id_fkey;
-
-ALTER TABLE claims.service_line_modifier
-ADD CONSTRAINT service_line_modifier_service_line_id_fkey
+ALTER TABLE claims.service_line_adjustment
+ADD CONSTRAINT service_line_adjustment_service_line_id_fkey
 FOREIGN KEY (service_line_id) REFERENCES claims.service_line(service_line_id) ON DELETE RESTRICT;
 
 -- ============================================================================
@@ -150,24 +140,19 @@ DECLARE
     v_deleted BOOLEAN := FALSE;
 BEGIN
     -- Delete child records in proper order
-    DELETE FROM claims.service_line_diagnosis sld
+    DELETE FROM claims.service_line_diagnosis_pointer sld
     USING claims.service_line sl
     WHERE sld.service_line_id = sl.service_line_id
     AND sl.encounter_id = p_encounter_id;
 
-    DELETE FROM claims.service_line_modifier slm
+    DELETE FROM claims.service_line_adjustment sla
     USING claims.service_line sl
-    WHERE slm.service_line_id = sl.service_line_id
+    WHERE sla.service_line_id = sl.service_line_id
     AND sl.encounter_id = p_encounter_id;
 
     DELETE FROM claims.service_line_flag slf
     USING claims.service_line sl
     WHERE slf.service_line_id = sl.service_line_id
-    AND sl.encounter_id = p_encounter_id;
-
-    DELETE FROM claims.rvu_calculation rc
-    USING claims.service_line sl
-    WHERE rc.service_line_id = sl.service_line_id
     AND sl.encounter_id = p_encounter_id;
 
     DELETE FROM claims.denial_appeal da

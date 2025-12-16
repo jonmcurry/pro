@@ -755,6 +755,20 @@ impl ClaimsImporter {
             encounter_fields.insert("subscriber_country".to_string(), serde_json::json!(claim.subscriber_country.clone().unwrap_or_default()));
             encounter_fields.insert("medical_record_number".to_string(), serde_json::json!(claim.medical_record_number.clone().unwrap_or_default()));
 
+            // Patient information (when patient is different from subscriber - Loop 2000C/2010CA)
+            encounter_fields.insert("patient_last_name".to_string(), serde_json::json!(claim.patient_last_name.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_first_name".to_string(), serde_json::json!(claim.patient_first_name.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_middle_name".to_string(), serde_json::json!(claim.patient_middle_name.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_name_suffix".to_string(), serde_json::json!(claim.patient_name_suffix.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_date_of_birth".to_string(), serde_json::json!(claim.patient_date_of_birth.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+            encounter_fields.insert("patient_gender".to_string(), serde_json::json!(claim.patient_gender.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_address_line1".to_string(), serde_json::json!(claim.patient_address_line1.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_address_line2".to_string(), serde_json::json!(claim.patient_address_line2.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_city".to_string(), serde_json::json!(claim.patient_city.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_state".to_string(), serde_json::json!(claim.patient_state.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_postal_code".to_string(), serde_json::json!(claim.patient_postal_code.clone().unwrap_or_default()));
+            encounter_fields.insert("patient_relationship_code".to_string(), serde_json::json!(claim.patient_relationship_code.clone().unwrap_or_default()));
+
             // Payer information
             encounter_fields.insert("payer_name".to_string(), serde_json::json!(claim.payer_name));
             encounter_fields.insert("payer_id".to_string(), serde_json::json!(claim.payer_id));
@@ -850,8 +864,15 @@ impl ClaimsImporter {
             encounter_fields.insert("billing_provider_name".to_string(), serde_json::json!(transaction.billing_provider.organization_name.clone().unwrap_or_default()));
             encounter_fields.insert("billing_provider_tax_id".to_string(), serde_json::json!(transaction.billing_provider.tax_id.clone().unwrap_or_default()));
 
+            // Service Facility information (Loop 2310C - NM1*77, N3, N4)
+            // NPI and name are independent - populate whichever is available
             encounter_fields.insert("service_facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));
             encounter_fields.insert("service_facility_name".to_string(), serde_json::json!(claim.service_facility_name.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_address_line1".to_string(), serde_json::json!(claim.service_facility_address_line1.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_address_line2".to_string(), serde_json::json!(claim.service_facility_address_line2.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_city".to_string(), serde_json::json!(claim.service_facility_city.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_state".to_string(), serde_json::json!(claim.service_facility_state.clone().unwrap_or_default()));
+            encounter_fields.insert("service_facility_postal_code".to_string(), serde_json::json!(claim.service_facility_postal_code.clone().unwrap_or_default()));
 
             // CRITICAL: facility_npi for Stage 2 facility resolution
             encounter_fields.insert("facility_npi".to_string(), serde_json::json!(claim.service_facility_npi.clone().unwrap_or_default()));

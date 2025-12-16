@@ -15,67 +15,80 @@ COMMENT ON SCHEMA archive IS 'Archive schema for storing old/historical data tha
 -- ARCHIVE TABLES - Mirror structure of main tables
 -- ==============================================================================
 
--- Archive table for encounters
-CREATE TABLE archive.encounter (
-    LIKE claims.encounter INCLUDING ALL
-);
-
--- Remove identity from archive table (we preserve original IDs)
-ALTER TABLE archive.encounter ALTER COLUMN encounter_id DROP IDENTITY IF EXISTS;
+-- Archive table for encounters (using DO block for idempotency since LIKE doesn't support IF NOT EXISTS)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'encounter') THEN
+        CREATE TABLE archive.encounter (LIKE claims.encounter INCLUDING ALL);
+        ALTER TABLE archive.encounter ALTER COLUMN encounter_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.encounter IS 'Archived encounters removed from active claims.encounter table';
 
 -- Archive table for service lines
-CREATE TABLE archive.service_line (
-    LIKE claims.service_line INCLUDING ALL
-);
-
-ALTER TABLE archive.service_line ALTER COLUMN service_line_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'service_line') THEN
+        CREATE TABLE archive.service_line (LIKE claims.service_line INCLUDING ALL);
+        ALTER TABLE archive.service_line ALTER COLUMN service_line_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.service_line IS 'Archived service lines removed from active claims.service_line table';
 
 -- Archive table for encounter diagnoses
-CREATE TABLE archive.encounter_diagnosis (
-    LIKE claims.encounter_diagnosis INCLUDING ALL
-);
-
-ALTER TABLE archive.encounter_diagnosis ALTER COLUMN diagnosis_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'encounter_diagnosis') THEN
+        CREATE TABLE archive.encounter_diagnosis (LIKE claims.encounter_diagnosis INCLUDING ALL);
+        ALTER TABLE archive.encounter_diagnosis ALTER COLUMN diagnosis_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.encounter_diagnosis IS 'Archived diagnoses removed from active claims.encounter_diagnosis table';
 
 -- Archive table for encounter flags
-CREATE TABLE archive.encounter_flag (
-    LIKE claims.encounter_flag INCLUDING ALL
-);
-
-ALTER TABLE archive.encounter_flag ALTER COLUMN flag_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'encounter_flag') THEN
+        CREATE TABLE archive.encounter_flag (LIKE claims.encounter_flag INCLUDING ALL);
+        ALTER TABLE archive.encounter_flag ALTER COLUMN flag_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.encounter_flag IS 'Archived encounter flags removed from active claims.encounter_flag table';
 
 -- Archive table for service line flags
-CREATE TABLE archive.service_line_flag (
-    LIKE claims.service_line_flag INCLUDING ALL
-);
-
-ALTER TABLE archive.service_line_flag ALTER COLUMN flag_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'service_line_flag') THEN
+        CREATE TABLE archive.service_line_flag (LIKE claims.service_line_flag INCLUDING ALL);
+        ALTER TABLE archive.service_line_flag ALTER COLUMN flag_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.service_line_flag IS 'Archived service line flags removed from active claims.service_line_flag table';
 
 -- Archive table for import batches
-CREATE TABLE archive.import_batch (
-    LIKE staging.import_batch INCLUDING ALL
-);
-
-ALTER TABLE archive.import_batch ALTER COLUMN batch_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'import_batch') THEN
+        CREATE TABLE archive.import_batch (LIKE staging.import_batch INCLUDING ALL);
+        ALTER TABLE archive.import_batch ALTER COLUMN batch_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.import_batch IS 'Archived import batches removed from active staging.import_batch table';
 
 -- Archive table for raw claims
-CREATE TABLE archive.raw_claims (
-    LIKE staging.raw_claims INCLUDING ALL
-);
-
-ALTER TABLE archive.raw_claims ALTER COLUMN raw_claim_id DROP IDENTITY IF EXISTS;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'archive' AND table_name = 'raw_claims') THEN
+        CREATE TABLE archive.raw_claims (LIKE staging.raw_claims INCLUDING ALL);
+        ALTER TABLE archive.raw_claims ALTER COLUMN raw_claim_id DROP IDENTITY IF EXISTS;
+    END IF;
+END $$;
 
 COMMENT ON TABLE archive.raw_claims IS 'Archived raw claims removed from active staging.raw_claims table';
 
@@ -83,7 +96,7 @@ COMMENT ON TABLE archive.raw_claims IS 'Archived raw claims removed from active 
 -- ARCHIVE METADATA TABLE
 -- ==============================================================================
 
-CREATE TABLE archive.archive_log (
+CREATE TABLE IF NOT EXISTS archive.archive_log (
     archive_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     archive_type VARCHAR(50) NOT NULL, -- ENCOUNTER, IMPORT_BATCH
     archived_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -97,8 +110,8 @@ CREATE TABLE archive.archive_log (
     notes TEXT
 );
 
-CREATE INDEX idx_archive_log_type ON archive.archive_log(archive_type);
-CREATE INDEX idx_archive_log_date ON archive.archive_log(archived_at);
+CREATE INDEX IF NOT EXISTS idx_archive_log_type ON archive.archive_log(archive_type);
+CREATE INDEX IF NOT EXISTS idx_archive_log_date ON archive.archive_log(archived_at);
 
 COMMENT ON TABLE archive.archive_log IS 'Audit log of all archive operations';
 
@@ -504,25 +517,22 @@ FROM archive.raw_claims;
 COMMENT ON VIEW archive.v_archive_statistics IS 'Summary statistics of archived data';
 
 -- ==============================================================================
--- USAGE EXAMPLES (as comments)
+-- USAGE EXAMPLES
 -- ==============================================================================
-
-/*
 -- Archive all encounters older than 1 year:
-SELECT * FROM archive.archive_encounters('2024-11-26'::DATE);
-
+--   SELECT * FROM archive.archive_encounters('2024-11-26'::DATE);
+--
 -- Archive encounters for a specific organization:
-SELECT * FROM archive.archive_encounters('2024-11-26'::DATE, 1, NULL, 'admin_user');
-
+--   SELECT * FROM archive.archive_encounters('2024-11-26'::DATE, 1, NULL, 'admin_user');
+--
 -- Archive import batches older than 6 months:
-SELECT * FROM archive.archive_import_batches('2025-05-26'::DATE);
-
+--   SELECT * FROM archive.archive_import_batches('2025-05-26'::DATE);
+--
 -- View archive statistics:
-SELECT * FROM archive.v_archive_statistics;
-
+--   SELECT * FROM archive.v_archive_statistics;
+--
 -- View archive history:
-SELECT * FROM archive.archive_log ORDER BY archived_at DESC;
-
+--   SELECT * FROM archive.archive_log ORDER BY archived_at DESC;
+--
 -- Restore specific encounters:
-SELECT * FROM archive.restore_encounters(ARRAY[123, 456, 789]);
-*/
+--   SELECT * FROM archive.restore_encounters(ARRAY[123, 456, 789]);

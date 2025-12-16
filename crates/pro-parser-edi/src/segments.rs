@@ -258,17 +258,19 @@ impl SbrSegment {
 }
 
 /// Parse CLM segment (Claim Information)
-/// Format: CLM*patient_control_number*charge_amount*claim_filing_indicator*place_of_service*...
+/// Format: CLM*patient_control_number*charge_amount***facility_type_composite*signature*assignment*benefits*release
+/// CLM05 is a composite field: place_of_service:facility_code_qualifier:claim_frequency_code
 pub struct ClmSegment {
     pub patient_control_number: String,
     pub total_claim_charge_amount: Decimal,
     pub claim_filing_indicator_code: Option<String>,
-    pub place_of_service_code: Option<String>,
-    pub claim_frequency_code: Option<String>,
-    pub provider_signature_indicator: Option<String>,
-    pub assignment_indicator: Option<String>,
-    pub benefits_assignment_indicator: Option<String>,
-    pub release_information_code: Option<String>,
+    pub place_of_service_code: Option<String>,       // CLM05-1
+    pub facility_code_qualifier: Option<String>,     // CLM05-2
+    pub claim_frequency_code: Option<String>,        // CLM05-3
+    pub provider_signature_indicator: Option<String>, // CLM06
+    pub assignment_indicator: Option<String>,         // CLM07
+    pub benefits_assignment_indicator: Option<String>, // CLM08
+    pub release_information_code: Option<String>,     // CLM09
 }
 
 impl ClmSegment {
@@ -279,16 +281,34 @@ impl ClmSegment {
 
         let charge_amount = parse_edi_decimal(segment.get_or_empty(1))?;
 
+        // CLM05 is a composite field (e.g., "11:B:1") containing:
+        // - CLM05-1: Place of Service Code (e.g., "11")
+        // - CLM05-2: Facility Code Qualifier (e.g., "B")
+        // - CLM05-3: Claim Frequency Code (e.g., "1")
+        let clm05 = segment.get_optional(4);
+        let (place_of_service_code, facility_code_qualifier, claim_frequency_code) =
+            if let Some(composite) = &clm05 {
+                let parts: Vec<&str> = composite.split(':').collect();
+                (
+                    parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                )
+            } else {
+                (None, None, None)
+            };
+
         Ok(Self {
             patient_control_number: segment.get_or_empty(0).to_string(),
             total_claim_charge_amount: charge_amount,
-            claim_filing_indicator_code: segment.get_optional(4),
-            place_of_service_code: segment.get_optional(5),
-            claim_frequency_code: segment.get_optional(6),
-            provider_signature_indicator: segment.get_optional(7),
-            assignment_indicator: segment.get_optional(8),
-            benefits_assignment_indicator: segment.get_optional(9),
-            release_information_code: segment.get_optional(10),
+            claim_filing_indicator_code: segment.get_optional(2), // CLM03
+            place_of_service_code,       // CLM05-1
+            facility_code_qualifier,     // CLM05-2
+            claim_frequency_code,        // CLM05-3
+            provider_signature_indicator: segment.get_optional(5), // CLM06
+            assignment_indicator: segment.get_optional(6),         // CLM07
+            benefits_assignment_indicator: segment.get_optional(7), // CLM08
+            release_information_code: segment.get_optional(8),     // CLM09
         })
     }
 }
@@ -683,6 +703,167 @@ impl HcpSegment {
     }
 }
 
+/// OI - Other Insurance Coverage Information Segment
+/// Format: OI*coverage_type**benefits_assignment*patient_signature_source*release_of_info
+#[derive(Debug, Clone)]
+pub struct OiSegment {
+    pub claim_filing_indicator_code: Option<String>,
+    pub claim_submission_reason_code: Option<String>,
+    pub benefits_assignment_certification: Option<String>,
+    pub patient_signature_source_code: Option<String>,
+    pub release_of_information_code: Option<String>,
+}
+
+impl OiSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "OI" {
+            return Err(Error::Parse(format!("Expected OI segment, got {}", segment.segment_id)));
+        }
+
+        Ok(Self {
+            claim_filing_indicator_code: segment.get_optional(0),
+            claim_submission_reason_code: segment.get_optional(1),
+            benefits_assignment_certification: segment.get_optional(2),
+            patient_signature_source_code: segment.get_optional(3),
+            release_of_information_code: segment.get_optional(4),
+        })
+    }
+}
+
+/// CAS - Claim Adjustment Segment
+/// Format: CAS*group_code*reason_code*amount*quantity*reason_code2*amount2*...
+/// Can contain up to 6 adjustment groups (19 elements total)
+#[derive(Debug, Clone)]
+pub struct CasSegment {
+    pub adjustment_group_code: String,
+    /// List of (reason_code, amount, quantity) tuples
+    pub adjustments: Vec<(String, Option<Decimal>, Option<Decimal>)>,
+}
+
+impl CasSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "CAS" {
+            return Err(Error::Parse(format!("Expected CAS segment, got {}", segment.segment_id)));
+        }
+
+        let adjustment_group_code = segment.get_or_empty(0).to_string();
+        let mut adjustments = Vec::new();
+
+        // CAS can have up to 6 adjustment sets (reason, amount, quantity)
+        // Elements: 1,2,3 | 4,5,6 | 7,8,9 | 10,11,12 | 13,14,15 | 16,17,18
+        for i in 0..6 {
+            let base = 1 + (i * 3);
+            if let Some(reason_code) = segment.get_optional(base) {
+                let amount = segment.get_optional(base + 1)
+                    .and_then(|s| parse_edi_decimal(&s).ok());
+                let quantity = segment.get_optional(base + 2)
+                    .and_then(|s| parse_edi_decimal(&s).ok());
+                adjustments.push((reason_code, amount, quantity));
+            } else {
+                break;
+            }
+        }
+
+        Ok(Self {
+            adjustment_group_code,
+            adjustments,
+        })
+    }
+}
+
+/// SVD - Service Line Adjudication Information Segment
+/// Format: SVD*payer_id*paid_amount*procedure_composite*product_id*paid_units*bundled_line
+#[derive(Debug, Clone)]
+pub struct SvdSegment {
+    pub other_payer_primary_identifier: Option<String>,
+    pub service_line_paid_amount: Option<Decimal>,
+    pub product_service_id_qualifier: Option<String>,
+    pub procedure_code: Option<String>,
+    pub procedure_modifier_1: Option<String>,
+    pub procedure_modifier_2: Option<String>,
+    pub procedure_modifier_3: Option<String>,
+    pub procedure_modifier_4: Option<String>,
+    pub product_service_id: Option<String>,
+    pub paid_service_unit_count: Option<Decimal>,
+    pub bundled_unbundled_line_number: Option<i16>,
+}
+
+impl SvdSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "SVD" {
+            return Err(Error::Parse(format!("Expected SVD segment, got {}", segment.segment_id)));
+        }
+
+        // Element 2 (index 2) is composite: qualifier:code:mod1:mod2:mod3:mod4
+        let composite = segment.get_optional(2);
+        let (qualifier, code, mod1, mod2, mod3, mod4) = if let Some(comp) = &composite {
+            let parts: Vec<&str> = comp.split(':').collect();
+            (
+                parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(5).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+            )
+        } else {
+            (None, None, None, None, None, None)
+        };
+
+        Ok(Self {
+            other_payer_primary_identifier: segment.get_optional(0),
+            service_line_paid_amount: segment.get_optional(1).and_then(|s| parse_edi_decimal(&s).ok()),
+            product_service_id_qualifier: qualifier,
+            procedure_code: code,
+            procedure_modifier_1: mod1,
+            procedure_modifier_2: mod2,
+            procedure_modifier_3: mod3,
+            procedure_modifier_4: mod4,
+            product_service_id: segment.get_optional(3),
+            paid_service_unit_count: segment.get_optional(4).and_then(|s| parse_edi_decimal(&s).ok()),
+            bundled_unbundled_line_number: segment.get_optional(5).and_then(|s| s.parse().ok()),
+        })
+    }
+}
+
+/// PAT - Patient Information Segment
+/// Format: PAT*relationship_code*location*employment_status*student_status***death_date*...
+#[derive(Debug, Clone)]
+pub struct PatSegment {
+    pub individual_relationship_code: Option<String>,
+    pub patient_location_code: Option<String>,
+    pub employment_status_code: Option<String>,
+    pub student_status_code: Option<String>,
+    pub date_time_period_format_qualifier: Option<String>,
+    pub patient_death_date: Option<NaiveDate>,
+    pub unit_of_measurement_code: Option<String>,
+    pub weight: Option<Decimal>,
+    pub pregnancy_indicator: Option<String>,
+}
+
+impl PatSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "PAT" {
+            return Err(Error::Parse(format!("Expected PAT segment, got {}", segment.segment_id)));
+        }
+
+        let death_date = segment.get_optional(5)
+            .and_then(|s| parse_edi_date(&s).ok());
+
+        Ok(Self {
+            individual_relationship_code: segment.get_optional(0),
+            patient_location_code: segment.get_optional(1),
+            employment_status_code: segment.get_optional(2),
+            student_status_code: segment.get_optional(3),
+            date_time_period_format_qualifier: segment.get_optional(4),
+            patient_death_date: death_date,
+            unit_of_measurement_code: segment.get_optional(6),
+            weight: segment.get_optional(7).and_then(|s| parse_edi_decimal(&s).ok()),
+            pregnancy_indicator: segment.get_optional(8),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -740,20 +921,19 @@ mod tests {
 
     #[test]
     fn test_clm_segment() {
+        // Test CLM segment: CLM*PATIENT123*250.00***11:B:1*Y*A*Y*I~
         let segment = EdiSegment {
             segment_id: "CLM".to_string(),
             elements: vec![
-                "PATIENT123".to_string(),
-                "250.00".to_string(),
-                "".to_string(),
-                "".to_string(),
-                "12".to_string(),
-                "11".to_string(),
-                "1".to_string(),
-                "Y".to_string(),
-                "Y".to_string(),
-                "Y".to_string(),
-                "I".to_string(),
+                "PATIENT123".to_string(),  // CLM01 - Patient Control Number
+                "250.00".to_string(),      // CLM02 - Total Charge Amount
+                "".to_string(),            // CLM03 - Claim Filing Indicator
+                "".to_string(),            // CLM04 - (not used)
+                "11:B:1".to_string(),      // CLM05 - Composite: POS:FacilityQual:FreqCode
+                "Y".to_string(),           // CLM06 - Provider Signature Indicator
+                "A".to_string(),           // CLM07 - Assignment Indicator
+                "Y".to_string(),           // CLM08 - Benefits Assignment
+                "I".to_string(),           // CLM09 - Release of Information
             ],
         };
 
@@ -761,6 +941,11 @@ mod tests {
         assert_eq!(clm.patient_control_number, "PATIENT123");
         assert_eq!(clm.total_claim_charge_amount, Decimal::new(25000, 2));
         assert_eq!(clm.place_of_service_code, Some("11".to_string()));
+        assert_eq!(clm.facility_code_qualifier, Some("B".to_string()));
         assert_eq!(clm.claim_frequency_code, Some("1".to_string()));
+        assert_eq!(clm.provider_signature_indicator, Some("Y".to_string()));
+        assert_eq!(clm.assignment_indicator, Some("A".to_string()));
+        assert_eq!(clm.benefits_assignment_indicator, Some("Y".to_string()));
+        assert_eq!(clm.release_information_code, Some("I".to_string()));
     }
 }

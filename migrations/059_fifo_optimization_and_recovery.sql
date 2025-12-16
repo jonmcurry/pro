@@ -112,9 +112,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION staging.recover_stuck_sequences IS
-'Manually recover all stuck sequences. Call with: SELECT * FROM staging.recover_stuck_sequences(5);
-The threshold_minutes parameter sets how long a sequence must be waiting to be considered stuck.';
+COMMENT ON FUNCTION staging.recover_stuck_sequences IS 'Manually recover all stuck sequences. Call with: SELECT * FROM staging.recover_stuck_sequences(5). The threshold_minutes parameter sets how long a sequence must be waiting to be considered stuck.';
 
 -- View for monitoring stuck sequence recovery history
 CREATE OR REPLACE VIEW staging.vw_sequence_recovery_history AS

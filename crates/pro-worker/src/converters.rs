@@ -163,7 +163,26 @@ pub fn convert_csv_to_claim(csv_row: &ParsedRow) -> Result<ParsedClaim> {
         other_payer_id: None,
         other_payer_name: None,
         other_payer_claim_number: None,
+        other_insurance: Vec::new(), // Full COB support
         patient_signature_code: None,
+
+        // Patient fields (when different from subscriber)
+        patient_entity_identifier: None,
+        patient_entity_type: None,
+        patient_last_name: None,
+        patient_first_name: None,
+        patient_middle_name: None,
+        patient_name_suffix: None,
+        patient_date_of_birth: None,
+        patient_gender: None,
+        patient_address_line1: None,
+        patient_address_line2: None,
+        patient_city: None,
+        patient_state: None,
+        patient_postal_code: None,
+        patient_country: None,
+        patient_relationship_code: None,
+
         related_causes_code_1: None,
         related_causes_code_2: None,
         related_causes_code_3: None,
@@ -310,6 +329,8 @@ pub fn extract_service_lines_from_csv(csv_row: &ParsedRow) -> Result<Vec<ParsedS
         ordering_provider_last_name: None,
         ordering_provider_first_name: None,
         referring_provider_npi: get_optional("referring_provider_npi"),
+        referring_provider_last_name: None,
+        referring_provider_first_name: None,
 
         // NDC information
         ndc_code: get_optional("ndc_code"),
@@ -330,6 +351,7 @@ pub fn extract_service_lines_from_csv(csv_row: &ParsedRow) -> Result<Vec<ParsedS
 
         // Other payer line adjudication
         other_payer_line_paid_amount: None,
+        line_adjudications: Vec::new(), // Full line adjudication support
 
         // HCP - Health Care Pricing
         allowed_amount: None,

@@ -30,10 +30,18 @@ const SERVICE_DESCRIPTION: &str = "Automated claims processing, validation, and 
 
 /// Main service run loop
 pub fn run_service() -> Result<()> {
-    // Initialize file logging for service mode
+    // Load .env file FIRST before initializing logging
+    // This allows LOG_LEVEL to be read from the config file
+    load_env_config();
+
+    // Initialize file logging for service mode (now reads LOG_LEVEL from env)
     let _guard = init_service_logging()?;
 
-    info!("Professional SMART service starting...");
+    // Log the effective log level
+    let log_level = std::env::var("LOG_LEVEL")
+        .or_else(|_| std::env::var("RUST_LOG"))
+        .unwrap_or_else(|_| "info".to_string());
+    info!("Professional SMART service starting (log level: {})", log_level);
 
     // Create shutdown channel
     let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -84,65 +92,27 @@ pub fn run_service() -> Result<()> {
 
     info!("Service registered with SCM, initializing...");
 
-    // Load configuration from ProgramData directory
-    let env_path = std::path::Path::new("C:\\ProgramData\\Professional SMART\\config\\.env");
-    info!("Checking for .env file at: {}", env_path.display());
-
-    // Check if path exists and is accessible
-    match std::fs::metadata(env_path) {
-        Ok(metadata) => {
-            info!(".env file found - size: {} bytes, readonly: {}",
-                metadata.len(),
-                metadata.permissions().readonly()
-            );
-
-            // Try to read the file content to verify access
-            match std::fs::read_to_string(env_path) {
-                Ok(content) => {
-                    info!(".env file is readable, {} lines", content.lines().count());
-
-                    // Now try to load with dotenvy
-                    match dotenvy::from_path(env_path) {
-                        Ok(_) => {
-                            info!("Successfully loaded configuration from {}", env_path.display());
-                            // Log key environment variables (without sensitive values)
-                            if let Ok(db_url) = std::env::var("DATABASE_URL") {
-                                // Mask password in log
-                                let masked = if db_url.contains('@') {
-                                    let parts: Vec<&str> = db_url.split('@').collect();
-                                    if parts.len() == 2 {
-                                        let before_at = parts[0];
-                                        if let Some(colon_pos) = before_at.rfind(':') {
-                                            format!("{}:****@{}", &before_at[..colon_pos], parts[1])
-                                        } else {
-                                            "****".to_string()
-                                        }
-                                    } else {
-                                        "****".to_string()
-                                    }
-                                } else {
-                                    db_url.clone()
-                                };
-                                info!("DATABASE_URL is set: {}", masked);
-                            } else {
-                                warn!("DATABASE_URL environment variable is NOT set after loading .env");
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to load .env file from {}: {} (error kind: {:?})",
-                                env_path.display(), e, e);
-                        }
-                    }
+    // Log DATABASE_URL status (config was already loaded in load_env_config)
+    if let Ok(db_url) = std::env::var("DATABASE_URL") {
+        // Mask password in log
+        let masked = if db_url.contains('@') {
+            let parts: Vec<&str> = db_url.split('@').collect();
+            if parts.len() == 2 {
+                let before_at = parts[0];
+                if let Some(colon_pos) = before_at.rfind(':') {
+                    format!("{}:****@{}", &before_at[..colon_pos], parts[1])
+                } else {
+                    "****".to_string()
                 }
-                Err(e) => {
-                    error!("Failed to read .env file: {} (error kind: {:?})", e, e.kind());
-                }
+            } else {
+                "****".to_string()
             }
-        }
-        Err(e) => {
-            error!(".env file not found or not accessible at {}: {} (error kind: {:?})",
-                env_path.display(), e, e.kind());
-        }
+        } else {
+            db_url.clone()
+        };
+        info!("DATABASE_URL is set: {}", masked);
+    } else {
+        warn!("DATABASE_URL environment variable is NOT set");
     }
 
     // Initialize worker
@@ -857,6 +827,59 @@ pub fn stop_service() -> Result<()> {
     Ok(())
 }
 
+/// Load environment configuration from .env file
+/// This must be called BEFORE init_service_logging so LOG_LEVEL is available
+fn load_env_config() {
+    let env_path = std::path::Path::new("C:\\ProgramData\\Professional SMART\\config\\.env");
+
+    // Try to load the .env file - errors are non-fatal since defaults will be used
+    match std::fs::metadata(env_path) {
+        Ok(metadata) => {
+            if let Ok(content) = std::fs::read_to_string(env_path) {
+                // Use eprintln since logging isn't initialized yet
+                eprintln!("[PRE-LOG] .env file found - {} bytes, {} lines",
+                    metadata.len(), content.lines().count());
+
+                match dotenvy::from_path(env_path) {
+                    Ok(_) => {
+                        eprintln!("[PRE-LOG] Successfully loaded configuration from {}", env_path.display());
+                    }
+                    Err(e) => {
+                        eprintln!("[PRE-LOG] Failed to load .env file: {}", e);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[PRE-LOG] .env file not found at {}: {}", env_path.display(), e);
+        }
+    }
+}
+
+/// Get the configured log level from environment
+/// Checks LOG_LEVEL first, then RUST_LOG, defaults to "info"
+fn get_log_level() -> String {
+    // Check LOG_LEVEL first (simple user-friendly option)
+    if let Ok(level) = std::env::var("LOG_LEVEL") {
+        let level = level.to_lowercase();
+        // Validate the level
+        match level.as_str() {
+            "trace" | "debug" | "info" | "warn" | "error" => return level,
+            _ => {
+                eprintln!("[PRE-LOG] Invalid LOG_LEVEL '{}', using 'info'. Valid values: trace, debug, info, warn, error", level);
+            }
+        }
+    }
+
+    // Fall back to RUST_LOG (more advanced option for per-module control)
+    if let Ok(rust_log) = std::env::var("RUST_LOG") {
+        return rust_log;
+    }
+
+    // Default to info
+    "info".to_string()
+}
+
 /// Initialize logging for service mode
 fn init_service_logging() -> Result<tracing_appender::non_blocking::WorkerGuard> {
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -869,10 +892,14 @@ fn init_service_logging() -> Result<tracing_appender::non_blocking::WorkerGuard>
     let file_appender = tracing_appender::rolling::daily(log_dir, "service.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
+    // Get configured log level (from LOG_LEVEL or RUST_LOG env vars)
+    let log_level = get_log_level();
+    eprintln!("[PRE-LOG] Initializing logging with level: {}", log_level);
+
     tracing_subscriber::registry()
         .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "error".into()),
+            tracing_subscriber::EnvFilter::try_new(&log_level)
+                .unwrap_or_else(|_| "info".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
         .init();

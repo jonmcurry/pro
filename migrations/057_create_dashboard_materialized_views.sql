@@ -358,32 +358,30 @@ COMMENT ON FUNCTION claims.refresh_dashboard_views IS
 'Refreshes all dashboard materialized views. Call daily via pg_cron or scheduled task.
 Usage: SELECT * FROM claims.refresh_dashboard_views();';
 
+
 -- ==============================================================================
 -- USAGE EXAMPLES
 -- ==============================================================================
-
-/*
 -- View current data:
-SELECT * FROM claims.mv_management_overview WHERE organization_id = 1 ORDER BY month DESC LIMIT 12;
-SELECT * FROM claims.mv_denial_by_payer WHERE organization_id = 1 ORDER BY month DESC LIMIT 12;
-SELECT * FROM claims.mv_procedure_volume WHERE organization_id = 1 ORDER BY procedure_count DESC LIMIT 100;
-SELECT * FROM claims.mv_provider_productivity WHERE organization_id = 1 ORDER BY total_work_rvus DESC LIMIT 50;
-
+--   SELECT * FROM claims.mv_management_overview WHERE organization_id = 1 ORDER BY month DESC LIMIT 12;
+--   SELECT * FROM claims.mv_denial_by_payer WHERE organization_id = 1 ORDER BY month DESC LIMIT 12;
+--   SELECT * FROM claims.mv_procedure_volume WHERE organization_id = 1 ORDER BY procedure_count DESC LIMIT 100;
+--   SELECT * FROM claims.mv_provider_productivity WHERE organization_id = 1 ORDER BY total_work_rvus DESC LIMIT 50;
+--
 -- Refresh all views:
-SELECT * FROM claims.refresh_dashboard_views();
-
+--   SELECT * FROM claims.refresh_dashboard_views();
+--
 -- Manual refresh single view:
-REFRESH MATERIALIZED VIEW CONCURRENTLY claims.mv_management_overview;
-
+--   REFRESH MATERIALIZED VIEW CONCURRENTLY claims.mv_management_overview;
+--
 -- Check when views were last refreshed:
-SELECT 'mv_management_overview' AS view_name, MAX(last_refreshed) FROM claims.mv_management_overview
-UNION ALL
-SELECT 'mv_denial_by_payer', MAX(last_refreshed) FROM claims.mv_denial_by_payer
-UNION ALL
-SELECT 'mv_procedure_volume', MAX(last_refreshed) FROM claims.mv_procedure_volume
-UNION ALL
-SELECT 'mv_provider_productivity', MAX(last_refreshed) FROM claims.mv_provider_productivity;
-
+--   SELECT 'mv_management_overview' AS view_name, MAX(last_refreshed) FROM claims.mv_management_overview
+--   UNION ALL
+--   SELECT 'mv_denial_by_payer', MAX(last_refreshed) FROM claims.mv_denial_by_payer
+--   UNION ALL
+--   SELECT 'mv_procedure_volume', MAX(last_refreshed) FROM claims.mv_procedure_volume
+--   UNION ALL
+--   SELECT 'mv_provider_productivity', MAX(last_refreshed) FROM claims.mv_provider_productivity;
+--
 -- Schedule daily refresh with pg_cron (if installed):
--- SELECT cron.schedule('refresh-dashboard-views', '0 2 * * *', 'SELECT * FROM claims.refresh_dashboard_views()');
-*/
+--   SELECT cron.schedule('refresh-dashboard-views', '0 2 * * *', 'SELECT * FROM claims.refresh_dashboard_views()');

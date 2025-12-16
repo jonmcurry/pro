@@ -145,6 +145,23 @@ pub struct ParsedClaim {
     // Loop 2010BA - Medical Record Number (REF*EA)
     pub medical_record_number: Option<String>,
 
+    // Loop 2000C/2010CA - Patient (when different from subscriber)
+    pub patient_entity_identifier: Option<String>,
+    pub patient_entity_type: Option<String>,
+    pub patient_last_name: Option<String>,
+    pub patient_first_name: Option<String>,
+    pub patient_middle_name: Option<String>,
+    pub patient_name_suffix: Option<String>,
+    pub patient_date_of_birth: Option<NaiveDate>,
+    pub patient_gender: Option<String>,
+    pub patient_address_line1: Option<String>,
+    pub patient_address_line2: Option<String>,
+    pub patient_city: Option<String>,
+    pub patient_state: Option<String>,
+    pub patient_postal_code: Option<String>,
+    pub patient_country: Option<String>,
+    pub patient_relationship_code: Option<String>, // PAT01 - relationship to subscriber
+
     // Loop 2010BB - Payer
     pub payer_entity_identifier: String,
     pub payer_entity_type: String,
@@ -234,11 +251,14 @@ pub struct ParsedClaim {
     pub supervising_provider_last_name: Option<String>,
     pub supervising_provider_first_name: Option<String>,
 
-    // Loop 2320 - Other Subscriber (COB)
+    // Loop 2320 - Other Subscriber (COB) - legacy fields for simple COB
     pub other_payer_paid_amount: Option<Decimal>,
     pub other_payer_id: Option<String>,
     pub other_payer_name: Option<String>,
     pub other_payer_claim_number: Option<String>,
+
+    // Loop 2320/2330 - Full COB support (multiple other payers)
+    pub other_insurance: Vec<OtherInsurance>,
 
     // Loop 2300 - Ambulance Information (CR1)
     pub ambulance_transport_reason_code: Option<String>,
@@ -314,6 +334,8 @@ pub struct ServiceLine {
 
     // Loop 2420F - Referring Provider (line level)
     pub referring_provider_npi: Option<String>,
+    pub referring_provider_last_name: Option<String>,
+    pub referring_provider_first_name: Option<String>,
 
     // Loop 2410 - Drug Identification (if applicable)
     pub ndc_code: Option<String>,
@@ -332,8 +354,11 @@ pub struct ServiceLine {
     // Revenue code (for institutional, may appear on professional)
     pub revenue_code: Option<String>,
 
-    // Loop 2430 - Line Adjudication (from other payers)
+    // Loop 2430 - Line Adjudication (from other payers) - legacy field
     pub other_payer_line_paid_amount: Option<Decimal>,
+
+    // Loop 2430 - Full Line Adjudication support (SVD/CAS/DTP)
+    pub line_adjudications: Vec<LineAdjudication>,
 
     // Loop 2400 HCP - Health Care Pricing
     pub allowed_amount: Option<Decimal>,
@@ -347,6 +372,81 @@ pub struct DiagnosisCode {
     pub diagnosis_code_qualifier: String,
     pub diagnosis_code: String,
     pub is_principal: bool,
+}
+
+/// Loop 2320/2330 - Other Insurance (COB) information
+/// Represents a single other payer in coordination of benefits
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct OtherInsurance {
+    // SBR Segment Elements (Loop 2320)
+    pub payer_responsibility_sequence: Option<String>, // P=Primary, S=Secondary, T=Tertiary
+    pub individual_relationship_code: Option<String>,  // 01=Spouse, 18=Self, 19=Child, etc.
+    pub group_policy_number: Option<String>,
+    pub group_name: Option<String>,
+    pub insurance_type_code: Option<String>,           // 12=Medicare Part A, 13=Medicare Part B, etc.
+    pub coordination_benefits_code: Option<String>,
+    pub yes_no_condition_response: Option<String>,     // Y/N
+    pub employment_status_code: Option<String>,
+    pub claim_filing_indicator: Option<String>,        // MB=Medicare Part B, etc.
+
+    // Loop 2330A - Other Subscriber Name (NM1*IL)
+    pub other_subscriber_last_name: Option<String>,
+    pub other_subscriber_first_name: Option<String>,
+    pub other_subscriber_middle_name: Option<String>,
+    pub other_subscriber_name_suffix: Option<String>,
+    pub other_subscriber_id_qualifier: Option<String>,
+    pub other_subscriber_id: Option<String>,
+    pub other_subscriber_address_line1: Option<String>,
+    pub other_subscriber_address_line2: Option<String>,
+    pub other_subscriber_city: Option<String>,
+    pub other_subscriber_state: Option<String>,
+    pub other_subscriber_postal_code: Option<String>,
+
+    // Loop 2330B - Other Payer Name (NM1*PR)
+    pub payer_id: Option<String>,
+    pub payer_name: Option<String>,
+    pub payer_address_line1: Option<String>,
+    pub payer_address_line2: Option<String>,
+    pub payer_city: Option<String>,
+    pub payer_state: Option<String>,
+    pub payer_postal_code: Option<String>,
+
+    // OI Segment (Other Insurance Coverage Information)
+    pub benefits_assignment_certification: Option<String>, // Y/N
+    pub patient_signature_source_code: Option<String>,     // P=Patient signed, etc.
+    pub release_of_information_code: Option<String>,       // Y/N/I
+
+    // AMT Segments
+    pub paid_amount: Option<Decimal>,           // AMT*D - Other payer paid amount
+    pub remaining_patient_liability: Option<Decimal>,
+
+    // Claim control number from other payer
+    pub claim_control_number: Option<String>,   // REF*F8
+
+    // Adjustments (CAS segments)
+    pub adjustments: Vec<ClaimAdjustment>,
+}
+
+/// CAS Segment - Claim Adjustment
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ClaimAdjustment {
+    pub adjustment_group_code: String,      // CO=Contractual, CR=Correction, OA=Other, PI=Payer Initiated, PR=Patient Responsibility
+    pub adjustment_reason_code: String,     // CARC codes (1-999+)
+    pub adjustment_amount: Option<Decimal>,
+    pub adjustment_quantity: Option<Decimal>,
+}
+
+/// SVD Segment - Line Adjudication Information
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LineAdjudication {
+    pub payer_id: Option<String>,
+    pub paid_amount: Option<Decimal>,
+    pub procedure_code: Option<String>,
+    pub procedure_modifier: Option<String>,
+    pub paid_service_unit_count: Option<Decimal>,
+    pub bundled_line_number: Option<i16>,
+    pub adjudication_date: Option<NaiveDate>,
+    pub adjustments: Vec<ClaimAdjustment>,
 }
 
 /// EDI segment with parsed elements

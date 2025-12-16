@@ -232,6 +232,8 @@ pub fn parse_billing_provider(segments: &[EdiSegment]) -> Result<BillingProvider
 
 /// Parse Loop 2300 - Claim Information
 pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
+    use crate::types::{OtherInsurance, ClaimAdjustment, LineAdjudication};
+
     let mut claim = ParsedClaim {
         temp_id: 0, // Temporary ID, database will generate actual ID
 
@@ -255,6 +257,23 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         subscriber_postal_code: None,
         subscriber_country: None,
         medical_record_number: None,
+
+        // Patient fields (when different from subscriber - Loop 2000C/2010CA)
+        patient_entity_identifier: None,
+        patient_entity_type: None,
+        patient_last_name: None,
+        patient_first_name: None,
+        patient_middle_name: None,
+        patient_name_suffix: None,
+        patient_date_of_birth: None,
+        patient_gender: None,
+        patient_address_line1: None,
+        patient_address_line2: None,
+        patient_city: None,
+        patient_state: None,
+        patient_postal_code: None,
+        patient_country: None,
+        patient_relationship_code: None,
 
         payer_entity_identifier: String::new(),
         payer_entity_type: String::new(),
@@ -332,10 +351,14 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         supervising_provider_last_name: None,
         supervising_provider_first_name: None,
 
+        // Legacy COB fields (for backwards compatibility)
         other_payer_paid_amount: None,
         other_payer_id: None,
         other_payer_name: None,
         other_payer_claim_number: None,
+
+        // Full COB support
+        other_insurance: Vec::new(),
 
         ambulance_transport_reason_code: None,
         ambulance_transport_distance: None,
@@ -354,6 +377,17 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
 
     let mut last_nm1_entity: Option<String> = None;
     let mut current_service_line: Option<ServiceLine> = None;
+
+    // COB tracking: true when we're in Loop 2320 (Other Subscriber Information)
+    let mut in_cob_loop = false;
+    let mut current_other_insurance: Option<OtherInsurance> = None;
+
+    // Patient tracking: true when patient is different from subscriber (Loop 2000C)
+    let mut in_patient_loop = false;
+    let mut primary_payer_captured = false; // Track if we've captured the primary payer
+
+    // Line adjudication tracking (Loop 2430)
+    let mut current_line_adjudication: Option<LineAdjudication> = None;
 
     for segment in segments {
         match segment.segment_id.as_str() {
@@ -416,15 +450,18 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                                 line.referring_provider_npi = nm1.identification_code.clone();
                                 debug_log(&format!("[SERVICE_LINE] Set referring_provider_npi = {:?}", line.referring_provider_npi));
                             }
+                            line.referring_provider_last_name = nm1.last_name_or_org.clone();
+                            line.referring_provider_first_name = nm1.first_name.clone();
                         }
                         _ => {
                             // Ignore other entity identifiers at service line level
                         }
                     }
-                } else {
-                    // Claim level NM1 segments (Loop 2310)
+                } else if in_cob_loop {
+                    // COB Loop NM1 segments (Loop 2330A/2330B)
+                    // These go to current_other_insurance, NOT to claim primary fields
                     debug_log(&format!(
-                        "[CLAIM_NM1] entity_id='{}', entity_type='{}', name={:?}, qualifier={:?}, npi={:?}",
+                        "[COB_NM1] entity_id='{}', entity_type='{}', name={:?}, qualifier={:?}, id={:?}",
                         nm1.entity_identifier_code,
                         nm1.entity_type_qualifier,
                         nm1.last_name_or_org,
@@ -432,10 +469,51 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                         nm1.identification_code
                     ));
 
+                    last_nm1_entity = Some(format!("COB_{}", nm1.entity_identifier_code));
+
+                    if let Some(ref mut other_ins) = current_other_insurance {
+                        match nm1.entity_identifier_code.as_str() {
+                            "IL" => {
+                                // Loop 2330A - Other Subscriber Name
+                                other_ins.other_subscriber_last_name = nm1.last_name_or_org.clone();
+                                other_ins.other_subscriber_first_name = nm1.first_name.clone();
+                                other_ins.other_subscriber_middle_name = nm1.middle_name.clone();
+                                other_ins.other_subscriber_name_suffix = nm1.name_suffix.clone();
+                                other_ins.other_subscriber_id_qualifier = nm1.identification_code_qualifier.clone();
+                                other_ins.other_subscriber_id = nm1.identification_code.clone();
+                            }
+                            "PR" => {
+                                // Loop 2330B - Other Payer Name
+                                other_ins.payer_name = nm1.last_name_or_org.clone();
+                                other_ins.payer_id = nm1.identification_code.clone();
+
+                                // Also populate legacy fields for backwards compatibility
+                                // (only populate if primary payer not set - first PR after CLM is primary)
+                                if !claim.other_payer_id.is_some() {
+                                    claim.other_payer_id = nm1.identification_code.clone();
+                                    claim.other_payer_name = nm1.last_name_or_org.clone();
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                } else {
+                    // Claim level NM1 segments (Loop 2010BA/2010BB/2010CA/2310)
+                    debug_log(&format!(
+                        "[CLAIM_NM1] entity_id='{}', entity_type='{}', name={:?}, qualifier={:?}, npi={:?}, in_patient_loop={}",
+                        nm1.entity_identifier_code,
+                        nm1.entity_type_qualifier,
+                        nm1.last_name_or_org,
+                        nm1.identification_code_qualifier,
+                        nm1.identification_code,
+                        in_patient_loop
+                    ));
+
                     last_nm1_entity = Some(nm1.entity_identifier_code.clone());
 
                     match nm1.entity_identifier_code.as_str() {
                         "IL" => {
+                            // Loop 2010BA - Subscriber Name (only if NOT in COB)
                             claim.subscriber_entity_identifier = nm1.entity_identifier_code;
                             claim.subscriber_entity_type = nm1.entity_type_qualifier;
                             claim.subscriber_last_name = nm1.last_name_or_org.clone().unwrap_or_default();
@@ -447,12 +525,27 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                                 claim.subscriber_id = nm1.identification_code.clone().unwrap_or_default();
                             }
                         }
+                        "QC" => {
+                            // Loop 2010CA - Patient Name (when patient != subscriber)
+                            claim.patient_entity_identifier = Some(nm1.entity_identifier_code);
+                            claim.patient_entity_type = Some(nm1.entity_type_qualifier);
+                            claim.patient_last_name = nm1.last_name_or_org.clone();
+                            claim.patient_first_name = nm1.first_name.clone();
+                            claim.patient_middle_name = nm1.middle_name.clone();
+                            claim.patient_name_suffix = nm1.name_suffix.clone();
+                            in_patient_loop = true;
+                        }
                         "PR" => {
-                            claim.payer_entity_identifier = nm1.entity_identifier_code;
-                            claim.payer_entity_type = nm1.entity_type_qualifier;
-                            claim.payer_name = nm1.last_name_or_org.clone().unwrap_or_default();
-                            claim.payer_id_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
-                            claim.payer_id = nm1.identification_code.clone().unwrap_or_default();
+                            // Loop 2010BB - Payer Name (Primary)
+                            // Only capture if primary payer not yet captured
+                            if !primary_payer_captured {
+                                claim.payer_entity_identifier = nm1.entity_identifier_code;
+                                claim.payer_entity_type = nm1.entity_type_qualifier;
+                                claim.payer_name = nm1.last_name_or_org.clone().unwrap_or_default();
+                                claim.payer_id_qualifier = nm1.identification_code_qualifier.clone().unwrap_or_default();
+                                claim.payer_id = nm1.identification_code.clone().unwrap_or_default();
+                                primary_payer_captured = true;
+                            }
                         }
                         "82" => {
                             claim.rendering_provider_qualifier = nm1.identification_code_qualifier.clone();
@@ -466,11 +559,14 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                                 claim.rendering_provider_last_name, claim.rendering_provider_first_name));
                         }
                         "77" => {
+                            // Loop 2310C - Service Facility Location
                             claim.service_facility_qualifier = nm1.identification_code_qualifier.clone();
                             if nm1.identification_code_qualifier.as_deref() == Some("XX") {
                                 claim.service_facility_npi = nm1.identification_code.clone();
                             }
                             claim.service_facility_name = nm1.last_name_or_org.clone();
+                            debug_log(&format!("[CLAIM] Set service_facility_name = {:?}, npi = {:?}, qualifier = {:?}",
+                                claim.service_facility_name, claim.service_facility_npi, claim.service_facility_qualifier));
                         }
                         "DN" => {
                             claim.referring_provider_qualifier = nm1.identification_code_qualifier.clone();
@@ -500,6 +596,11 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                             claim.subscriber_address_line1 = Some(n3.address_line1.clone());
                             claim.subscriber_address_line2 = n3.address_line2.clone();
                         }
+                        "QC" => {
+                            // Patient address (when patient != subscriber)
+                            claim.patient_address_line1 = Some(n3.address_line1.clone());
+                            claim.patient_address_line2 = n3.address_line2.clone();
+                        }
                         "PR" => {
                             claim.payer_address_line1 = Some(n3.address_line1.clone());
                             claim.payer_address_line2 = n3.address_line2.clone();
@@ -507,6 +608,20 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                         "77" => {
                             claim.service_facility_address_line1 = Some(n3.address_line1.clone());
                             claim.service_facility_address_line2 = n3.address_line2.clone();
+                        }
+                        "COB_IL" => {
+                            // Other subscriber address (COB)
+                            if let Some(ref mut other_ins) = current_other_insurance {
+                                other_ins.other_subscriber_address_line1 = Some(n3.address_line1.clone());
+                                other_ins.other_subscriber_address_line2 = n3.address_line2.clone();
+                            }
+                        }
+                        "COB_PR" => {
+                            // Other payer address (COB)
+                            if let Some(ref mut other_ins) = current_other_insurance {
+                                other_ins.payer_address_line1 = Some(n3.address_line1.clone());
+                                other_ins.payer_address_line2 = n3.address_line2.clone();
+                            }
                         }
                         _ => {}
                     }
@@ -522,6 +637,13 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                             claim.subscriber_postal_code = n4.postal_code.clone();
                             claim.subscriber_country = n4.country_code.clone();
                         }
+                        "QC" => {
+                            // Patient city/state (when patient != subscriber)
+                            claim.patient_city = Some(n4.city.clone());
+                            claim.patient_state = n4.state_code.clone();
+                            claim.patient_postal_code = n4.postal_code.clone();
+                            claim.patient_country = n4.country_code.clone();
+                        }
                         "PR" => {
                             claim.payer_city = Some(n4.city.clone());
                             claim.payer_state = n4.state_code.clone();
@@ -532,18 +654,91 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                             claim.service_facility_state = n4.state_code.clone();
                             claim.service_facility_postal_code = n4.postal_code.clone();
                         }
+                        "COB_IL" => {
+                            // Other subscriber city/state (COB)
+                            if let Some(ref mut other_ins) = current_other_insurance {
+                                other_ins.other_subscriber_city = Some(n4.city.clone());
+                                other_ins.other_subscriber_state = n4.state_code.clone();
+                                other_ins.other_subscriber_postal_code = n4.postal_code.clone();
+                            }
+                        }
+                        "COB_PR" => {
+                            // Other payer city/state (COB)
+                            if let Some(ref mut other_ins) = current_other_insurance {
+                                other_ins.payer_city = Some(n4.city.clone());
+                                other_ins.payer_state = n4.state_code.clone();
+                                other_ins.payer_postal_code = n4.postal_code.clone();
+                            }
+                        }
                         _ => {}
                     }
                 }
             }
             "SBR" => {
                 let sbr = SbrSegment::parse(segment)?;
-                claim.subscriber_relationship_code = sbr.individual_relationship_code;
+
+                // Check if this is a second SBR (indicates COB Loop 2320)
+                // First SBR is always the primary subscriber
+                if claim.subscriber_relationship_code.is_empty() {
+                    // First SBR - primary subscriber
+                    claim.subscriber_relationship_code = sbr.individual_relationship_code;
+                } else {
+                    // Second or subsequent SBR - COB (Other Subscriber)
+                    // Finish any existing COB record
+                    if let Some(other_ins) = current_other_insurance.take() {
+                        claim.other_insurance.push(other_ins);
+                    }
+
+                    // Start new COB record
+                    in_cob_loop = true;
+                    let mut other_ins = OtherInsurance::default();
+                    other_ins.payer_responsibility_sequence = Some(sbr.payer_responsibility_sequence.clone());
+                    other_ins.individual_relationship_code = Some(sbr.individual_relationship_code.clone());
+                    other_ins.group_policy_number = sbr.group_policy_number.clone();
+                    other_ins.group_name = sbr.group_name.clone();
+                    other_ins.insurance_type_code = sbr.insurance_type_code.clone();
+                    other_ins.coordination_benefits_code = sbr.coordination_of_benefits_code.clone();
+                    other_ins.yes_no_condition_response = sbr.yes_no_condition_response_code.clone();
+                    other_ins.employment_status_code = sbr.employment_status_code.clone();
+                    other_ins.claim_filing_indicator = sbr.claim_filing_indicator_code.clone();
+                    current_other_insurance = Some(other_ins);
+
+                    debug_log(&format!(
+                        "[COB] Entered COB loop - payer_seq={:?}, relationship={:?}",
+                        sbr.payer_responsibility_sequence,
+                        sbr.individual_relationship_code
+                    ));
+                }
+            }
+            "PAT" => {
+                // PAT segment in Loop 2000C indicates patient is different from subscriber
+                use crate::segments::PatSegment;
+                if let Ok(pat) = PatSegment::parse(segment) {
+                    claim.patient_relationship_code = pat.individual_relationship_code;
+                }
             }
             "DMG" => {
                 let dmg = DmgSegment::parse(segment)?;
-                claim.subscriber_date_of_birth = dmg.date_of_birth;
-                claim.subscriber_gender = dmg.gender_code;
+                // DMG can appear for subscriber (Loop 2010BA) or patient (Loop 2010CA)
+                // If we're in the patient loop (after NM1*QC), it's patient demographics
+                if in_patient_loop {
+                    claim.patient_date_of_birth = dmg.date_of_birth;
+                    claim.patient_gender = dmg.gender_code;
+                } else {
+                    claim.subscriber_date_of_birth = dmg.date_of_birth;
+                    claim.subscriber_gender = dmg.gender_code;
+                }
+            }
+            "OI" => {
+                // OI segment - Other Insurance Coverage Information (Loop 2320)
+                use crate::segments::OiSegment;
+                if let Ok(oi) = OiSegment::parse(segment) {
+                    if let Some(ref mut other_ins) = current_other_insurance {
+                        other_ins.benefits_assignment_certification = oi.benefits_assignment_certification;
+                        other_ins.patient_signature_source_code = oi.patient_signature_source_code;
+                        other_ins.release_of_information_code = oi.release_of_information_code;
+                    }
+                }
             }
             "DTP" => {
                 let dtp = DtpSegment::parse(segment)?;
@@ -660,26 +855,97 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
             }
             "AMT" => {
                 let amt = AmtSegment::parse(segment)?;
-                match amt.amount_qualifier_code.as_str() {
-                    "D" => {
-                        // Patient amount paid
-                        claim.patient_amount_paid = amt.monetary_amount;
-                    }
-                    "F5" => {
-                        // Patient responsibility amount
-                        claim.patient_responsibility_amount = amt.monetary_amount;
-                    }
-                    "A8" => {
-                        // COB - other payer paid amount (at claim level)
-                        claim.other_payer_paid_amount = amt.monetary_amount;
-                    }
-                    "B6" => {
-                        // Allowed amount (at service line level if in service line context)
-                        if let Some(ref mut line) = current_service_line {
-                            line.allowed_amount = amt.monetary_amount;
+
+                // Check if we're in COB context
+                if in_cob_loop {
+                    if let Some(ref mut other_ins) = current_other_insurance {
+                        match amt.amount_qualifier_code.as_str() {
+                            "D" => {
+                                // Other payer paid amount
+                                other_ins.paid_amount = amt.monetary_amount;
+                                // Also update legacy field
+                                claim.other_payer_paid_amount = amt.monetary_amount;
+                            }
+                            "EAF" => {
+                                // Remaining patient liability
+                                other_ins.remaining_patient_liability = amt.monetary_amount;
+                            }
+                            _ => {}
                         }
                     }
-                    _ => {}
+                } else {
+                    match amt.amount_qualifier_code.as_str() {
+                        "D" => {
+                            // Patient amount paid
+                            claim.patient_amount_paid = amt.monetary_amount;
+                        }
+                        "F5" => {
+                            // Patient responsibility amount
+                            claim.patient_responsibility_amount = amt.monetary_amount;
+                        }
+                        "A8" => {
+                            // COB - other payer paid amount (at claim level)
+                            claim.other_payer_paid_amount = amt.monetary_amount;
+                        }
+                        "B6" => {
+                            // Allowed amount (at service line level if in service line context)
+                            if let Some(ref mut line) = current_service_line {
+                                line.allowed_amount = amt.monetary_amount;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            "CAS" => {
+                // CAS - Claim Adjustment Segment (Loop 2320 or 2430)
+                use crate::segments::CasSegment;
+                if let Ok(cas) = CasSegment::parse(segment) {
+                    let adjustments: Vec<ClaimAdjustment> = cas.adjustments.iter()
+                        .map(|(reason, amount, qty)| ClaimAdjustment {
+                            adjustment_group_code: cas.adjustment_group_code.clone(),
+                            adjustment_reason_code: reason.clone(),
+                            adjustment_amount: *amount,
+                            adjustment_quantity: *qty,
+                        })
+                        .collect();
+
+                    // Determine context: service line adjudication or COB claim-level
+                    if let Some(ref mut line_adj) = current_line_adjudication {
+                        // CAS in Loop 2430 (service line level)
+                        line_adj.adjustments.extend(adjustments);
+                    } else if let Some(ref mut other_ins) = current_other_insurance {
+                        // CAS in Loop 2320 (COB claim level)
+                        other_ins.adjustments.extend(adjustments);
+                    }
+                }
+            }
+            "SVD" => {
+                // SVD - Line Adjudication Information (Loop 2430)
+                use crate::segments::SvdSegment;
+                if let Ok(svd) = SvdSegment::parse(segment) {
+                    // Save any previous line adjudication to current service line
+                    if let Some(line_adj) = current_line_adjudication.take() {
+                        if let Some(ref mut line) = current_service_line {
+                            line.line_adjudications.push(line_adj);
+                            // Also set legacy field for backwards compatibility
+                            if line.other_payer_line_paid_amount.is_none() {
+                                line.other_payer_line_paid_amount = svd.service_line_paid_amount;
+                            }
+                        }
+                    }
+
+                    // Start new line adjudication
+                    current_line_adjudication = Some(LineAdjudication {
+                        payer_id: svd.other_payer_primary_identifier,
+                        paid_amount: svd.service_line_paid_amount,
+                        procedure_code: svd.procedure_code,
+                        procedure_modifier: svd.procedure_modifier_1,
+                        paid_service_unit_count: svd.paid_service_unit_count,
+                        bundled_line_number: svd.bundled_unbundled_line_number,
+                        adjudication_date: None,
+                        adjustments: Vec::new(),
+                    });
                 }
             }
             "CR1" => {
@@ -698,9 +964,24 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 claim.paperwork_control_number = pwk.identification_code;
             }
             "LX" => {
+                // Save any pending line adjudication to current service line
+                if let Some(line_adj) = current_line_adjudication.take() {
+                    if let Some(ref mut line) = current_service_line {
+                        line.line_adjudications.push(line_adj);
+                    }
+                }
+
                 // Save previous service line if any
                 if let Some(line) = current_service_line.take() {
                     claim.service_lines.push(line);
+                }
+
+                // Exit COB loop when we see LX (service lines follow after COB data)
+                if in_cob_loop {
+                    if let Some(other_ins) = current_other_insurance.take() {
+                        claim.other_insurance.push(other_ins);
+                    }
+                    in_cob_loop = false;
                 }
 
                 // Start new service line
@@ -734,6 +1015,8 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     ordering_provider_last_name: None,
                     ordering_provider_first_name: None,
                     referring_provider_npi: None,
+                    referring_provider_last_name: None,
+                    referring_provider_first_name: None,
                     ndc_code: None,
                     ndc_unit_count: None,
                     ndc_measurement_unit: None,
@@ -742,6 +1025,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                     line_note: None,
                     revenue_code: None,
                     other_payer_line_paid_amount: None,
+                    line_adjudications: Vec::new(),
                     allowed_amount: None,
                     saving_amount: None,
                 });
@@ -810,9 +1094,21 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         }
     }
 
+    // Save any pending line adjudication to current service line
+    if let Some(line_adj) = current_line_adjudication.take() {
+        if let Some(ref mut line) = current_service_line {
+            line.line_adjudications.push(line_adj);
+        }
+    }
+
     // Don't forget to push the last service line
     if let Some(line) = current_service_line {
         claim.service_lines.push(line);
+    }
+
+    // Save any pending COB record
+    if let Some(other_ins) = current_other_insurance.take() {
+        claim.other_insurance.push(other_ins);
     }
 
     // If claim-level dates are still default (1900-01-01), copy from first service line
@@ -820,6 +1116,38 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
     if claim.date_of_service_from == *DEFAULT_DATE && !claim.service_lines.is_empty() {
         claim.date_of_service_from = claim.service_lines[0].service_date_from;
         claim.date_of_service_to = claim.service_lines[0].service_date_to;
+    }
+
+    // If claim-level rendering provider is not set but first service line has one, copy it up
+    // This handles cases where NM1*82 appears only at service line level (Loop 2420A)
+    if claim.rendering_provider_npi.is_none() && !claim.service_lines.is_empty() {
+        if let Some(ref npi) = claim.service_lines[0].rendering_provider_npi {
+            claim.rendering_provider_npi = Some(npi.clone());
+            claim.rendering_provider_last_name = claim.service_lines[0].rendering_provider_last_name.clone();
+            claim.rendering_provider_first_name = claim.service_lines[0].rendering_provider_first_name.clone();
+            debug_log(&format!(
+                "[CLAIM] Copied rendering_provider from first service line: npi={:?}, name={:?} {:?}",
+                claim.rendering_provider_npi,
+                claim.rendering_provider_first_name,
+                claim.rendering_provider_last_name
+            ));
+        }
+    }
+
+    // If claim-level referring provider is not set but first service line has one, copy it up
+    // This handles cases where NM1*DN appears only at service line level (Loop 2420F)
+    if claim.referring_provider_npi.is_none() && !claim.service_lines.is_empty() {
+        if let Some(ref npi) = claim.service_lines[0].referring_provider_npi {
+            claim.referring_provider_npi = Some(npi.clone());
+            claim.referring_provider_last_name = claim.service_lines[0].referring_provider_last_name.clone();
+            claim.referring_provider_first_name = claim.service_lines[0].referring_provider_first_name.clone();
+            debug_log(&format!(
+                "[CLAIM] Copied referring_provider from first service line: npi={:?}, name={:?} {:?}",
+                claim.referring_provider_npi,
+                claim.referring_provider_first_name,
+                claim.referring_provider_last_name
+            ));
+        }
     }
 
     Ok(claim)
@@ -856,6 +1184,8 @@ pub fn parse_service_line(segments: &[EdiSegment], line_number: i16) -> Result<S
         ordering_provider_last_name: None,
         ordering_provider_first_name: None,
         referring_provider_npi: None,
+        referring_provider_last_name: None,
+        referring_provider_first_name: None,
         ndc_code: None,
         ndc_unit_count: None,
         ndc_measurement_unit: None,
@@ -864,6 +1194,7 @@ pub fn parse_service_line(segments: &[EdiSegment], line_number: i16) -> Result<S
         line_note: None,
         revenue_code: None,
         other_payer_line_paid_amount: None,
+        line_adjudications: Vec::new(),
         allowed_amount: None,
         saving_amount: None,
     };
