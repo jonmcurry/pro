@@ -260,6 +260,17 @@ impl ClaimsProcessor {
                     result.failed += service_lines.len();
                     error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, e);
 
+                    // CRITICAL: When encounter processing fails, the transaction is in an aborted state.
+                    // We must rollback and start fresh to log errors properly.
+                    // Rollback the aborted transaction (this is a no-op if already rolled back)
+                    tx.rollback().await
+                        .context("Failed to rollback aborted transaction")?;
+
+                    // Start fresh transaction for error logging
+                    tx = self.pool.begin().await
+                        .context("Failed to begin error logging transaction")?;
+                    batch_count = 0;
+
                     // Mark all raw_claims in this encounter as FAILED
                     for service_line in &service_lines {
                         let error_message = format!("Row {}: {}", service_line.row_number, e);
@@ -278,7 +289,7 @@ impl ClaimsProcessor {
                         .await?;
 
                         // Log error to staging.import_error_log
-                        let error_log_id: i64 = sqlx::query_scalar(
+                        let _error_log_id: i64 = sqlx::query_scalar(
                             r#"
                             INSERT INTO staging.import_error_log (
                                 batch_id,
@@ -557,6 +568,7 @@ impl ClaimsProcessor {
             service_facility_city, service_facility_state);
 
         // Ensure providers exist in claims.provider table and get their provider_ids
+        // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
         let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
             match self.ensure_provider_exists(
                 tx,
@@ -578,6 +590,7 @@ impl ClaimsProcessor {
                     provider_id
                 },
                 Err(e) => {
+                    // Log error but don't fail the claim - provider lookup should be non-fatal
                     error!("Error ensuring rendering provider exists: NPI={}, Error={:?}", npi, e);
                     None
                 }
@@ -1365,6 +1378,7 @@ impl ClaimsProcessor {
         let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").map(|s| s.as_str());
 
         // Ensure providers exist in claims.provider table and get their provider_ids
+        // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
         let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
             match self.ensure_provider_exists(
                 tx,
@@ -1929,6 +1943,7 @@ impl ClaimsProcessor {
             .filter(|s| !s.is_empty());
 
         // Phase 3.4: Ensure service line providers exist and get their IDs
+        // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
         let sl_rendering_provider_id = if let Some(npi) = sl_rendering_provider_npi {
             match self.ensure_provider_exists(
                 tx,
