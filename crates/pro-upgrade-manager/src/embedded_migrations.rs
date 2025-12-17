@@ -316,5 +316,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "fix_patient_relationship_code_length",
             sql: include_str!("../../../migrations/061_fix_patient_relationship_code_length.sql"),
         },
+        EmbeddedMigration {
+            version: "062",
+            name: "create_encounter_payer_table",
+            sql: include_str!("../../../migrations/062_create_encounter_payer_table.sql"),
+        },
     ]
 }

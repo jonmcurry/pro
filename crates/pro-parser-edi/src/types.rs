@@ -119,6 +119,7 @@ pub struct ParsedClaim {
     // Loop 2000B - Subscriber Hierarchical Level
     pub subscriber_hl_number: String,
     pub subscriber_relationship_code: String,
+    pub payer_responsibility_code: String, // SBR01 - P=Primary, S=Secondary, T=Tertiary
 
     // Loop 2010BA - Subscriber Name
     pub subscriber_entity_identifier: String,
@@ -173,6 +174,9 @@ pub struct ParsedClaim {
     pub payer_city: Option<String>,
     pub payer_state: Option<String>,
     pub payer_postal_code: Option<String>,
+
+    // Loop 2000B - Subscriber SBR Segment
+    pub claim_filing_indicator_code: Option<String>, // SBR09 - MB=Medicare B, MC=Medicaid, etc.
 
     // Loop 2300 - Claim Information
     pub patient_control_number: String,

@@ -240,6 +240,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         // Initialize all required fields with defaults
         subscriber_hl_number: String::new(),
         subscriber_relationship_code: String::new(),
+        payer_responsibility_code: String::new(), // SBR01 - P=Primary, S=Secondary
         subscriber_entity_identifier: String::new(),
         subscriber_entity_type: String::new(),
         subscriber_last_name: String::new(),
@@ -285,6 +286,9 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         payer_city: None,
         payer_state: None,
         payer_postal_code: None,
+
+        // SBR segment (Loop 2000B)
+        claim_filing_indicator_code: None, // SBR09 - MB=Medicare B, MC=Medicaid, etc.
 
         patient_control_number: String::new(),
         total_claim_charge_amount: rust_decimal::Decimal::ZERO,
@@ -678,10 +682,15 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 let sbr = SbrSegment::parse(segment)?;
 
                 // Check if this is a second SBR (indicates COB Loop 2320)
-                // First SBR is always the primary subscriber
+                // First SBR is the subscriber loop (Loop 2000B) - the payer being BILLED
+                // SBR01 indicates P=Primary, S=Secondary, T=Tertiary
                 if claim.subscriber_relationship_code.is_empty() {
-                    // First SBR - primary subscriber
+                    // First SBR - subscriber loop (payer being billed)
+                    claim.payer_responsibility_code = sbr.payer_responsibility_sequence.clone();
                     claim.subscriber_relationship_code = sbr.individual_relationship_code;
+                    claim.claim_filing_indicator_code = sbr.claim_filing_indicator_code.clone();
+                    debug_log(&format!("[CLAIM] SBR payer_responsibility={}, claim_filing_indicator_code={:?}",
+                        claim.payer_responsibility_code, claim.claim_filing_indicator_code));
                 } else {
                     // Second or subsequent SBR - COB (Other Subscriber)
                     // Finish any existing COB record

@@ -770,8 +770,13 @@ impl ClaimsImporter {
             encounter_fields.insert("patient_relationship_code".to_string(), serde_json::json!(claim.patient_relationship_code.clone().unwrap_or_default()));
 
             // Payer information
+            encounter_fields.insert("payer_responsibility_code".to_string(), serde_json::json!(claim.payer_responsibility_code));
             encounter_fields.insert("payer_name".to_string(), serde_json::json!(claim.payer_name));
             encounter_fields.insert("payer_id".to_string(), serde_json::json!(claim.payer_id));
+            let claim_filing_code = claim.claim_filing_indicator_code.clone().unwrap_or_default();
+            tracing::debug!("[IMPORTER] claim_filing_indicator_code from parsed claim: raw={:?}, unwrapped='{}'",
+                claim.claim_filing_indicator_code, claim_filing_code);
+            encounter_fields.insert("claim_filing_indicator_code".to_string(), serde_json::json!(claim_filing_code));
             encounter_fields.insert("payer_address_line1".to_string(), serde_json::json!(claim.payer_address_line1.clone().unwrap_or_default()));
             encounter_fields.insert("payer_address_line2".to_string(), serde_json::json!(claim.payer_address_line2.clone().unwrap_or_default()));
             encounter_fields.insert("payer_city".to_string(), serde_json::json!(claim.payer_city.clone().unwrap_or_default()));
@@ -826,11 +831,39 @@ impl ClaimsImporter {
             encounter_fields.insert("auto_accident_state".to_string(), serde_json::json!(claim.auto_accident_state.clone().unwrap_or_default()));
             encounter_fields.insert("auto_accident_country".to_string(), serde_json::json!(claim.auto_accident_country.clone().unwrap_or_default()));
 
-            // COB (Coordination of Benefits) information
+            // COB (Coordination of Benefits) information - legacy fields
             encounter_fields.insert("other_payer_paid_amount".to_string(), serde_json::json!(claim.other_payer_paid_amount.map(|d| d.to_string()).unwrap_or_default()));
             encounter_fields.insert("other_payer_id".to_string(), serde_json::json!(claim.other_payer_id.clone().unwrap_or_default()));
             encounter_fields.insert("other_payer_name".to_string(), serde_json::json!(claim.other_payer_name.clone().unwrap_or_default()));
             encounter_fields.insert("other_payer_claim_number".to_string(), serde_json::json!(claim.other_payer_claim_number.clone().unwrap_or_default()));
+
+            // Full COB support - serialize other_insurance array (Loop 2320 payers)
+            if !claim.other_insurance.is_empty() {
+                let other_insurance_json: Vec<serde_json::Value> = claim.other_insurance.iter().map(|oi| {
+                    serde_json::json!({
+                        "payer_responsibility_sequence": oi.payer_responsibility_sequence,
+                        "individual_relationship_code": oi.individual_relationship_code,
+                        "group_policy_number": oi.group_policy_number,
+                        "group_name": oi.group_name,
+                        "insurance_type_code": oi.insurance_type_code,
+                        "coordination_benefits_code": oi.coordination_benefits_code,
+                        "claim_filing_indicator": oi.claim_filing_indicator,
+                        "payer_id": oi.payer_id,
+                        "payer_name": oi.payer_name,
+                        "payer_address_line1": oi.payer_address_line1,
+                        "payer_address_line2": oi.payer_address_line2,
+                        "payer_city": oi.payer_city,
+                        "payer_state": oi.payer_state,
+                        "payer_postal_code": oi.payer_postal_code,
+                        "paid_amount": oi.paid_amount.map(|d| d.to_string()),
+                        "claim_control_number": oi.claim_control_number,
+                        "benefits_assignment_certification": oi.benefits_assignment_certification,
+                        "release_of_information_code": oi.release_of_information_code
+                    })
+                }).collect();
+                encounter_fields.insert("other_insurance".to_string(), serde_json::json!(other_insurance_json));
+                tracing::debug!("[IMPORTER] Serialized {} other_insurance records", claim.other_insurance.len());
+            }
 
             // Ambulance Information (CR1 segment)
             encounter_fields.insert("ambulance_transport_reason_code".to_string(), serde_json::json!(claim.ambulance_transport_reason_code.clone().unwrap_or_default()));

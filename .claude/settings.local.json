@@ -101,7 +101,10 @@
       "Bash(do tail -5 \"$f\")",
       "Bash(do if tail -10 \"$f\")",
       "Bash(sort:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(DB_HOST=localhost DB_PORT=5432 DB_NAME=professional_smart DB_USER=postgres DB_PASSWORD=ClearToFly1 c:/Users/jonmc/dev/pro/target/release/pro-upgrade.exe:*)",
+      "Bash(xargs ls:*)",
+      "Bash(tasklist:*)"
     ],
     "deny": [],
     "ask": []

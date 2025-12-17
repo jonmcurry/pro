@@ -56,6 +56,7 @@ pub fn convert_csv_to_claim(csv_row: &ParsedRow) -> Result<ParsedClaim> {
         // Subscriber hierarchical level (defaults for CSV)
         subscriber_hl_number: "1".to_string(),
         subscriber_relationship_code: "18".to_string(), // Self
+        payer_responsibility_code: get_optional("payer_responsibility_code").unwrap_or_else(|| "P".to_string()), // Default to Primary
 
         // Subscriber information
         subscriber_entity_identifier: "IL".to_string(), // Insured/Subscriber
@@ -93,6 +94,9 @@ pub fn convert_csv_to_claim(csv_row: &ParsedRow) -> Result<ParsedClaim> {
         payer_city: get_optional("payer_city"),
         payer_state: get_optional("payer_state"),
         payer_postal_code: get_optional("payer_postal_code"),
+
+        // Claim filing indicator (SBR09 equivalent for CSV)
+        claim_filing_indicator_code: get_optional("claim_filing_indicator_code"),
 
         // Claim information
         patient_control_number: get_required("patient_control_number")?,

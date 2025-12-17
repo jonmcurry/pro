@@ -15,6 +15,53 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
+/// Helper function to extract a string value from a serde_json::Value
+/// Handles both String values and converts other types to strings
+fn get_string_value(value: &JsonValue) -> Option<String> {
+    match value {
+        JsonValue::String(s) => Some(s.clone()),
+        JsonValue::Number(n) => Some(n.to_string()),
+        JsonValue::Bool(b) => Some(b.to_string()),
+        JsonValue::Null => None,
+        // For arrays and objects, return None (caller should handle separately)
+        _ => None,
+    }
+}
+
+/// Helper function to get a string from a HashMap<String, JsonValue>
+fn get_field_as_string(fields: &HashMap<String, JsonValue>, key: &str) -> Option<String> {
+    fields.get(key).and_then(get_string_value)
+}
+
+/// Wrapper type for encounter fields that provides String-like access to JsonValue fields
+/// This allows existing code patterns to work with minimal changes
+struct EncounterFieldsWrapper {
+    inner: HashMap<String, JsonValue>,
+}
+
+impl EncounterFieldsWrapper {
+    fn new(value: JsonValue) -> Result<Self, serde_json::Error> {
+        let inner: HashMap<String, JsonValue> = serde_json::from_value(value)?;
+        Ok(Self { inner })
+    }
+
+    /// Get a field as Option<String>, converting from JsonValue
+    fn get(&self, key: &str) -> Option<String> {
+        self.inner.get(key).and_then(get_string_value)
+    }
+
+    /// Get a field as Option<&str> by returning a reference to a cached string
+    /// For complex patterns, use get() and work with the owned String
+    fn get_raw(&self, key: &str) -> Option<&JsonValue> {
+        self.inner.get(key)
+    }
+
+    /// Get the inner HashMap for direct access (e.g., for other_insurance array)
+    fn inner(&self) -> &HashMap<String, JsonValue> {
+        &self.inner
+    }
+}
+
 
 /// Claims processor for Stage 2 of two-stage pipeline
 #[derive(Clone)]
@@ -133,7 +180,8 @@ impl ClaimsProcessor {
 
         for raw_claim in raw_claims {
             // Extract encounter key from encounter_fields
-            let encounter_fields: StdHashMap<String, String> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
+            // Use JsonValue to handle mixed types (strings, arrays like other_insurance)
+            let encounter_fields: StdHashMap<String, JsonValue> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
                 Ok(fields) => fields,
                 Err(e) => {
                     error!("Failed to deserialize encounter_fields for raw_claim_id {}: {}", raw_claim.raw_claim_id, e);
@@ -142,8 +190,8 @@ impl ClaimsProcessor {
                 }
             };
 
-            let patient_control_number = match encounter_fields.get("patient_control_number") {
-                Some(pcn) => pcn.clone(),
+            let patient_control_number = match get_field_as_string(&encounter_fields, "patient_control_number") {
+                Some(pcn) => pcn,
                 None => {
                     error!("Missing patient_control_number for raw_claim_id {}", raw_claim.raw_claim_id);
                     result.failed += 1;
@@ -151,8 +199,8 @@ impl ClaimsProcessor {
                 }
             };
 
-            let date_of_service = match encounter_fields.get("date_of_service_from") {
-                Some(dos) => dos.clone(),
+            let date_of_service = match get_field_as_string(&encounter_fields, "date_of_service_from") {
+                Some(dos) => dos,
                 None => {
                     error!("Missing date_of_service_from for raw_claim_id {}", raw_claim.raw_claim_id);
                     result.failed += 1;
@@ -366,7 +414,8 @@ impl ClaimsProcessor {
         let first_line = &service_lines[0];
 
         // Deserialize encounter fields from first line
-        let encounter_fields: HashMap<String, String> = serde_json::from_value(first_line.encounter_fields.clone())
+        // Use EncounterFieldsWrapper to handle mixed types (strings, arrays like other_insurance)
+        let encounter_fields = EncounterFieldsWrapper::new(first_line.encounter_fields.clone())
             .context("Failed to deserialize encounter_fields")?;
 
         // Extract facility_code
@@ -375,7 +424,7 @@ impl ClaimsProcessor {
             .context("Missing facility_code or facility_npi")?;
 
         // Check cache first
-        let (facility_id, organization_id, region_id) = if let Some(cached) = facility_cache.get(facility_code) {
+        let (facility_id, organization_id, region_id) = if let Some(cached) = facility_cache.get(&facility_code) {
             *cached
         } else {
             let facility = sqlx::query_as::<_, (Option<i64>, i64, Option<i64>)>(
@@ -385,7 +434,7 @@ impl ClaimsProcessor {
                 WHERE facility_code = $1 OR npi = $1
                 "#
             )
-            .bind(facility_code)
+            .bind(&facility_code)
             .fetch_optional(&mut **tx)
             .await?;
 
@@ -409,16 +458,18 @@ impl ClaimsProcessor {
             .context("Missing subscriber_id")?;
         let subscriber_birth_date_str = encounter_fields.get("subscriber_birth_date")
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
-            .unwrap_or("1900-01-01"); // Default to 1900-01-01 if missing or empty
+            .unwrap_or_else(|| "1900-01-01".to_string()); // Default to 1900-01-01 if missing or empty
 
         // Optional fields
-        let submitter_id = encounter_fields.get("submitter_id").unwrap_or(facility_code);
+        let submitter_id = encounter_fields.get("submitter_id").unwrap_or_else(|| facility_code.clone());
         // Truncate payer_responsibility_code to 1 char (CHAR(1) in DB, must be 'P' or 'S')
-        let payer_responsibility_code = encounter_fields.get("payer_responsibility_code")
-            .map(|s| s.as_str())
-            .map(|s| if s.len() > 1 { &s[..1] } else { s })
-            .unwrap_or("P");
+        let payer_responsibility_code_str = encounter_fields.get("payer_responsibility_code")
+            .unwrap_or_else(|| "P".to_string());
+        let payer_responsibility_code = if payer_responsibility_code_str.len() > 1 {
+            &payer_responsibility_code_str[..1]
+        } else {
+            &payer_responsibility_code_str
+        };
 
         // Calculate total claim charge from ALL service lines
         let mut total_claim_charge = rust_decimal::Decimal::ZERO;
@@ -435,72 +486,70 @@ impl ClaimsProcessor {
         }
 
         // Parse dates
-        let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
+        let dos_from = chrono::NaiveDate::parse_from_str(&date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
-        let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
+        let subscriber_dob = chrono::NaiveDate::parse_from_str(&subscriber_birth_date_str, "%Y-%m-%d")
             .unwrap_or(*DEFAULT_DATE); // Fallback to 1900-01-01
 
-        // Optional fields
-        let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
-        let payer_name = encounter_fields.get("payer_name").map(|s| s.as_str());
+        // Optional fields - now returns Option<String>, use .as_deref() where needed
+        let payer_id = encounter_fields.get("payer_id");
+        let payer_name = encounter_fields.get("payer_name");
+        // Claim filing indicator (SBR09) - filter empty strings to allow DB default
+        let claim_filing_indicator = encounter_fields.get("claim_filing_indicator_code")
+            .filter(|s| !s.is_empty());
+        debug!("[ENCOUNTER] claim_filing_indicator_code: raw={:?}, filtered={:?}",
+            encounter_fields.get("claim_filing_indicator_code"), claim_filing_indicator);
         // Truncate place_of_service to 2 chars (VARCHAR(2) in DB)
-        let place_of_service = encounter_fields.get("place_of_service_code")
-            .map(|s| s.as_str())
-            .map(|s| if s.len() > 2 { &s[..2] } else { s });
-        let medical_record_number = encounter_fields.get("medical_record_number").map(|s| s.as_str());
+        let place_of_service_str = encounter_fields.get("place_of_service_code");
+        let place_of_service = place_of_service_str.as_ref().map(|s| if s.len() > 2 { &s[..2] } else { s.as_str() });
+        let medical_record_number = encounter_fields.get("medical_record_number");
 
         // Patient fields (when patient is different from subscriber)
-        let patient_last_name = encounter_fields.get("patient_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_first_name = encounter_fields.get("patient_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_middle_name = encounter_fields.get("patient_middle_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_name_suffix = encounter_fields.get("patient_name_suffix").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_dob_str = encounter_fields.get("patient_date_of_birth").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_dob = patient_dob_str.and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+        let patient_last_name = encounter_fields.get("patient_last_name").filter(|s| !s.is_empty());
+        let patient_first_name = encounter_fields.get("patient_first_name").filter(|s| !s.is_empty());
+        let patient_middle_name = encounter_fields.get("patient_middle_name").filter(|s| !s.is_empty());
+        let patient_name_suffix = encounter_fields.get("patient_name_suffix").filter(|s| !s.is_empty());
+        let patient_dob_str = encounter_fields.get("patient_date_of_birth").filter(|s| !s.is_empty());
+        let patient_dob = patient_dob_str.as_ref().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
         // Truncate patient_gender to 1 char (CHAR(1) in DB)
-        let patient_gender = encounter_fields.get("patient_gender")
-            .map(|s| s.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| if s.len() > 1 { &s[..1] } else { s });
-        let patient_address_line1 = encounter_fields.get("patient_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_address_line2 = encounter_fields.get("patient_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let patient_city = encounter_fields.get("patient_city").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_gender_str = encounter_fields.get("patient_gender").filter(|s| !s.is_empty());
+        let patient_gender = patient_gender_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let patient_address_line1 = encounter_fields.get("patient_address_line1").filter(|s| !s.is_empty());
+        let patient_address_line2 = encounter_fields.get("patient_address_line2").filter(|s| !s.is_empty());
+        let patient_city = encounter_fields.get("patient_city").filter(|s| !s.is_empty());
         // Truncate patient_state to 2 chars (CHAR(2) in DB)
-        let patient_state = encounter_fields.get("patient_state")
-            .map(|s| s.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| if s.len() > 2 { &s[..2] } else { s });
-        let patient_postal_code = encounter_fields.get("patient_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let patient_state_str = encounter_fields.get("patient_state").filter(|s| !s.is_empty());
+        let patient_state = patient_state_str.as_ref().map(|s| if s.len() > 2 { &s[..2] } else { s.as_str() });
+        let patient_postal_code = encounter_fields.get("patient_postal_code").filter(|s| !s.is_empty());
         // Truncate patient_relationship_code to 3 chars (VARCHAR(3) in DB after migration 061)
-        let patient_relationship_code = encounter_fields.get("patient_relationship_code")
-            .map(|s| s.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| if s.len() > 3 { &s[..3] } else { s });
+        let patient_relationship_code_str = encounter_fields.get("patient_relationship_code").filter(|s| !s.is_empty());
+        let patient_relationship_code = patient_relationship_code_str.as_ref().map(|s| if s.len() > 3 { &s[..3] } else { s.as_str() });
 
         // Extract provider NPIs and names (with empty string filtering)
-        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let rendering_provider_last_name = encounter_fields.get("rendering_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let rendering_provider_first_name = encounter_fields.get("rendering_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").filter(|s| !s.is_empty());
+        let rendering_provider_last_name = encounter_fields.get("rendering_provider_last_name").filter(|s| !s.is_empty());
+        let rendering_provider_first_name = encounter_fields.get("rendering_provider_first_name").filter(|s| !s.is_empty());
+        let rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy").filter(|s| !s.is_empty());
 
-        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let referring_provider_last_name = encounter_fields.get("referring_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let referring_provider_first_name = encounter_fields.get("referring_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi").filter(|s| !s.is_empty());
+        let referring_provider_last_name = encounter_fields.get("referring_provider_last_name").filter(|s| !s.is_empty());
+        let referring_provider_first_name = encounter_fields.get("referring_provider_first_name").filter(|s| !s.is_empty());
 
-        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let supervising_provider_last_name = encounter_fields.get("supervising_provider_last_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").filter(|s| !s.is_empty());
+        let supervising_provider_last_name = encounter_fields.get("supervising_provider_last_name").filter(|s| !s.is_empty());
+        let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").filter(|s| !s.is_empty());
 
-        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi").filter(|s| !s.is_empty());
+        let billing_provider_name = encounter_fields.get("billing_provider_name").filter(|s| !s.is_empty());
 
         // Service Facility information (Loop 2310C - NM1*77, N3, N4)
-        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_city = encounter_fields.get("service_facility_city").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_state = encounter_fields.get("service_facility_state").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let service_facility_npi = encounter_fields.get("service_facility_npi").filter(|s| !s.is_empty());
+        let service_facility_name = encounter_fields.get("service_facility_name").filter(|s| !s.is_empty());
+        let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").filter(|s| !s.is_empty());
+        let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").filter(|s| !s.is_empty());
+        let service_facility_city = encounter_fields.get("service_facility_city").filter(|s| !s.is_empty());
+        let service_facility_state = encounter_fields.get("service_facility_state").filter(|s| !s.is_empty());
+        let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").filter(|s| !s.is_empty());
 
         // Log service facility fields for debugging
         info!("Service facility from encounter_fields: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
@@ -508,23 +557,23 @@ impl ClaimsProcessor {
             service_facility_city, service_facility_state);
 
         // Ensure providers exist in claims.provider table and get their provider_ids
-        let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
+        let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
             match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Rendering",
-                rendering_provider_last_name,
-                rendering_provider_first_name,
+                rendering_provider_last_name.as_deref(),
+                rendering_provider_first_name.as_deref(),
                 None,
-                rendering_provider_taxonomy,
+                rendering_provider_taxonomy.as_deref(),
                 Some(organization_id),
             ).await {
                 Ok(provider_id) => {
                     if provider_id.is_none() {
                         warn!("Failed to create/find rendering provider: NPI={}, Name={} {}",
                             npi,
-                            rendering_provider_first_name.unwrap_or(""),
-                            rendering_provider_last_name.unwrap_or(""));
+                            rendering_provider_first_name.as_deref().unwrap_or(""),
+                            rendering_provider_last_name.as_deref().unwrap_or(""));
                     }
                     provider_id
                 },
@@ -537,13 +586,13 @@ impl ClaimsProcessor {
             None
         };
 
-        let referring_provider_id = if let Some(npi) = referring_provider_npi {
+        let referring_provider_id = if let Some(ref npi) = referring_provider_npi {
             match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Referring",
-                referring_provider_last_name,
-                referring_provider_first_name,
+                referring_provider_last_name.as_deref(),
+                referring_provider_first_name.as_deref(),
                 None,
                 None,
                 Some(organization_id),
@@ -552,8 +601,8 @@ impl ClaimsProcessor {
                     if provider_id.is_none() {
                         warn!("Failed to create/find referring provider: NPI={}, Name={} {}",
                             npi,
-                            referring_provider_first_name.unwrap_or(""),
-                            referring_provider_last_name.unwrap_or(""));
+                            referring_provider_first_name.as_deref().unwrap_or(""),
+                            referring_provider_last_name.as_deref().unwrap_or(""));
                     }
                     provider_id
                 },
@@ -566,13 +615,13 @@ impl ClaimsProcessor {
             None
         };
 
-        let supervising_provider_id = if let Some(npi) = supervising_provider_npi {
+        let supervising_provider_id = if let Some(ref npi) = supervising_provider_npi {
             match self.ensure_provider_exists(
                 tx,
                 npi,
                 "Supervising",
-                supervising_provider_last_name,
-                supervising_provider_first_name,
+                supervising_provider_last_name.as_deref(),
+                supervising_provider_first_name.as_deref(),
                 None,
                 None,
                 Some(organization_id),
@@ -581,8 +630,8 @@ impl ClaimsProcessor {
                     if provider_id.is_none() {
                         warn!("Failed to create/find supervising provider: NPI={}, Name={} {}",
                             npi,
-                            supervising_provider_first_name.unwrap_or(""),
-                            supervising_provider_last_name.unwrap_or(""));
+                            supervising_provider_first_name.as_deref().unwrap_or(""),
+                            supervising_provider_last_name.as_deref().unwrap_or(""));
                     }
                     provider_id
                 },
@@ -595,15 +644,15 @@ impl ClaimsProcessor {
             None
         };
 
-        let billing_provider_id = if let Some(npi) = billing_provider_npi {
+        let billing_provider_id = if let Some(ref npi) = billing_provider_npi {
             // For billing provider, we may only have organization name (not first/last)
             // Split billing_provider_name into last/first if it contains a comma
-            let (last, first) = if let Some(name) = billing_provider_name {
+            let (last, first) = if let Some(ref name) = billing_provider_name {
                 if name.contains(',') {
                     let parts: Vec<&str> = name.splitn(2, ',').collect();
                     (Some(parts[0].trim()), parts.get(1).map(|s| s.trim()))
                 } else {
-                    (Some(name), None)
+                    (Some(name.as_str()), None)
                 }
             } else {
                 (None, None)
@@ -635,6 +684,71 @@ impl ClaimsProcessor {
             None
         };
 
+        // Check for existing encounter (same claim resubmitted)
+        // Match on: patient_control_number + facility_id + date_of_service_from
+        // If exists, UPDATE payer fields and add to encounter_payer table
+        let existing_encounter: Option<i64> = sqlx::query_scalar(
+            r#"
+            SELECT encounter_id
+            FROM claims.encounter
+            WHERE patient_control_number = $1
+              AND facility_id = $2
+              AND date_of_service_from = $3
+              AND soft_deleted = false
+            LIMIT 1
+            "#
+        )
+        .bind(&patient_control_number)
+        .bind(facility_id)
+        .bind(dos_from)
+        .fetch_optional(&mut **tx)
+        .await?;
+
+        if let Some(existing_id) = existing_encounter {
+            info!("[RESUBMIT] Encounter exists: encounter_id={}, updating payer info. patient_control_number={}, payer_id={:?}, payer_name={:?}",
+                existing_id, &patient_control_number, &payer_id, &payer_name);
+
+            // Update encounter with new billing payer info
+            sqlx::query(
+                r#"
+                UPDATE claims.encounter
+                SET payer_responsibility_code = $1,
+                    payer_id = $2,
+                    payer_name = $3,
+                    claim_filing_indicator = $4,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE encounter_id = $5
+                "#
+            )
+            .bind(payer_responsibility_code)
+            .bind(payer_id.as_deref())
+            .bind(payer_name.as_deref())
+            .bind(claim_filing_indicator.as_deref())
+            .bind(existing_id)
+            .execute(&mut **tx)
+            .await
+            .context("Failed to update encounter payer info")?;
+
+            // Insert billing payer into encounter_payer table
+            self.insert_encounter_payer(
+                tx,
+                existing_id,
+                payer_responsibility_code,
+                payer_id.as_deref(),
+                payer_name.as_deref(),
+                claim_filing_indicator.as_deref(),
+                true, // is_billing_payer
+                None, // paid_amount (billing payer hasn't paid yet)
+                None, // claim_control_number
+                billing_provider_id,
+            ).await?;
+
+            // Insert COB payers (from Loop 2320) into encounter_payer table
+            self.import_encounter_payers_from_cob(tx, existing_id, encounter_fields.inner(), billing_provider_id).await?;
+
+            return Ok(existing_id);
+        }
+
         // Insert encounter and get generated ID (ONE record for all service lines)
         let encounter_id: i64 = sqlx::query_scalar(
             r#"
@@ -654,6 +768,7 @@ impl ClaimsProcessor {
                 payer_id,
                 payer_name,
                 payer_responsibility_code,
+                claim_filing_indicator,
                 place_of_service_code,
                 medical_record_number,
                 rendering_provider_id,
@@ -682,51 +797,52 @@ impl ClaimsProcessor {
                 service_facility_postal_code
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
+                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)
             RETURNING encounter_id
             "#
         )
         .bind(facility_id)
         .bind(organization_id)
         .bind(region_id)
-        .bind(submitter_id)
-        .bind(patient_control_number)
-        .bind(subscriber_id)
-        .bind(subscriber_last_name)
-        .bind(subscriber_first_name)
+        .bind(&submitter_id)
+        .bind(&patient_control_number)
+        .bind(&subscriber_id)
+        .bind(&subscriber_last_name)
+        .bind(&subscriber_first_name)
         .bind(subscriber_dob)
         .bind(dos_from)
         .bind(dos_from) // date_of_service_to same as from for now
         .bind(total_claim_charge)
-        .bind(payer_id)
-        .bind(payer_name)
+        .bind(payer_id.as_deref())
+        .bind(payer_name.as_deref())
         .bind(payer_responsibility_code)
+        .bind(claim_filing_indicator.as_deref())
         .bind(place_of_service)
-        .bind(medical_record_number)
+        .bind(medical_record_number.as_deref())
         .bind(rendering_provider_id)
         .bind(referring_provider_id)
         .bind(supervising_provider_id)
         .bind(billing_provider_id)
         .bind("NEW")
-        .bind(patient_last_name)
-        .bind(patient_first_name)
-        .bind(patient_middle_name)
-        .bind(patient_name_suffix)
+        .bind(patient_last_name.as_deref())
+        .bind(patient_first_name.as_deref())
+        .bind(patient_middle_name.as_deref())
+        .bind(patient_name_suffix.as_deref())
         .bind(patient_dob)
         .bind(patient_gender)
-        .bind(patient_address_line1)
-        .bind(patient_address_line2)
-        .bind(patient_city)
+        .bind(patient_address_line1.as_deref())
+        .bind(patient_address_line2.as_deref())
+        .bind(patient_city.as_deref())
         .bind(patient_state)
-        .bind(patient_postal_code)
+        .bind(patient_postal_code.as_deref())
         .bind(patient_relationship_code)
-        .bind(service_facility_npi)
-        .bind(service_facility_name)
-        .bind(service_facility_address_line1)
-        .bind(service_facility_address_line2)
-        .bind(service_facility_city)
-        .bind(service_facility_state)
-        .bind(service_facility_postal_code)
+        .bind(service_facility_npi.as_deref())
+        .bind(service_facility_name.as_deref())
+        .bind(service_facility_address_line1.as_deref())
+        .bind(service_facility_address_line2.as_deref())
+        .bind(service_facility_city.as_deref())
+        .bind(service_facility_state.as_deref())
+        .bind(service_facility_postal_code.as_deref())
         .fetch_one(&mut **tx)
         .await
         .map_err(|e| {
@@ -756,7 +872,313 @@ impl ClaimsProcessor {
         // Import diagnoses from first service line (all should have same diagnoses)
         self.import_diagnoses(tx, encounter_id, first_line).await?;
 
+        // Insert billing payer into encounter_payer table (first SBR - the one being billed)
+        self.insert_encounter_payer(
+            tx,
+            encounter_id,
+            payer_responsibility_code,
+            payer_id.as_deref(),
+            payer_name.as_deref(),
+            claim_filing_indicator.as_deref(),
+            true, // is_billing_payer
+            None, // paid_amount (billing payer hasn't paid yet)
+            None, // claim_control_number
+            billing_provider_id,
+        ).await?;
+
+        // Insert COB payers (from Loop 2320) into encounter_payer table
+        self.import_encounter_payers_from_cob(tx, encounter_id, encounter_fields.inner(), billing_provider_id).await?;
+
         Ok(encounter_id)
+    }
+
+    /// Insert a payer record into encounter_payer table
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_encounter_payer(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        encounter_id: i64,
+        payer_responsibility_code: &str,
+        payer_id: Option<&str>,
+        payer_name: Option<&str>,
+        claim_filing_indicator: Option<&str>,
+        is_billing_payer: bool,
+        paid_amount: Option<rust_decimal::Decimal>,
+        claim_control_number: Option<&str>,
+        billing_provider_id: Option<i64>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO claims.encounter_payer (
+                encounter_id,
+                payer_responsibility_code,
+                payer_id,
+                payer_name,
+                claim_filing_indicator,
+                is_billing_payer,
+                paid_amount,
+                claim_control_number,
+                billing_provider_id,
+                submitted_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+            "#
+        )
+        .bind(encounter_id)
+        .bind(payer_responsibility_code)
+        .bind(payer_id)
+        .bind(payer_name)
+        .bind(claim_filing_indicator)
+        .bind(is_billing_payer)
+        .bind(paid_amount)
+        .bind(claim_control_number)
+        .bind(billing_provider_id)
+        .execute(&mut **tx)
+        .await
+        .context("Failed to insert encounter_payer record")?;
+
+        debug!("[PAYER] Inserted encounter_payer: encounter_id={}, payer_resp={}, payer_id={:?}, is_billing={}, paid_amount={:?}",
+            encounter_id, payer_responsibility_code, payer_id, is_billing_payer, paid_amount);
+
+        Ok(())
+    }
+
+    /// Import COB payers from other_insurance JSON into encounter_payer table
+    async fn import_encounter_payers_from_cob(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        encounter_id: i64,
+        encounter_fields: &HashMap<String, JsonValue>,
+        billing_provider_id: Option<i64>,
+    ) -> Result<()> {
+        // Check if other_insurance data exists in encounter_fields
+        let other_insurance_value = match encounter_fields.get("other_insurance") {
+            Some(value) => value,
+            None => return Ok(()), // No COB data
+        };
+
+        // The other_insurance field is already a JsonValue array (not a string that needs parsing)
+        let other_insurance_array: Vec<serde_json::Value> = match other_insurance_value {
+            JsonValue::Array(arr) => arr.clone(),
+            JsonValue::String(json_str) => {
+                // Fallback: if it's a string, try parsing it
+                match serde_json::from_str(json_str) {
+                    Ok(arr) => arr,
+                    Err(e) => {
+                        warn!("[COB] Failed to parse other_insurance JSON string: {:?}", e);
+                        return Ok(());
+                    }
+                }
+            },
+            _ => {
+                warn!("[COB] other_insurance is not an array or string: {:?}", other_insurance_value);
+                return Ok(());
+            }
+        };
+
+        if other_insurance_array.is_empty() {
+            return Ok(());
+        }
+
+        debug!("[COB] Inserting {} COB payers into encounter_payer for encounter_id={}",
+            other_insurance_array.len(), encounter_id);
+
+        for oi in &other_insurance_array {
+            let payer_resp_seq = oi.get("payer_responsibility_sequence")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_id = oi.get("payer_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_name = oi.get("payer_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let claim_filing_indicator = oi.get("claim_filing_indicator")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let paid_amount: Option<rust_decimal::Decimal> = oi.get("paid_amount")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse().ok());
+            let claim_control_number = oi.get("claim_control_number")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+
+            // Skip if no payer_responsibility_sequence (required field)
+            let payer_resp = match payer_resp_seq {
+                Some(p) => p,
+                None => {
+                    warn!("[COB] Skipping COB payer with missing payer_responsibility_sequence");
+                    continue;
+                }
+            };
+
+            self.insert_encounter_payer(
+                tx,
+                encounter_id,
+                payer_resp,
+                payer_id,
+                payer_name,
+                claim_filing_indicator,
+                false, // is_billing_payer = false for COB payers
+                paid_amount,
+                claim_control_number,
+                billing_provider_id,
+            ).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Import other insurance records from encounter_fields JSON
+    async fn import_other_insurance(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        encounter_id: i64,
+        encounter_fields: &HashMap<String, String>,
+    ) -> Result<()> {
+        // Check if other_insurance data exists in encounter_fields
+        let other_insurance_json = match encounter_fields.get("other_insurance") {
+            Some(json_str) => json_str,
+            None => return Ok(()), // No COB data
+        };
+
+        // Parse the JSON array
+        let other_insurance_array: Vec<serde_json::Value> = match serde_json::from_str(other_insurance_json) {
+            Ok(arr) => arr,
+            Err(e) => {
+                warn!("[COB] Failed to parse other_insurance JSON: {:?}", e);
+                return Ok(());
+            }
+        };
+
+        if other_insurance_array.is_empty() {
+            return Ok(());
+        }
+
+        debug!("[COB] Inserting {} other_insurance records for encounter_id={}",
+            other_insurance_array.len(), encounter_id);
+
+        for oi in &other_insurance_array {
+            let payer_resp_seq = oi.get("payer_responsibility_sequence")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let individual_rel_code = oi.get("individual_relationship_code")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let group_policy_number = oi.get("group_policy_number")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let group_name = oi.get("group_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let insurance_type_code = oi.get("insurance_type_code")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let coordination_benefits_code = oi.get("coordination_benefits_code")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let claim_filing_indicator = oi.get("claim_filing_indicator")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_id = oi.get("payer_id")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_name = oi.get("payer_name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_address_line1 = oi.get("payer_address_line1")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_address_line2 = oi.get("payer_address_line2")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_city = oi.get("payer_city")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_state = oi.get("payer_state")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let payer_postal_code = oi.get("payer_postal_code")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let paid_amount: Option<rust_decimal::Decimal> = oi.get("paid_amount")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .and_then(|s| s.parse().ok());
+            let claim_control_number = oi.get("claim_control_number")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let benefits_assignment = oi.get("benefits_assignment_certification")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+            let release_of_info = oi.get("release_of_information_code")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty());
+
+            // Skip if no payer_responsibility_sequence (required field)
+            let payer_resp = match payer_resp_seq {
+                Some(p) => p,
+                None => {
+                    warn!("[COB] Skipping other_insurance record with missing payer_responsibility_sequence");
+                    continue;
+                }
+            };
+
+            sqlx::query(
+                r#"
+                INSERT INTO claims.other_insurance (
+                    encounter_id,
+                    payer_responsibility_sequence,
+                    individual_relationship_code,
+                    group_policy_number,
+                    group_name,
+                    insurance_type_code,
+                    coordination_benefits_code,
+                    claim_filing_indicator,
+                    payer_id,
+                    payer_name,
+                    payer_address_line1,
+                    payer_address_line2,
+                    payer_city,
+                    payer_state,
+                    payer_postal_code,
+                    paid_amount,
+                    claim_control_number,
+                    benefits_assignment_certification,
+                    release_of_information_code
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                "#
+            )
+            .bind(encounter_id)
+            .bind(payer_resp)
+            .bind(individual_rel_code)
+            .bind(group_policy_number)
+            .bind(group_name)
+            .bind(insurance_type_code)
+            .bind(coordination_benefits_code)
+            .bind(claim_filing_indicator)
+            .bind(payer_id)
+            .bind(payer_name)
+            .bind(payer_address_line1)
+            .bind(payer_address_line2)
+            .bind(payer_city)
+            .bind(payer_state)
+            .bind(payer_postal_code)
+            .bind(paid_amount)
+            .bind(claim_control_number)
+            .bind(benefits_assignment)
+            .bind(release_of_info)
+            .execute(&mut **tx)
+            .await
+            .context("Failed to insert other_insurance record")?;
+
+            debug!("[COB] Inserted other_insurance: payer_resp={}, payer_id={:?}, payer_name={:?}, paid_amount={:?}",
+                payer_resp, payer_id, payer_name, paid_amount);
+        }
+
+        Ok(())
     }
 
     /// Process a single raw claim from staging.raw_claims
@@ -898,7 +1320,10 @@ impl ClaimsProcessor {
         // Phase 2: Claim supplemental information
         let transaction_set_control_number = encounter_fields.get("transaction_set_control_number").map(|s| s.as_str());
         let submitter_name = encounter_fields.get("submitter_name").map(|s| s.as_str());
-        let claim_filing_indicator = encounter_fields.get("claim_filing_indicator_code").map(|s| s.as_str());
+        let claim_filing_indicator = encounter_fields.get("claim_filing_indicator_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        debug!("[ENCOUNTER] claim_filing_indicator_code from encounter_fields: raw={:?}, filtered={:?}",
+            encounter_fields.get("claim_filing_indicator_code"),
+            claim_filing_indicator);
         let claim_frequency_code = encounter_fields.get("claim_frequency_code").map(|s| s.as_str());
         let signature_indicator = encounter_fields.get("signature_indicator").map(|s| s.as_str());
         let assignment_indicator = encounter_fields.get("assignment_indicator").map(|s| s.as_str());
@@ -1364,8 +1789,8 @@ impl ClaimsProcessor {
         raw_claim: &RawClaim,
         line_number: i32,
     ) -> Result<()> {
-        // Deserialize encounter and service line fields
-        let encounter_fields: HashMap<String, String> = serde_json::from_value(raw_claim.encounter_fields.clone())
+        // Deserialize encounter fields - use JsonValue to handle mixed types (strings, arrays like other_insurance)
+        let encounter_fields: HashMap<String, JsonValue> = serde_json::from_value(raw_claim.encounter_fields.clone())
             .context("Failed to deserialize encounter_fields")?;
 
         let service_line_fields: HashMap<String, String> = raw_claim.service_line_fields.as_ref()
@@ -1388,7 +1813,8 @@ impl ClaimsProcessor {
 
         // Get service date - use service_date_from if available, otherwise fall back to encounter DOS
         let service_date_str = service_line_fields.get(&format!("{}date_from", prefix))
-            .or_else(|| encounter_fields.get("date_of_service_from"))
+            .cloned()
+            .or_else(|| get_field_as_string(&encounter_fields, "date_of_service_from"))
             .context("Missing service_date_from and date_of_service_from")?;
 
         // Parse decimal values
@@ -1398,7 +1824,7 @@ impl ClaimsProcessor {
             .unwrap_or(rust_decimal::Decimal::ONE);
 
         // Parse service date
-        let service_date = chrono::NaiveDate::parse_from_str(service_date_str, "%Y-%m-%d")
+        let service_date = chrono::NaiveDate::parse_from_str(&service_date_str, "%Y-%m-%d")
             .context("Invalid date format for service_date_from")?;
 
         // Extract diagnosis pointers (CRITICAL for medical necessity validation)
@@ -1498,9 +1924,9 @@ impl ClaimsProcessor {
             .map(|s| s.as_str());
 
         // Phase 3.3: Rendering provider taxonomy (from encounter level, not service line level)
-        let sl_rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy")
-            .filter(|s| !s.is_empty())
-            .map(|s| s.as_str());
+        let sl_rendering_provider_taxonomy_owned = get_field_as_string(&encounter_fields, "rendering_provider_taxonomy");
+        let sl_rendering_provider_taxonomy = sl_rendering_provider_taxonomy_owned.as_deref()
+            .filter(|s| !s.is_empty());
 
         // Phase 3.4: Ensure service line providers exist and get their IDs
         let sl_rendering_provider_id = if let Some(npi) = sl_rendering_provider_npi {
@@ -2050,7 +2476,8 @@ impl ClaimsProcessor {
 
         for raw_claim in raw_claims {
             // Extract encounter key from encounter_fields
-            let encounter_fields: StdHashMap<String, String> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
+            // Use JsonValue to handle mixed types (strings, arrays like other_insurance)
+            let encounter_fields: StdHashMap<String, JsonValue> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
                 Ok(fields) => fields,
                 Err(e) => {
                     failure_count += 1;
@@ -2061,8 +2488,8 @@ impl ClaimsProcessor {
                 }
             };
 
-            let patient_control_number = match encounter_fields.get("patient_control_number") {
-                Some(pcn) => pcn.clone(),
+            let patient_control_number = match get_field_as_string(&encounter_fields, "patient_control_number") {
+                Some(pcn) => pcn,
                 None => {
                     failure_count += 1;
                     let error_message = format!("Row {}: Missing patient_control_number", raw_claim.row_number);
@@ -2072,8 +2499,8 @@ impl ClaimsProcessor {
                 }
             };
 
-            let date_of_service = match encounter_fields.get("date_of_service_from") {
-                Some(dos) => dos.clone(),
+            let date_of_service = match get_field_as_string(&encounter_fields, "date_of_service_from") {
+                Some(dos) => dos,
                 None => {
                     failure_count += 1;
                     let error_message = format!("Row {}: Missing date_of_service_from", raw_claim.row_number);

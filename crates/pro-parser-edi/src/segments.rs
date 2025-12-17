@@ -260,10 +260,10 @@ impl SbrSegment {
 /// Parse CLM segment (Claim Information)
 /// Format: CLM*patient_control_number*charge_amount***facility_type_composite*signature*assignment*benefits*release
 /// CLM05 is a composite field: place_of_service:facility_code_qualifier:claim_frequency_code
+/// Note: Claim filing indicator is NOT in CLM segment - it's in SBR09
 pub struct ClmSegment {
     pub patient_control_number: String,
     pub total_claim_charge_amount: Decimal,
-    pub claim_filing_indicator_code: Option<String>,
     pub place_of_service_code: Option<String>,       // CLM05-1
     pub facility_code_qualifier: Option<String>,     // CLM05-2
     pub claim_frequency_code: Option<String>,        // CLM05-3
@@ -301,7 +301,6 @@ impl ClmSegment {
         Ok(Self {
             patient_control_number: segment.get_or_empty(0).to_string(),
             total_claim_charge_amount: charge_amount,
-            claim_filing_indicator_code: segment.get_optional(2), // CLM03
             place_of_service_code,       // CLM05-1
             facility_code_qualifier,     // CLM05-2
             claim_frequency_code,        // CLM05-3
