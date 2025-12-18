@@ -572,9 +572,9 @@ impl ClaimsProcessor {
         let billing_date = billing_date_str.as_ref().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
         // Ensure providers exist in claims.provider table and get their provider_ids
-        // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
+        // Provider errors are handled internally using savepoints - claims proceed with NULL provider_id on error
         let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Rendering",
@@ -583,28 +583,13 @@ impl ClaimsProcessor {
                 None,
                 rendering_provider_taxonomy.as_deref(),
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find rendering provider: NPI={}, Name={} {}",
-                            npi,
-                            rendering_provider_first_name.as_deref().unwrap_or(""),
-                            rendering_provider_last_name.as_deref().unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    // Log error but don't fail the claim - provider lookup should be non-fatal
-                    error!("Error ensuring rendering provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
 
         let referring_provider_id = if let Some(ref npi) = referring_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Referring",
@@ -613,27 +598,13 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find referring provider: NPI={}, Name={} {}",
-                            npi,
-                            referring_provider_first_name.as_deref().unwrap_or(""),
-                            referring_provider_last_name.as_deref().unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring referring provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
 
         let supervising_provider_id = if let Some(ref npi) = supervising_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Supervising",
@@ -642,21 +613,7 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find supervising provider: NPI={}, Name={} {}",
-                            npi,
-                            supervising_provider_first_name.as_deref().unwrap_or(""),
-                            supervising_provider_last_name.as_deref().unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring supervising provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
@@ -675,7 +632,7 @@ impl ClaimsProcessor {
                 (None, None)
             };
 
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Billing",
@@ -684,19 +641,7 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find billing provider: NPI={}, Name={:?}",
-                            npi, billing_provider_name);
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring billing provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
@@ -1339,9 +1284,9 @@ impl ClaimsProcessor {
         let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").map(|s| s.as_str());
 
         // Ensure providers exist in claims.provider table and get their provider_ids
-        // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
+        // Provider errors are handled internally using savepoints - claims proceed with NULL provider_id on error
         let rendering_provider_id = if let Some(npi) = rendering_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Rendering",
@@ -1350,27 +1295,13 @@ impl ClaimsProcessor {
                 None,
                 rendering_provider_taxonomy,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find rendering provider: NPI={}, Name={} {}",
-                            npi,
-                            rendering_provider_first_name.unwrap_or(""),
-                            rendering_provider_last_name.unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring rendering provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
 
         let referring_provider_id = if let Some(npi) = referring_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Referring",
@@ -1379,27 +1310,13 @@ impl ClaimsProcessor {
                 None,
                 referring_provider_taxonomy,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find referring provider: NPI={}, Name={} {}",
-                            npi,
-                            referring_provider_first_name.unwrap_or(""),
-                            referring_provider_last_name.unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring referring provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
 
         let supervising_provider_id = if let Some(npi) = supervising_provider_npi {
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Supervising",
@@ -1408,21 +1325,7 @@ impl ClaimsProcessor {
                 None,
                 supervising_provider_taxonomy,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find supervising provider: NPI={}, Name={} {}",
-                            npi,
-                            supervising_provider_first_name.unwrap_or(""),
-                            supervising_provider_last_name.unwrap_or(""));
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring supervising provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
@@ -1441,7 +1344,7 @@ impl ClaimsProcessor {
                 (None, None)
             };
 
-            match self.ensure_provider_exists(
+            self.ensure_provider_exists(
                 tx,
                 npi,
                 "Billing",
@@ -1450,19 +1353,7 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await {
-                Ok(provider_id) => {
-                    if provider_id.is_none() {
-                        warn!("Failed to create/find billing provider: NPI={}, Name={:?}",
-                            npi, billing_provider_name);
-                    }
-                    provider_id
-                },
-                Err(e) => {
-                    error!("Error ensuring billing provider exists: NPI={}, Error={:?}", npi, e);
-                    None
-                }
-            }
+            ).await.unwrap_or(None)
         } else {
             None
         };
@@ -2665,6 +2556,11 @@ impl ClaimsProcessor {
 
     /// Ensure a provider exists in claims.provider table, creating if necessary
     /// Returns the provider_id (either existing or newly created)
+    ///
+    /// IMPORTANT: This function is designed to be fault-tolerant and deadlock-free.
+    /// - Uses atomic INSERT ... ON CONFLICT DO UPDATE to avoid race conditions
+    /// - Uses savepoints to isolate errors without aborting the transaction
+    /// - Returns Ok(None) on any error - claim proceeds with NULL provider_id
     async fn ensure_provider_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -2687,189 +2583,138 @@ impl ClaimsProcessor {
             return Ok(None);
         }
 
-        // Retry logic to handle deadlocks from concurrent provider creation
-        const MAX_RETRIES: u32 = 5;
-        let mut retry_count = 0;
+        // Use a savepoint to allow rollback of just this operation if it fails
+        // This prevents the entire transaction from being aborted
+        let savepoint_name = format!("provider_{}", npi);
 
-        loop {
-            // Check if provider already exists
-            let existing_provider: Option<i64> = sqlx::query_scalar(
-                r#"
-                SELECT provider_id
-                FROM claims.provider
-                WHERE npi = $1
-                "#
-            )
-            .bind(npi)
-            .fetch_optional(&mut **tx)
+        // Create savepoint
+        if let Err(e) = sqlx::query(&format!("SAVEPOINT {}", savepoint_name))
+            .execute(&mut **tx)
             .await
-            .context("Failed to query existing provider")?;
+        {
+            error!("Failed to create savepoint for provider {}: {:?}", npi, e);
+            return Ok(None);
+        }
 
-            if let Some(provider_id) = existing_provider {
-                // Provider exists, return the ID
-                return Ok(Some(provider_id));
-            }
+        // Prepare values
+        let last_name_value = last_name.unwrap_or("Unknown");
+        let first_name_value = first_name.unwrap_or("");
 
-            // Provider doesn't exist, create it
-            // Use "Unknown" for last_name if not provided, and empty string for first_name
-            let last_name_value = last_name.unwrap_or("Unknown");
-            let first_name_value = first_name.unwrap_or("");
+        // Lookup specialty from taxonomy code if provided (do this BEFORE the upsert)
+        let (validated_taxonomy_code, specialty) = if let Some(tax_code) = taxonomy_code {
+            if tax_code.is_empty() {
+                (None, None)
+            } else {
+                // Check if taxonomy exists and get specialty in one query
+                let result = sqlx::query_scalar::<_, String>(
+                    r#"
+                    SELECT specialty_display
+                    FROM claims.provider_taxonomy
+                    WHERE taxonomy_code = $1 AND is_active = true
+                    "#
+                )
+                .bind(tax_code)
+                .fetch_optional(&mut **tx)
+                .await;
 
-            // Lookup specialty from taxonomy code if provided AND validate taxonomy exists in reference table
-            // If taxonomy code doesn't exist in provider_taxonomy, we must NOT insert it (FK constraint)
-            let (validated_taxonomy_code, specialty) = if let Some(tax_code) = taxonomy_code {
-                if tax_code.is_empty() {
-                    (None, None)
-                } else {
-                    // Check if taxonomy exists and get specialty in one query
-                    let result: Option<String> = sqlx::query_scalar(
-                        r#"
-                        SELECT specialty_display
-                        FROM claims.provider_taxonomy
-                        WHERE taxonomy_code = $1 AND is_active = true
-                        "#
-                    )
-                    .bind(tax_code)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .unwrap_or(None);
-
-                    if result.is_some() {
-                        // Taxonomy exists, use it
-                        (Some(tax_code), result)
-                    } else {
-                        // Taxonomy doesn't exist in reference table - set to NULL to avoid FK violation
+                match result {
+                    Ok(Some(spec)) => (Some(tax_code), Some(spec)),
+                    Ok(None) => {
                         warn!("Taxonomy code '{}' not found in provider_taxonomy table, setting to NULL for provider NPI={}",
                             tax_code, npi);
                         (None, None)
                     }
+                    Err(e) => {
+                        // Taxonomy query failed - rollback and return None
+                        error!("Failed to query taxonomy for provider {}: {:?}", npi, e);
+                        let _ = sqlx::query(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name))
+                            .execute(&mut **tx)
+                            .await;
+                        let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
+                            .execute(&mut **tx)
+                            .await;
+                        return Ok(None);
+                    }
                 }
-            } else {
-                (None, None)
-            };
-
-            // Log if taxonomy lookup succeeded
-            if let Some(ref spec) = specialty {
-                debug!("Mapped taxonomy {} to specialty: {}", validated_taxonomy_code.unwrap_or(""), spec);
             }
+        } else {
+            (None, None)
+        };
 
-            // Try to insert the provider. Use DO NOTHING to reduce lock contention.
-            // Note: When ON CONFLICT DO NOTHING is triggered, RETURNING returns nothing,
-            // so fetch_optional will return Ok(None)
-            let insert_result = sqlx::query_scalar::<_, i64>(
-                r#"
-                INSERT INTO claims.provider (
-                    npi,
-                    provider_type,
-                    last_name,
-                    first_name,
-                    middle_name,
-                    taxonomy_code,
-                    specialty,
-                    organization_id,
-                    is_active,
-                    created_at,
-                    updated_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT (npi) DO NOTHING
-                RETURNING provider_id
-                "#
+        // Log if taxonomy lookup succeeded
+        if let Some(ref spec) = specialty {
+            debug!("Mapped taxonomy {} to specialty: {}", validated_taxonomy_code.unwrap_or(""), spec);
+        }
+
+        // Use atomic INSERT ... ON CONFLICT DO UPDATE to avoid deadlocks
+        // The DO UPDATE sets updated_at to ensure we always get the RETURNING value
+        // This single query handles both insert and select atomically
+        let upsert_result = sqlx::query_scalar::<_, i64>(
+            r#"
+            INSERT INTO claims.provider (
+                npi,
+                provider_type,
+                last_name,
+                first_name,
+                middle_name,
+                taxonomy_code,
+                specialty,
+                organization_id,
+                is_active,
+                created_at,
+                updated_at
             )
-            .bind(npi)
-            .bind(provider_type)
-            .bind(last_name_value)
-            .bind(first_name_value)
-            .bind(middle_name)
-            .bind(validated_taxonomy_code) // Use validated taxonomy (NULL if not in reference table)
-            .bind(specialty.as_deref())
-            .bind(organization_id)
-            .fetch_optional(&mut **tx)
-            .await;
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT (npi) DO UPDATE SET
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING provider_id
+            "#
+        )
+        .bind(npi)
+        .bind(provider_type)
+        .bind(last_name_value)
+        .bind(first_name_value)
+        .bind(middle_name)
+        .bind(validated_taxonomy_code)
+        .bind(specialty.as_deref())
+        .bind(organization_id)
+        .fetch_one(&mut **tx)
+        .await;
 
-            match insert_result {
-                Ok(Some(provider_id)) => {
-                    // Successfully inserted, return the new provider_id
-                    debug!("Created new provider: NPI={}, Type={}, Name={} {}, Specialty={:?}",
-                        npi, provider_type, first_name_value, last_name_value, specialty);
+        match upsert_result {
+            Ok(provider_id) => {
+                debug!("Provider upserted: NPI={}, provider_id={}", npi, provider_id);
 
-                    // Enqueue provider for background NPI enrichment (fire-and-forget)
-                    // This does not block claim processing if it fails
-                    let _ = sqlx::query(
-                        r#"
-                        INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (provider_id) DO NOTHING
-                        "#
-                    )
-                    .bind(provider_id)
-                    .bind(npi)
-                    .bind(5) // Default priority
+                // Enqueue provider for background NPI enrichment (fire-and-forget)
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (provider_id) DO NOTHING
+                    "#
+                )
+                .bind(provider_id)
+                .bind(npi)
+                .bind(5)
+                .execute(&mut **tx)
+                .await;
+
+                // Release savepoint and return
+                let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
                     .execute(&mut **tx)
                     .await;
-
-                    return Ok(Some(provider_id));
-                }
-                Ok(None) => {
-                    // ON CONFLICT DO NOTHING was triggered - provider was created by another transaction
-                    // Query again to get the provider_id
-                    let existing_id: Option<i64> = sqlx::query_scalar(
-                        r#"
-                        SELECT provider_id
-                        FROM claims.provider
-                        WHERE npi = $1
-                        "#
-                    )
-                    .bind(npi)
-                    .fetch_optional(&mut **tx)
-                    .await
-                    .context("Failed to query provider after conflict")?;
-
-                    if let Some(id) = existing_id {
-                        debug!("Provider already exists (concurrent creation): NPI={}, provider_id={}",
-                            npi, id);
-                        return Ok(Some(id));
-                    } else {
-                        // Very rare: provider was deleted between INSERT and SELECT
-                        // Retry the whole operation
-                        if retry_count < MAX_RETRIES {
-                            retry_count += 1;
-                            let backoff_ms = 10u64 * 2u64.pow(retry_count - 1); // 10ms, 20ms, 40ms, 80ms, 160ms
-                            warn!("Provider disappeared after conflict, retrying ({}/{}): NPI={}, backoff={}ms",
-                                retry_count, MAX_RETRIES, npi, backoff_ms);
-                            tokio::time::sleep(tokio::time::Duration::from_millis(backoff_ms)).await;
-                            continue;
-                        } else {
-                            return Err(anyhow::anyhow!(
-                                "Provider creation failed after {} retries: NPI={}",
-                                MAX_RETRIES, npi
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    // Check if this is a deadlock error (PostgreSQL error code 40P01)
-                    let error_string = e.to_string();
-                    let is_deadlock = error_string.contains("deadlock detected")
-                        || error_string.contains("40P01");
-
-                    if is_deadlock && retry_count < MAX_RETRIES {
-                        retry_count += 1;
-                        // Exponential backoff with jitter: 10ms, 20ms, 40ms, 80ms, 160ms
-                        let backoff_ms = 10u64 * 2u64.pow(retry_count - 1);
-                        let jitter = (rand::random::<u64>() % 10) as u64; // 0-9ms jitter
-                        let total_backoff = backoff_ms + jitter;
-
-                        warn!("Deadlock detected creating provider, retrying ({}/{}): NPI={}, backoff={}ms",
-                            retry_count, MAX_RETRIES, npi, total_backoff);
-
-                        tokio::time::sleep(tokio::time::Duration::from_millis(total_backoff)).await;
-                        continue;
-                    } else {
-                        // Not a deadlock or max retries exceeded
-                        return Err(e).context("Failed to insert provider");
-                    }
-                }
+                Ok(Some(provider_id))
+            }
+            Err(e) => {
+                // Upsert failed - rollback to savepoint and return None
+                error!("Failed to upsert provider {}: {:?}", npi, e);
+                let _ = sqlx::query(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name))
+                    .execute(&mut **tx)
+                    .await;
+                let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
+                    .execute(&mut **tx)
+                    .await;
+                Ok(None)
             }
         }
     }

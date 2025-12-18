@@ -508,8 +508,7 @@ impl SequentialCompletionManager {
                 r#"
                 UPDATE staging.raw_claims
                 SET processing_status = 'PENDING',
-                    batch_sequence_number = NULL,
-                    updated_at = CURRENT_TIMESTAMP
+                    batch_sequence_number = NULL
                 WHERE batch_sequence_number = $1
                 AND processing_status IN ('PENDING', 'PROCESSING')
                 "#
