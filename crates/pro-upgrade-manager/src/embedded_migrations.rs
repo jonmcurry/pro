@@ -321,5 +321,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "create_encounter_payer_table",
             sql: include_str!("../../../migrations/062_create_encounter_payer_table.sql"),
         },
+        EmbeddedMigration {
+            version: "063",
+            name: "add_billing_date_to_encounter",
+            sql: include_str!("../../../migrations/063_add_billing_date_to_encounter.sql"),
+        },
     ]
 }

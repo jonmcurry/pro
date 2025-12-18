@@ -104,7 +104,11 @@
       "Bash(git push:*)",
       "Bash(DB_HOST=localhost DB_PORT=5432 DB_NAME=professional_smart DB_USER=postgres DB_PASSWORD=ClearToFly1 c:/Users/jonmc/dev/pro/target/release/pro-upgrade.exe:*)",
       "Bash(xargs ls:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(cargo run:*)",
+      "Bash(DB_HOST=localhost DB_PORT=5432 DB_NAME=professional_smart DB_USER=postgres DB_PASSWORD=ClearToFly1 cargo run:*)",
+      "Bash(./target/release/pro-service.exe:*)",
+      "Bash(./target/release/pro-data-loader.exe:*)"
     ],
     "deny": [],
     "ask": []

@@ -811,6 +811,9 @@ impl ClaimsImporter {
             encounter_fields.insert("admission_date".to_string(), serde_json::json!(claim.admission_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
             encounter_fields.insert("discharge_date".to_string(), serde_json::json!(claim.discharge_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
 
+            // Billing date from BHT segment (transaction creation date)
+            encounter_fields.insert("billing_date".to_string(), serde_json::json!(claim.billing_date.map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()));
+
             // Claim supplemental information
             encounter_fields.insert("delay_reason_code".to_string(), serde_json::json!(claim.delay_reason_code.clone().unwrap_or_default()));
             encounter_fields.insert("special_program_code".to_string(), serde_json::json!(claim.special_program_code.clone().unwrap_or_default()));

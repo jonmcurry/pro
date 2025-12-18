@@ -567,6 +567,10 @@ impl ClaimsProcessor {
             service_facility_npi, service_facility_name, service_facility_address_line1,
             service_facility_city, service_facility_state);
 
+        // Billing date from BHT segment (transaction creation date)
+        let billing_date_str = encounter_fields.get("billing_date").filter(|s| !s.is_empty());
+        let billing_date = billing_date_str.as_ref().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
+
         // Ensure providers exist in claims.provider table and get their provider_ids
         // Provider errors are logged but do NOT fail the claim - claims proceed with NULL provider_id
         let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
@@ -697,72 +701,8 @@ impl ClaimsProcessor {
             None
         };
 
-        // Check for existing encounter (same claim resubmitted)
-        // Match on: patient_control_number + facility_id + date_of_service_from
-        // If exists, UPDATE payer fields and add to encounter_payer table
-        let existing_encounter: Option<i64> = sqlx::query_scalar(
-            r#"
-            SELECT encounter_id
-            FROM claims.encounter
-            WHERE patient_control_number = $1
-              AND facility_id = $2
-              AND date_of_service_from = $3
-              AND soft_deleted = false
-            LIMIT 1
-            "#
-        )
-        .bind(&patient_control_number)
-        .bind(facility_id)
-        .bind(dos_from)
-        .fetch_optional(&mut **tx)
-        .await?;
-
-        if let Some(existing_id) = existing_encounter {
-            info!("[RESUBMIT] Encounter exists: encounter_id={}, updating payer info. patient_control_number={}, payer_id={:?}, payer_name={:?}",
-                existing_id, &patient_control_number, &payer_id, &payer_name);
-
-            // Update encounter with new billing payer info
-            sqlx::query(
-                r#"
-                UPDATE claims.encounter
-                SET payer_responsibility_code = $1,
-                    payer_id = $2,
-                    payer_name = $3,
-                    claim_filing_indicator = $4,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE encounter_id = $5
-                "#
-            )
-            .bind(payer_responsibility_code)
-            .bind(payer_id.as_deref())
-            .bind(payer_name.as_deref())
-            .bind(claim_filing_indicator.as_deref())
-            .bind(existing_id)
-            .execute(&mut **tx)
-            .await
-            .context("Failed to update encounter payer info")?;
-
-            // Insert billing payer into encounter_payer table
-            self.insert_encounter_payer(
-                tx,
-                existing_id,
-                payer_responsibility_code,
-                payer_id.as_deref(),
-                payer_name.as_deref(),
-                claim_filing_indicator.as_deref(),
-                true, // is_billing_payer
-                None, // paid_amount (billing payer hasn't paid yet)
-                None, // claim_control_number
-                billing_provider_id,
-            ).await?;
-
-            // Insert COB payers (from Loop 2320) into encounter_payer table
-            self.import_encounter_payers_from_cob(tx, existing_id, encounter_fields.inner(), billing_provider_id).await?;
-
-            return Ok(existing_id);
-        }
-
         // Insert encounter and get generated ID (ONE record for all service lines)
+        // Note: Every claim is imported as a new encounter - no duplicate checking
         let encounter_id: i64 = sqlx::query_scalar(
             r#"
             INSERT INTO claims.encounter (
@@ -807,10 +747,11 @@ impl ClaimsProcessor {
                 service_facility_address_line2,
                 service_facility_city,
                 service_facility_state,
-                service_facility_postal_code
+                service_facility_postal_code,
+                billing_date
             )
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42)
+                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
             RETURNING encounter_id
             "#
         )
@@ -856,6 +797,7 @@ impl ClaimsProcessor {
         .bind(service_facility_city.as_deref())
         .bind(service_facility_state.as_deref())
         .bind(service_facility_postal_code.as_deref())
+        .bind(billing_date)
         .fetch_one(&mut **tx)
         .await
         .map_err(|e| {
@@ -876,10 +818,29 @@ impl ClaimsProcessor {
         .context("Failed to insert encounter")?;
 
         // Insert all service lines for this encounter
+        // For EDI files: one raw_claim contains ALL service lines (service_line_1_*, service_line_2_*, etc.)
+        // For CSV files: each raw_claim contains ONE service line (always service_line_1_*)
         let mut line_number = 1;
-        for service_line in &service_lines {
-            self.import_service_line(tx, encounter_id, organization_id, service_line, line_number).await?;
-            line_number += 1;
+        for raw_claim in &service_lines {
+            // Check how many service lines are in this raw_claim's JSONB
+            let service_line_fields: HashMap<String, String> = raw_claim.service_line_fields.as_ref()
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            let num_service_lines = Self::count_service_lines_in_jsonb(&service_line_fields);
+
+            if num_service_lines == 0 {
+                // No service lines found, skip this raw_claim
+                warn!("No service lines found in raw_claim {}", raw_claim.raw_claim_id);
+                continue;
+            }
+
+            // Import each service line from this raw_claim
+            for sl_idx in 1..=num_service_lines {
+                let prefix = format!("service_line_{}_", sl_idx);
+                self.import_service_line(tx, encounter_id, organization_id, raw_claim, line_number, &prefix).await?;
+                line_number += 1;
+            }
         }
 
         // Import diagnoses from first service line (all should have same diagnoses)
@@ -1785,8 +1746,20 @@ impl ClaimsProcessor {
             }
         }
 
-        // Import service line (use line number 1 for single-line processing)
-        self.import_service_line(tx, encounter_id, organization_id, raw_claim, 1).await?;
+        // Import all service lines from this raw_claim
+        // For EDI: may have multiple service lines (service_line_1_*, service_line_2_*, etc.)
+        // For CSV: typically one service line (service_line_1_*)
+        let service_line_fields: HashMap<String, String> = raw_claim.service_line_fields.as_ref()
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+
+        let num_service_lines = Self::count_service_lines_in_jsonb(&service_line_fields);
+        let num_service_lines = if num_service_lines == 0 { 1 } else { num_service_lines }; // Default to 1
+
+        for sl_idx in 1..=num_service_lines {
+            let prefix = format!("service_line_{}_", sl_idx);
+            self.import_service_line(tx, encounter_id, organization_id, raw_claim, sl_idx as i32, &prefix).await?;
+        }
 
         // Import diagnoses
         self.import_diagnoses(tx, encounter_id, raw_claim).await?;
@@ -1794,7 +1767,26 @@ impl ClaimsProcessor {
         Ok(encounter_id)
     }
 
+    /// Count the number of service lines in the service_line_fields JSONB
+    /// Returns the highest service line number found (e.g., if keys include service_line_3_*, returns 3)
+    fn count_service_lines_in_jsonb(service_line_fields: &HashMap<String, String>) -> usize {
+        let mut max_line = 0;
+        for key in service_line_fields.keys() {
+            // Keys are like "service_line_1_procedure_code", "service_line_2_charge_amount", etc.
+            if let Some(rest) = key.strip_prefix("service_line_") {
+                if let Some(num_str) = rest.split('_').next() {
+                    if let Ok(num) = num_str.parse::<usize>() {
+                        max_line = max_line.max(num);
+                    }
+                }
+            }
+        }
+        max_line
+    }
+
     /// Import service line for an encounter
+    /// The `service_line_prefix` parameter specifies which service line to read from the JSONB
+    /// (e.g., "service_line_1_" or "service_line_2_")
     async fn import_service_line(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1802,6 +1794,7 @@ impl ClaimsProcessor {
         organization_id: i64,
         raw_claim: &RawClaim,
         line_number: i32,
+        service_line_prefix: &str,
     ) -> Result<()> {
         // Deserialize encounter fields - use JsonValue to handle mixed types (strings, arrays like other_insurance)
         let encounter_fields: HashMap<String, JsonValue> = serde_json::from_value(raw_claim.encounter_fields.clone())
@@ -1811,10 +1804,10 @@ impl ClaimsProcessor {
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
 
-        // IMPORTANT: Each RawClaim from staging represents ONE service line, so service_line_fields
-        // always uses "service_line_1_" prefix. The line_number parameter is only used for the
-        // INSERT statement to set the correct line_number column value.
-        let prefix = "service_line_1_";
+        // Use the provided prefix to read the correct service line from JSONB
+        // For CSV: always "service_line_1_" (one service line per raw_claim)
+        // For EDI: "service_line_1_", "service_line_2_", etc. (all service lines in one raw_claim)
+        let prefix = service_line_prefix;
 
         // Extract required service line fields using line number prefix
         let procedure_code = service_line_fields.get(&format!("{}procedure_code", prefix))

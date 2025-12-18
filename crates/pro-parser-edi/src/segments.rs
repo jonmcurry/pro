@@ -863,6 +863,39 @@ impl PatSegment {
     }
 }
 
+/// BHT - Beginning of Hierarchical Transaction Segment
+/// Format: BHT*structure_code*purpose_code*reference_id*creation_date*creation_time*transaction_type
+/// Example: BHT*0019*00*244579*20190501*1036*CH~
+#[derive(Debug, Clone)]
+pub struct BhtSegment {
+    pub hierarchical_structure_code: String,      // BHT01 - Always "0019" for 837P
+    pub transaction_set_purpose_code: String,     // BHT02 - "00"=Original, "18"=Reissue
+    pub reference_identification: Option<String>, // BHT03 - Batch/Claim Control Number
+    pub transaction_date: Option<NaiveDate>,      // BHT04 - Transaction Set Creation Date (BILLING DATE)
+    pub transaction_time: Option<String>,         // BHT05 - Transaction Set Creation Time (HHMM)
+    pub transaction_type_code: Option<String>,    // BHT06 - "CH"=Chargeable, "RP"=Reporting
+}
+
+impl BhtSegment {
+    pub fn parse(segment: &EdiSegment) -> Result<Self> {
+        if segment.segment_id != "BHT" {
+            return Err(Error::Parse(format!("Expected BHT segment, got {}", segment.segment_id)));
+        }
+
+        let transaction_date = segment.get_optional(3)
+            .and_then(|s| parse_edi_date(&s).ok());
+
+        Ok(Self {
+            hierarchical_structure_code: segment.get_or_empty(0).to_string(),
+            transaction_set_purpose_code: segment.get_or_empty(1).to_string(),
+            reference_identification: segment.get_optional(2),
+            transaction_date,
+            transaction_time: segment.get_optional(4),
+            transaction_type_code: segment.get_optional(5),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

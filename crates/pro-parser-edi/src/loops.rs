@@ -322,6 +322,8 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         admission_date: None,
         discharge_date: None,
 
+        billing_date: None, // Set by parser from BHT04 segment
+
         delay_reason_code: None,
         special_program_code: None,
         patient_amount_paid: None,

@@ -213,6 +213,9 @@ pub struct ParsedClaim {
     pub admission_date: Option<NaiveDate>,
     pub discharge_date: Option<NaiveDate>,
 
+    // BHT Segment - Billing/Transaction Date
+    pub billing_date: Option<NaiveDate>, // BHT04 - Transaction Set Creation Date
+
     // Loop 2300 - Claim Supplemental Information
     pub delay_reason_code: Option<String>,
     pub special_program_code: Option<String>,

@@ -289,6 +289,13 @@ impl EdiParser {
         let mut in_patient_loop = false;
         let mut in_claim = false;
 
+        // Extract BHT segment to get billing_date (transaction creation date)
+        // BHT appears once per transaction, before the HL loops
+        let billing_date = segments.iter()
+            .find(|s| s.segment_id == "BHT")
+            .and_then(|bht_seg| BhtSegment::parse(bht_seg).ok())
+            .and_then(|bht| bht.transaction_date);
+
         for segment in segments {
             match segment.segment_id.as_str() {
                 "HL" => {
@@ -297,6 +304,13 @@ impl EdiParser {
                         match level_code.as_str() {
                             "22" => {
                                 // Subscriber level (2000B) - contains NM1*IL, NM1*PR, SBR, etc.
+                                // IMPORTANT: Finalize any in-progress claim before starting new subscriber
+                                if in_claim && !current_claim_segments.is_empty() {
+                                    let mut claim = parse_claim_info(&current_claim_segments)?;
+                                    claim.billing_date = billing_date;
+                                    claims.push(claim);
+                                    current_claim_segments.clear();
+                                }
                                 // Reset subscriber segments for new subscriber
                                 subscriber_segments.clear();
                                 in_subscriber_loop = true;
@@ -305,6 +319,14 @@ impl EdiParser {
                             }
                             "23" => {
                                 // Patient level (2000C) - claims follow under this
+                                // IMPORTANT: Finalize any in-progress claim before starting patient loop
+                                if in_claim && !current_claim_segments.is_empty() {
+                                    let mut claim = parse_claim_info(&current_claim_segments)?;
+                                    claim.billing_date = billing_date;
+                                    claims.push(claim);
+                                    current_claim_segments.clear();
+                                    in_claim = false;
+                                }
                                 in_subscriber_loop = false;
                                 in_patient_loop = true;
                             }
@@ -316,7 +338,8 @@ impl EdiParser {
                     // Start of new claim
                     if in_claim && !current_claim_segments.is_empty() {
                         // Parse previous claim
-                        let claim = parse_claim_info(&current_claim_segments)?;
+                        let mut claim = parse_claim_info(&current_claim_segments)?;
+                        claim.billing_date = billing_date; // Set billing date from BHT segment
                         claims.push(claim);
                         current_claim_segments.clear();
                     }
@@ -329,7 +352,8 @@ impl EdiParser {
                 "SE" => {
                     // End of transaction set - finish last claim
                     if in_claim && !current_claim_segments.is_empty() {
-                        let claim = parse_claim_info(&current_claim_segments)?;
+                        let mut claim = parse_claim_info(&current_claim_segments)?;
+                        claim.billing_date = billing_date; // Set billing date from BHT segment
                         claims.push(claim);
                         current_claim_segments.clear();
                     }
@@ -402,6 +426,12 @@ impl EdiParser {
                 return;
             }
 
+            // Extract BHT segment to get billing_date (transaction creation date)
+            let billing_date = segments.iter()
+                .find(|s| s.segment_id == "BHT")
+                .and_then(|bht_seg| BhtSegment::parse(bht_seg).ok())
+                .and_then(|bht| bht.transaction_date);
+
             // Stream claims one at a time
             let mut current_claim_segments = Vec::new();
             let mut subscriber_segments: Vec<EdiSegment> = Vec::new(); // Segments from HL*22 (subscriber level)
@@ -437,7 +467,10 @@ impl EdiParser {
                         if in_claim && !current_claim_segments.is_empty() {
                             // Emit previous claim
                             match parse_claim_info(&current_claim_segments) {
-                                Ok(claim) => yield Ok(claim),
+                                Ok(mut claim) => {
+                                    claim.billing_date = billing_date; // Set billing date from BHT segment
+                                    yield Ok(claim)
+                                },
                                 Err(e) => yield Err(e),
                             }
                             current_claim_segments.clear();
@@ -452,7 +485,10 @@ impl EdiParser {
                         // End of transaction set - emit last claim
                         if in_claim && !current_claim_segments.is_empty() {
                             match parse_claim_info(&current_claim_segments) {
-                                Ok(claim) => yield Ok(claim),
+                                Ok(mut claim) => {
+                                    claim.billing_date = billing_date; // Set billing date from BHT segment
+                                    yield Ok(claim)
+                                },
                                 Err(e) => yield Err(e),
                             }
                             current_claim_segments.clear();

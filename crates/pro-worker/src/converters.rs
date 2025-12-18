@@ -200,6 +200,7 @@ pub fn convert_csv_to_claim(csv_row: &ParsedRow) -> Result<ParsedClaim> {
         paperwork_transmission_code: None,
         paperwork_control_number: None,
         condition_codes: Vec::new(),
+        billing_date: None, // CSV files don't have BHT segment
     };
 
     Ok(claim)
