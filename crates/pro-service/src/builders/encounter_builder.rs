@@ -9,7 +9,6 @@
 #![allow(dead_code)]
 
 use anyhow::{Context, Result};
-use pro_common::DEFAULT_DATE;
 use std::collections::HashMap;
 
 /// Builder for constructing encounter records from raw claim fields
@@ -54,15 +53,10 @@ impl EncounterBuilder {
             .get("date_of_service_to")
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
-        let subscriber_birth_date_str = encounter_fields
+        let subscriber_birth_date = encounter_fields
             .get("subscriber_birth_date")
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
-            .unwrap_or("1900-01-01");
-
-        let subscriber_birth_date =
-            chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-                .unwrap_or(*DEFAULT_DATE);
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
         // Extract optional fields
         let facility_code = encounter_fields
@@ -143,7 +137,7 @@ pub struct EncounterData {
     pub subscriber_id: String,
     pub subscriber_last_name: String,
     pub subscriber_first_name: String,
-    pub subscriber_birth_date: chrono::NaiveDate,
+    pub subscriber_birth_date: Option<chrono::NaiveDate>,
     pub date_of_service_from: chrono::NaiveDate,
     pub date_of_service_to: Option<chrono::NaiveDate>,
     pub facility_code: String,

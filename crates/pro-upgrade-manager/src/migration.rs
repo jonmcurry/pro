@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn, error};
 
 use crate::error::{Result, UpgradeError};
-use crate::embedded_migrations::get_all_migrations;
+use crate::embedded_migrations::{get_all_migrations, get_baseline, BASELINE_COVERS_THROUGH};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MigrationInfo {
@@ -186,11 +186,18 @@ impl MigrationManager {
         Ok(migrations)
     }
 
-    /// Find baseline file in migrations directory (e.g., baseline_v1.2.0.sql)
+    /// Find baseline file (embedded or disk-based)
     pub fn find_baseline_file(&self) -> Result<Option<PendingMigration>> {
-        // Embedded migrations don't use baselines - we apply all migrations sequentially
         if self.use_embedded {
-            return Ok(None);
+            // Use embedded baseline
+            let baseline = get_baseline();
+            info!("Using embedded baseline: {}", baseline.file_name());
+            return Ok(Some(PendingMigration {
+                file_name: baseline.file_name(),
+                file_path: PathBuf::from(format!("embedded://{}", baseline.file_name())),
+                content: baseline.sql.to_string(),
+                checksum: baseline.checksum(),
+            }));
         }
 
         let migrations_dir = self.migrations_dir.as_ref()
@@ -206,8 +213,9 @@ impl MigrationManager {
 
             if path.is_file() {
                 if let Some(file_name) = path.file_name().and_then(|n| n.to_str()) {
-                    // Look for baseline_*.sql files
-                    if file_name.starts_with("baseline_") && file_name.ends_with(".sql") {
+                    // Look for baseline_*.sql or 000_baseline*.sql files
+                    if (file_name.starts_with("baseline_") || file_name.starts_with("000_baseline"))
+                        && file_name.ends_with(".sql") {
                         info!("Found baseline file: {}", file_name);
                         let content = std::fs::read_to_string(&path)?;
                         let checksum = Self::calculate_checksum(&content);
@@ -232,27 +240,93 @@ impl MigrationManager {
 
         let start = std::time::Instant::now();
 
-        // Execute the baseline SQL
-        sqlx::query(&baseline.content)
-            .execute(&self.pool)
-            .await?;
+        // Split and execute the baseline SQL statements
+        let statements = self.split_sql_statements(&baseline.content);
+        info!("Baseline contains {} SQL statements", statements.len());
+
+        for (idx, statement) in statements.iter().enumerate() {
+            if statement.trim().is_empty() {
+                continue;
+            }
+
+            debug!("Executing baseline statement {}/{}", idx + 1, statements.len());
+
+            match sqlx::raw_sql(statement).execute(&self.pool).await {
+                Ok(_) => {
+                    debug!("Statement {} executed successfully", idx + 1);
+                }
+                Err(e) => {
+                    error!("Baseline failed at statement {}: {}", idx + 1, e);
+                    error!("Failed statement: {}", &statement[..statement.len().min(200)]);
+                    return Err(UpgradeError::Migration(format!(
+                        "Failed to apply baseline at statement {}: {}",
+                        idx + 1, e
+                    )));
+                }
+            }
+        }
 
         let execution_time = start.elapsed().as_millis() as i32;
 
-        // Record baseline in schema_migrations table with special marker
+        // Ensure staging schema and migrations table exist
+        sqlx::raw_sql("CREATE SCHEMA IF NOT EXISTS staging")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::raw_sql(
+            r#"
+            CREATE TABLE IF NOT EXISTS staging.schema_migrations (
+                migration_name VARCHAR(255) PRIMARY KEY,
+                applied_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                checksum VARCHAR(64) NOT NULL,
+                execution_time_ms INTEGER,
+                description TEXT
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Record baseline in schema_migrations table
         sqlx::query(
             r#"
             INSERT INTO staging.schema_migrations
             (migration_name, applied_at, checksum, execution_time_ms, description)
             VALUES ($1, CURRENT_TIMESTAMP, $2, $3, $4)
+            ON CONFLICT (migration_name) DO NOTHING
             "#
         )
         .bind(&baseline.file_name)
         .bind(&baseline.checksum)
         .bind(execution_time)
-        .bind("Baseline schema snapshot")
+        .bind(format!("Baseline schema snapshot (covers migrations 001-{:03})", BASELINE_COVERS_THROUGH))
         .execute(&self.pool)
         .await?;
+
+        // Also record all individual migrations that the baseline covers
+        // This prevents them from being re-applied on upgrades
+        if self.use_embedded {
+            let all_migrations = get_all_migrations();
+            for migration in all_migrations {
+                let version: u32 = migration.version.parse().unwrap_or(0);
+                if version <= BASELINE_COVERS_THROUGH {
+                    sqlx::query(
+                        r#"
+                        INSERT INTO staging.schema_migrations
+                        (migration_name, applied_at, checksum, execution_time_ms, description)
+                        VALUES ($1, CURRENT_TIMESTAMP, $2, 0, $3)
+                        ON CONFLICT (migration_name) DO NOTHING
+                        "#
+                    )
+                    .bind(migration.file_name())
+                    .bind(migration.checksum())
+                    .bind("Applied via baseline")
+                    .execute(&self.pool)
+                    .await?;
+                }
+            }
+            info!("Recorded {} migrations as applied via baseline", BASELINE_COVERS_THROUGH);
+        }
 
         info!("Baseline applied successfully in {}ms", execution_time);
         Ok(())

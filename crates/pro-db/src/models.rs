@@ -156,7 +156,7 @@ pub struct Encounter {
     pub subscriber_middle_name: Option<String>,
     pub subscriber_name_suffix: Option<String>,
     pub subscriber_gender: Option<String>,
-    pub subscriber_birth_date: NaiveDate,
+    pub subscriber_birth_date: Option<NaiveDate>,
     pub subscriber_address_line1: Option<String>,
     pub subscriber_address_line2: Option<String>,
     pub subscriber_city: Option<String>,

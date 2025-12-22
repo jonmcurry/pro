@@ -59,7 +59,7 @@ pub struct Encounter {
     pub subscriber_id: String,
     pub subscriber_last_name: String,
     pub subscriber_first_name: String,
-    pub subscriber_birth_date: NaiveDate,
+    pub subscriber_birth_date: Option<NaiveDate>,
     pub total_claim_charge_amount: rust_decimal::Decimal,
     pub date_of_service_from: NaiveDate,
     pub date_of_service_to: Option<NaiveDate>,

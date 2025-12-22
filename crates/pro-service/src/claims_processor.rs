@@ -468,8 +468,30 @@ impl ClaimsProcessor {
         let subscriber_id = encounter_fields.get("subscriber_id")
             .context("Missing subscriber_id")?;
         let subscriber_birth_date_str = encounter_fields.get("subscriber_birth_date")
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "1900-01-01".to_string()); // Default to 1900-01-01 if missing or empty
+            .filter(|s| !s.is_empty());
+
+        // Subscriber demographics - optional fields
+        let subscriber_middle_name = encounter_fields.get("subscriber_middle_name").filter(|s| !s.is_empty());
+        let subscriber_name_suffix = encounter_fields.get("subscriber_name_suffix").filter(|s| !s.is_empty());
+        // Truncate subscriber_gender to 1 char (CHAR(1) in DB)
+        let subscriber_gender_str = encounter_fields.get("subscriber_gender").filter(|s| !s.is_empty());
+        let subscriber_gender = subscriber_gender_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let subscriber_address_line1 = encounter_fields.get("subscriber_address_line1").filter(|s| !s.is_empty());
+        let subscriber_address_line2 = encounter_fields.get("subscriber_address_line2").filter(|s| !s.is_empty());
+        let subscriber_city = encounter_fields.get("subscriber_city").filter(|s| !s.is_empty());
+        // Truncate subscriber_state to 2 chars (CHAR(2) in DB)
+        let subscriber_state_str = encounter_fields.get("subscriber_state").filter(|s| !s.is_empty());
+        let subscriber_state = subscriber_state_str.as_ref().map(|s| if s.len() > 2 { &s[..2] } else { s.as_str() });
+        let subscriber_postal_code = encounter_fields.get("subscriber_postal_code").filter(|s| !s.is_empty());
+        // Truncate subscriber_country to 3 chars (CHAR(3) in DB)
+        let subscriber_country_str = encounter_fields.get("subscriber_country").filter(|s| !s.is_empty());
+        let subscriber_country = subscriber_country_str.as_ref().map(|s| if s.len() > 3 { &s[..3] } else { s.as_str() });
+
+        // Claim reference fields
+        let claim_number = encounter_fields.get("claim_number").filter(|s| !s.is_empty());
+        let paperwork_report_type = encounter_fields.get("paperwork_report_type").filter(|s| !s.is_empty());
+        let paperwork_transmission_code = encounter_fields.get("paperwork_transmission_code").filter(|s| !s.is_empty());
+        let paperwork_control_number = encounter_fields.get("paperwork_control_number").filter(|s| !s.is_empty());
 
         // Optional fields
         let submitter_id = encounter_fields.get("submitter_id").unwrap_or_else(|| facility_code.clone());
@@ -499,8 +521,8 @@ impl ClaimsProcessor {
         // Parse dates
         let dos_from = chrono::NaiveDate::parse_from_str(&date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
-        let subscriber_dob = chrono::NaiveDate::parse_from_str(&subscriber_birth_date_str, "%Y-%m-%d")
-            .unwrap_or(*DEFAULT_DATE); // Fallback to 1900-01-01
+        let subscriber_dob = subscriber_birth_date_str.as_ref()
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
         // Optional fields - now returns Option<String>, use .as_deref() where needed
         let payer_id = encounter_fields.get("payer_id");
@@ -537,24 +559,58 @@ impl ClaimsProcessor {
         let patient_relationship_code = patient_relationship_code_str.as_ref().map(|s| if s.len() > 3 { &s[..3] } else { s.as_str() });
 
         // Extract provider NPIs and names (with empty string filtering)
-        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").filter(|s| !s.is_empty());
+        // NPI must be exactly 10 digits - reject invalid values
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi")
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let rendering_provider_last_name = encounter_fields.get("rendering_provider_last_name").filter(|s| !s.is_empty());
         let rendering_provider_first_name = encounter_fields.get("rendering_provider_first_name").filter(|s| !s.is_empty());
         let rendering_provider_taxonomy = encounter_fields.get("rendering_provider_taxonomy").filter(|s| !s.is_empty());
 
-        let referring_provider_npi = encounter_fields.get("referring_provider_npi").filter(|s| !s.is_empty());
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi")
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let referring_provider_last_name = encounter_fields.get("referring_provider_last_name").filter(|s| !s.is_empty());
         let referring_provider_first_name = encounter_fields.get("referring_provider_first_name").filter(|s| !s.is_empty());
 
-        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").filter(|s| !s.is_empty());
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi")
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let supervising_provider_last_name = encounter_fields.get("supervising_provider_last_name").filter(|s| !s.is_empty());
         let supervising_provider_first_name = encounter_fields.get("supervising_provider_first_name").filter(|s| !s.is_empty());
 
-        let billing_provider_npi = encounter_fields.get("billing_provider_npi").filter(|s| !s.is_empty());
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi")
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let billing_provider_name = encounter_fields.get("billing_provider_name").filter(|s| !s.is_empty());
+        let billing_provider_tax_id = encounter_fields.get("billing_provider_tax_id").filter(|s| !s.is_empty());
+        let billing_provider_address_line1 = encounter_fields.get("billing_provider_address_line1").filter(|s| !s.is_empty());
+        let billing_provider_city = encounter_fields.get("billing_provider_city").filter(|s| !s.is_empty());
+        let billing_provider_state = encounter_fields.get("billing_provider_state").filter(|s| !s.is_empty());
+        let billing_provider_postal_code = encounter_fields.get("billing_provider_postal_code").filter(|s| !s.is_empty());
+
+        // Construct provider names from first/last
+        let rendering_provider_name = match (rendering_provider_first_name.as_ref(), rendering_provider_last_name.as_ref()) {
+            (Some(first), Some(last)) => Some(format!("{}, {}", last, first)),
+            (None, Some(last)) => Some(last.to_string()),
+            _ => None,
+        };
+        let referring_provider_name = match (referring_provider_first_name.as_ref(), referring_provider_last_name.as_ref()) {
+            (Some(first), Some(last)) => Some(format!("{}, {}", last, first)),
+            (None, Some(last)) => Some(last.to_string()),
+            _ => None,
+        };
+        let supervising_provider_name = match (supervising_provider_first_name.as_ref(), supervising_provider_last_name.as_ref()) {
+            (Some(first), Some(last)) => Some(format!("{}, {}", last, first)),
+            (None, Some(last)) => Some(last.to_string()),
+            _ => None,
+        };
 
         // Service Facility information (Loop 2310C - NM1*77, N3, N4)
-        let service_facility_npi = encounter_fields.get("service_facility_npi").filter(|s| !s.is_empty());
+        // NPI must be exactly 10 digits - reject invalid values like facility codes
+        let service_facility_npi = encounter_fields.get("service_facility_npi")
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let service_facility_name = encounter_fields.get("service_facility_name").filter(|s| !s.is_empty());
         let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").filter(|s| !s.is_empty());
         let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").filter(|s| !s.is_empty());
@@ -571,8 +627,142 @@ impl ClaimsProcessor {
         let billing_date_str = encounter_fields.get("billing_date").filter(|s| !s.is_empty());
         let billing_date = billing_date_str.as_ref().and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
+        // Additional provider taxonomy codes
+        let referring_provider_taxonomy = encounter_fields.get("referring_provider_taxonomy").filter(|s| !s.is_empty());
+        let supervising_provider_taxonomy = encounter_fields.get("supervising_provider_taxonomy").filter(|s| !s.is_empty());
+
+        // Other payer information (COB)
+        let other_payer_id = encounter_fields.get("other_payer_id").filter(|s| !s.is_empty());
+        let other_payer_name = encounter_fields.get("other_payer_name").filter(|s| !s.is_empty());
+        let other_payer_paid_amount = encounter_fields.get("other_payer_paid_amount")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Condition codes - convert comma-separated string to JSON array
+        let condition_codes: Option<serde_json::Value> = encounter_fields.get("condition_codes")
+            .filter(|s| !s.is_empty())
+            .map(|s| {
+                let codes: Vec<&str> = s.split(',').map(|c| c.trim()).collect();
+                serde_json::json!(codes)
+            });
+
+        // Patient responsibility amount
+        let patient_responsibility_amount = encounter_fields.get("patient_responsibility_amount")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Claim indicator fields from CLM segment
+        // Truncate to 1 char (CHAR(1) in DB)
+        let signature_indicator_str = encounter_fields.get("signature_indicator").filter(|s| !s.is_empty());
+        let signature_indicator = signature_indicator_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let assignment_indicator_str = encounter_fields.get("assignment_indicator").filter(|s| !s.is_empty());
+        let assignment_indicator = assignment_indicator_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let benefits_assignment_indicator_str = encounter_fields.get("benefits_assignment_indicator").filter(|s| !s.is_empty());
+        let benefits_assignment_indicator = benefits_assignment_indicator_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let release_of_information_code_str = encounter_fields.get("release_of_information_code").filter(|s| !s.is_empty());
+        let release_of_information_code = release_of_information_code_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+        let patient_signature_code_str = encounter_fields.get("patient_signature_code").filter(|s| !s.is_empty());
+        let patient_signature_code = patient_signature_code_str.as_ref().map(|s| if s.len() > 1 { &s[..1] } else { s.as_str() });
+
+
+        // Additional claim reference fields
+        // Truncate delay_reason_code to 2 chars (VARCHAR(2) in DB)
+        let delay_reason_code_str = encounter_fields.get("delay_reason_code").filter(|s| !s.is_empty());
+        let delay_reason_code = delay_reason_code_str.as_ref().map(|s| if s.len() > 2 { &s[..2] } else { s.as_str() });
+        // Truncate special_program_code to 3 chars (VARCHAR(3) in DB)
+        let special_program_code_str = encounter_fields.get("special_program_code").filter(|s| !s.is_empty());
+        let special_program_code = special_program_code_str.as_ref().map(|s| if s.len() > 3 { &s[..3] } else { s.as_str() });
+        // Truncate service_authorization_code to 50 chars (VARCHAR(50) in DB)
+        let service_authorization_code_str = encounter_fields.get("service_authorization_code").filter(|s| !s.is_empty());
+        let service_authorization_code = service_authorization_code_str.as_ref().map(|s| if s.len() > 50 { &s[..50] } else { s.as_str() });
+
+        // Patient amount paid (numeric)
+        let patient_amount_paid = encounter_fields.get("patient_amount_paid")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
+        // Submitter and transaction info
+        // Truncate submitter_name to 255 chars (VARCHAR(255) in DB)
+        let submitter_name_str = encounter_fields.get("submitter_name").filter(|s| !s.is_empty());
+        let submitter_name = submitter_name_str.as_ref().map(|s| if s.len() > 255 { &s[..255] } else { s.as_str() });
+        // Truncate transaction_set_control_number to 9 chars (VARCHAR(9) in DB)
+        let transaction_set_control_number_str = encounter_fields.get("transaction_set_control_number").filter(|s| !s.is_empty());
+        let transaction_set_control_number = transaction_set_control_number_str.as_ref().map(|s| if s.len() > 9 { &s[..9] } else { s.as_str() });
+
+        // Onset of illness date
+        let onset_of_illness_date = encounter_fields.get("onset_of_illness_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+
+        // Date fields
+        let initial_treatment_date = encounter_fields.get("initial_treatment_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let last_seen_date = encounter_fields.get("last_seen_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let acute_manifestation_date = encounter_fields.get("acute_manifestation_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let accident_date = encounter_fields.get("accident_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let last_xray_date = encounter_fields.get("last_xray_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let disability_from_date = encounter_fields.get("disability_from_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let disability_to_date = encounter_fields.get("disability_to_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let last_worked_date = encounter_fields.get("last_worked_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let authorized_return_to_work_date = encounter_fields.get("authorized_return_to_work_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let admission_date = encounter_fields.get("admission_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+        let discharge_date = encounter_fields.get("discharge_date")
+            .filter(|s| !s.is_empty())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok());
+
         // Ensure providers exist in claims.provider table and get their provider_ids
         // Provider errors are handled internally using savepoints - claims proceed with NULL provider_id on error
+        
+        // DEADLOCK PREVENTION: Use TRY advisory locks for ALL provider NPIs in SORTED order
+        // pg_try_advisory_xact_lock returns false if lock can't be acquired (instead of blocking)
+        // This prevents deadlocks by failing fast rather than waiting
+        let mut provider_npis: Vec<&str> = Vec::new();
+        if let Some(ref npi) = rendering_provider_npi { provider_npis.push(npi); }
+        if let Some(ref npi) = referring_provider_npi { provider_npis.push(npi); }
+        if let Some(ref npi) = supervising_provider_npi { provider_npis.push(npi); }
+        if let Some(ref npi) = billing_provider_npi { provider_npis.push(npi); }
+
+        // Sort NPIs to ensure consistent lock order across all workers
+        provider_npis.sort();
+        provider_npis.dedup(); // Remove duplicates (same NPI might appear multiple times)
+
+        // Try to acquire advisory locks in sorted order (non-blocking)
+        for npi in &provider_npis {
+            let lock_acquired: bool = sqlx::query_scalar(
+                "SELECT pg_try_advisory_xact_lock(hashtext($1))"
+            )
+            .bind(*npi)
+            .fetch_one(&mut **tx)
+            .await
+            .unwrap_or(false);
+
+            if !lock_acquired {
+                // Another worker has this provider locked - skip this encounter
+                // It will be retried in a future batch
+                debug!("Could not acquire lock for provider {}, skipping encounter", npi);
+                return Err(anyhow::anyhow!("Provider {} is locked by another worker, retry later", npi));
+            }
+        }
+        
         let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
             self.ensure_provider_exists(
                 tx,
@@ -659,7 +849,16 @@ impl ClaimsProcessor {
                 subscriber_id,
                 subscriber_last_name,
                 subscriber_first_name,
+                subscriber_middle_name,
+                subscriber_name_suffix,
+                subscriber_gender,
                 subscriber_birth_date,
+                subscriber_address_line1,
+                subscriber_address_line2,
+                subscriber_city,
+                subscriber_state,
+                subscriber_postal_code,
+                subscriber_country,
                 date_of_service_from,
                 date_of_service_to,
                 total_claim_charge_amount,
@@ -669,10 +868,30 @@ impl ClaimsProcessor {
                 claim_filing_indicator,
                 place_of_service_code,
                 medical_record_number,
+                claim_number,
+                paperwork_report_type,
+                paperwork_transmission_code,
+                paperwork_control_number,
                 rendering_provider_id,
+                rendering_provider_npi,
+                rendering_provider_name,
+                rendering_provider_taxonomy,
                 referring_provider_id,
+                referring_provider_npi,
+                referring_provider_name,
+                referring_provider_taxonomy,
                 supervising_provider_id,
+                supervising_provider_npi,
+                supervising_provider_name,
+                supervising_provider_taxonomy,
                 billing_provider_id,
+                billing_provider_npi,
+                billing_provider_tax_id,
+                billing_provider_name,
+                billing_provider_address_line1,
+                billing_provider_city,
+                billing_provider_state,
+                billing_provider_postal_code,
                 claim_status,
                 patient_last_name,
                 patient_first_name,
@@ -693,71 +912,150 @@ impl ClaimsProcessor {
                 service_facility_city,
                 service_facility_state,
                 service_facility_postal_code,
-                billing_date
+                billing_date,
+                other_payer_id,
+                other_payer_name,
+                other_payer_paid_amount,
+                condition_codes,
+                patient_responsibility_amount,
+                initial_treatment_date,
+                last_seen_date,
+                acute_manifestation_date,
+                accident_date,
+                last_xray_date,
+                disability_from_date,
+                disability_to_date,
+                last_worked_date,
+                authorized_return_to_work_date,
+                admission_date,
+                discharge_date,
+                signature_indicator,
+                assignment_indicator,
+                benefits_assignment_indicator,
+                release_of_information_code,
+                patient_signature_code,
+                delay_reason_code,
+                special_program_code,
+                service_authorization_code,
+                patient_amount_paid,
+                submitter_name,
+                transaction_set_control_number,
+                onset_of_illness_date
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-                    $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+                    $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40,
+                    $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60,
+                    $61, $62, $63, $64, $65, $66, $67, $68, $69, $70, $71, $72, $73, $74, $75, $76, $77, $78, $79, $80,
+                    $81, $82, $83, $84, $85, $86, $87, $88, $89, $90, $91, $92, $93, $94, $95, $96, $97, $98, $99, $100)
             RETURNING encounter_id
             "#
         )
-        .bind(facility_id)
-        .bind(organization_id)
-        .bind(region_id)
-        .bind(&submitter_id)
-        .bind(&patient_control_number)
-        .bind(&subscriber_id)
-        .bind(&subscriber_last_name)
-        .bind(&subscriber_first_name)
-        .bind(subscriber_dob)
-        .bind(dos_from)
-        .bind(dos_from) // date_of_service_to same as from for now
-        .bind(total_claim_charge)
-        .bind(payer_id.as_deref())
-        .bind(payer_name.as_deref())
-        .bind(payer_responsibility_code)
-        .bind(claim_filing_indicator.as_deref())
-        .bind(place_of_service)
-        .bind(medical_record_number.as_deref())
-        .bind(rendering_provider_id)
-        .bind(referring_provider_id)
-        .bind(supervising_provider_id)
-        .bind(billing_provider_id)
-        .bind("NEW")
-        .bind(patient_last_name.as_deref())
-        .bind(patient_first_name.as_deref())
-        .bind(patient_middle_name.as_deref())
-        .bind(patient_name_suffix.as_deref())
-        .bind(patient_dob)
-        .bind(patient_gender)
-        .bind(patient_address_line1.as_deref())
-        .bind(patient_address_line2.as_deref())
-        .bind(patient_city.as_deref())
-        .bind(patient_state)
-        .bind(patient_postal_code.as_deref())
-        .bind(patient_relationship_code)
-        .bind(service_facility_npi.as_deref())
-        .bind(service_facility_name.as_deref())
-        .bind(service_facility_address_line1.as_deref())
-        .bind(service_facility_address_line2.as_deref())
-        .bind(service_facility_city.as_deref())
-        .bind(service_facility_state.as_deref())
-        .bind(service_facility_postal_code.as_deref())
-        .bind(billing_date)
+        .bind(facility_id)                              // $1
+        .bind(organization_id)                          // $2
+        .bind(region_id)                                // $3
+        .bind(&submitter_id)                            // $4
+        .bind(&patient_control_number)                  // $5
+        .bind(&subscriber_id)                           // $6
+        .bind(&subscriber_last_name)                    // $7
+        .bind(&subscriber_first_name)                   // $8
+        .bind(subscriber_middle_name.as_deref())        // $9
+        .bind(subscriber_name_suffix.as_deref())        // $10
+        .bind(subscriber_gender)                        // $11
+        .bind(subscriber_dob)                           // $12
+        .bind(subscriber_address_line1.as_deref())      // $13
+        .bind(subscriber_address_line2.as_deref())      // $14
+        .bind(subscriber_city.as_deref())               // $15
+        .bind(subscriber_state)                         // $16
+        .bind(subscriber_postal_code.as_deref())        // $17
+        .bind(subscriber_country)                       // $18
+        .bind(dos_from)                                 // $19
+        .bind(dos_from)                                 // $20 date_of_service_to same as from for now
+        .bind(total_claim_charge)                       // $21
+        .bind(payer_id.as_deref())                      // $22
+        .bind(payer_name.as_deref())                    // $23
+        .bind(payer_responsibility_code)                // $24
+        .bind(claim_filing_indicator.as_deref())        // $25
+        .bind(place_of_service)                         // $26
+        .bind(medical_record_number.as_deref())         // $27
+        .bind(claim_number.as_deref())                  // $28
+        .bind(paperwork_report_type.as_deref())         // $29
+        .bind(paperwork_transmission_code.as_deref())   // $30
+        .bind(paperwork_control_number.as_deref())      // $31
+        .bind(rendering_provider_id)                    // $32
+        .bind(rendering_provider_npi.as_deref())        // $33
+        .bind(rendering_provider_name.as_deref())       // $34
+        .bind(rendering_provider_taxonomy.as_deref())   // $35
+        .bind(referring_provider_id)                    // $36
+        .bind(referring_provider_npi.as_deref())        // $37
+        .bind(referring_provider_name.as_deref())       // $38
+        .bind(referring_provider_taxonomy.as_deref())   // $39
+        .bind(supervising_provider_id)                  // $40
+        .bind(supervising_provider_npi.as_deref())      // $41
+        .bind(supervising_provider_name.as_deref())     // $42
+        .bind(supervising_provider_taxonomy.as_deref()) // $43
+        .bind(billing_provider_id)                      // $44
+        .bind(billing_provider_npi.as_deref())          // $45
+        .bind(billing_provider_tax_id.as_deref())       // $46
+        .bind(billing_provider_name.as_deref())         // $47
+        .bind(billing_provider_address_line1.as_deref()) // $48
+        .bind(billing_provider_city.as_deref())         // $49
+        .bind(billing_provider_state.as_deref())        // $50
+        .bind(billing_provider_postal_code.as_deref())  // $51
+        .bind("NEW")                                    // $52 claim_status
+        .bind(patient_last_name.as_deref())             // $53
+        .bind(patient_first_name.as_deref())            // $54
+        .bind(patient_middle_name.as_deref())           // $55
+        .bind(patient_name_suffix.as_deref())           // $56
+        .bind(patient_dob)                              // $57
+        .bind(patient_gender)                           // $58
+        .bind(patient_address_line1.as_deref())         // $59
+        .bind(patient_address_line2.as_deref())         // $60
+        .bind(patient_city.as_deref())                  // $61
+        .bind(patient_state)                            // $62
+        .bind(patient_postal_code.as_deref())           // $63
+        .bind(patient_relationship_code)                // $64
+        .bind(service_facility_npi.as_deref())          // $65
+        .bind(service_facility_name.as_deref())         // $66
+        .bind(service_facility_address_line1.as_deref()) // $67
+        .bind(service_facility_address_line2.as_deref()) // $68
+        .bind(service_facility_city.as_deref())         // $69
+        .bind(service_facility_state.as_deref())        // $70
+        .bind(service_facility_postal_code.as_deref())  // $71
+        .bind(billing_date)                             // $72
+        .bind(other_payer_id.as_deref())                // $73
+        .bind(other_payer_name.as_deref())              // $74
+        .bind(other_payer_paid_amount)                  // $75
+        .bind(condition_codes.as_ref())                 // $76
+        .bind(patient_responsibility_amount)            // $77
+        .bind(initial_treatment_date)                   // $78
+        .bind(last_seen_date)                           // $79
+        .bind(acute_manifestation_date)                 // $80
+        .bind(accident_date)                            // $81
+        .bind(last_xray_date)                           // $82
+        .bind(disability_from_date)                     // $83
+        .bind(disability_to_date)                       // $84
+        .bind(last_worked_date)                         // $85
+        .bind(authorized_return_to_work_date)           // $86
+        .bind(admission_date)                           // $87
+        .bind(discharge_date)                           // $88
+        .bind(signature_indicator)                      // $89
+        .bind(assignment_indicator)                     // $90
+        .bind(benefits_assignment_indicator)            // $91
+        .bind(release_of_information_code)              // $92
+        .bind(patient_signature_code)                   // $93
+        .bind(delay_reason_code)                        // $94
+        .bind(special_program_code)                     // $95
+        .bind(service_authorization_code)               // $96
+        .bind(patient_amount_paid)                      // $97
+        .bind(submitter_name)                           // $98
+        .bind(transaction_set_control_number)           // $99
+        .bind(onset_of_illness_date)                    // $100
         .fetch_one(&mut **tx)
         .await
         .map_err(|e| {
             error!("Database error inserting encounter: {:?}", e);
             error!("  patient_control_number={}, facility_id={:?}, organization_id={}",
                 patient_control_number, facility_id, organization_id);
-            // Log all VARCHAR(2) and CHAR fields to identify which is too long
-            error!("  DEBUG field lengths: place_of_service={:?}(len={}), payer_responsibility={:?}(len={})",
-                place_of_service, place_of_service.map(|s| s.len()).unwrap_or(0),
-                payer_responsibility_code, payer_responsibility_code.len());
-            error!("  DEBUG patient fields: gender={:?}(len={}), state={:?}(len={}), relationship={:?}(len={})",
-                patient_gender, patient_gender.map(|s| s.len()).unwrap_or(0),
-                patient_state, patient_state.map(|s| s.len()).unwrap_or(0),
-                patient_relationship_code, patient_relationship_code.map(|s| s.len()).unwrap_or(0));
-            error!("  DEBUG service_facility: npi={:?}, name={:?}", service_facility_npi, service_facility_name);
             e
         })
         .context("Failed to insert encounter")?;
@@ -1158,8 +1456,7 @@ impl ClaimsProcessor {
             .context("Missing subscriber_id")?;
         let subscriber_birth_date_str = encounter_fields.get("subscriber_birth_date")
             .filter(|s| !s.is_empty())
-            .map(|s| s.as_str())
-            .unwrap_or("1900-01-01"); // Default to 1900-01-01 if missing or empty
+            .map(|s| s.as_str());
 
         // Optional fields with defaults
         let submitter_id = encounter_fields.get("submitter_id")
@@ -1183,8 +1480,8 @@ impl ClaimsProcessor {
         // Parse dates
         let dos_from = chrono::NaiveDate::parse_from_str(date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
-        let subscriber_dob = chrono::NaiveDate::parse_from_str(subscriber_birth_date_str, "%Y-%m-%d")
-            .unwrap_or(*DEFAULT_DATE); // Fallback to 1900-01-01
+        let subscriber_dob = subscriber_birth_date_str
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
         // Optional fields - subscriber demographics
         let payer_id = encounter_fields.get("payer_id").map(|s| s.as_str());
@@ -1203,11 +1500,21 @@ impl ClaimsProcessor {
         let subscriber_country = encounter_fields.get("subscriber_country").map(|s| s.as_str());
 
         // Provider information
-        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let rendering_provider_npi = encounter_fields.get("rendering_provider_npi")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let rendering_provider_name = encounter_fields.get("rendering_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let referring_provider_npi = encounter_fields.get("referring_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let referring_provider_npi = encounter_fields.get("referring_provider_npi")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let referring_provider_name = encounter_fields.get("referring_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let service_facility_npi = encounter_fields.get("service_facility_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        // NPI must be exactly 10 digits - reject invalid values like facility codes
+        let service_facility_npi = encounter_fields.get("service_facility_npi")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let service_facility_name = encounter_fields.get("service_facility_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let service_facility_address_line1 = encounter_fields.get("service_facility_address_line1").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let service_facility_address_line2 = encounter_fields.get("service_facility_address_line2").map(|s| s.as_str()).filter(|s| !s.is_empty());
@@ -1219,9 +1526,15 @@ impl ClaimsProcessor {
         info!("Service facility from raw_claims: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
             service_facility_npi, service_facility_name, service_facility_address_line1,
             service_facility_city, service_facility_state);
-        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let supervising_provider_npi = encounter_fields.get("supervising_provider_npi")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let supervising_provider_name = encounter_fields.get("supervising_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
-        let billing_provider_npi = encounter_fields.get("billing_provider_npi").map(|s| s.as_str()).filter(|s| !s.is_empty());
+        let billing_provider_npi = encounter_fields.get("billing_provider_npi")
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit()));
         let billing_provider_name = encounter_fields.get("billing_provider_name").map(|s| s.as_str()).filter(|s| !s.is_empty());
         let billing_provider_tax_id = encounter_fields.get("billing_provider_tax_id").map(|s| s.as_str());
         let billing_provider_address_line1 = encounter_fields.get("billing_provider_address_line1").map(|s| s.as_str());
@@ -1981,6 +2294,12 @@ impl ClaimsProcessor {
         let sl_other_payer_paid = service_line_fields.get(&format!("{}other_payer_line_paid_amount", prefix))
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
 
+        // Phase 3.10: Pricing information (from HCP segment)
+        let sl_allowed_amount = service_line_fields.get(&format!("{}allowed_amount", prefix))
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+        let sl_saving_amount = service_line_fields.get(&format!("{}saving_amount", prefix))
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok());
+
         // Insert service line and get generated ID
         let service_line_id: i64 = sqlx::query_scalar(
             r#"
@@ -2025,9 +2344,11 @@ impl ClaimsProcessor {
                 line_note,
                 revenue_code,
                 other_payer_line_paid_amount,
-                line_status
+                line_status,
+                allowed_amount,
+                saving_amount
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43)
             RETURNING service_line_id
             "#
         )
@@ -2072,6 +2393,8 @@ impl ClaimsProcessor {
         .bind(sl_revenue_code)
         .bind(sl_other_payer_paid)
         .bind("IMPORTED")
+        .bind(sl_allowed_amount)
+        .bind(sl_saving_amount)
         .fetch_one(&mut **tx)
         .await
         .map_err(|e| {
@@ -2444,8 +2767,29 @@ impl ClaimsProcessor {
                         patient_control_number, date_of_service, encounter_id, service_lines.len());
                 }
                 Err(e) => {
-                    failure_count += service_lines.len();
                     let error_str = e.to_string();
+
+                    // Check if this is a "retry later" error (provider locked by another worker)
+                    if error_str.contains("locked by another worker") {
+                        // Don't count as failure - will be retried in future batch
+                        debug!("Encounter {} skipped due to provider lock, will retry", patient_control_number);
+                        // Reset claims back to PENDING so they get picked up again
+                        let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+                        let _ = sqlx::query(
+                            r#"
+                            UPDATE staging.raw_claims
+                            SET processing_status = 'PENDING',
+                                batch_sequence_number = NULL
+                            WHERE raw_claim_id = ANY($1)
+                            "#
+                        )
+                        .bind(&claim_ids)
+                        .execute(&mut *tx)
+                        .await;
+                        continue; // Skip to next encounter
+                    }
+
+                    failure_count += service_lines.len();
                     error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, error_str);
 
                     // Collect error logs and claim IDs for bulk operations
@@ -2595,6 +2939,9 @@ impl ClaimsProcessor {
             error!("Failed to create savepoint for provider {}: {:?}", npi, e);
             return Ok(None);
         }
+
+        // Advisory locks are acquired upfront in sorted order by process_encounter_with_service_lines
+        // This prevents deadlocks by ensuring all workers acquire locks in the same order
 
         // Prepare values
         let last_name_value = last_name.unwrap_or("Unknown");

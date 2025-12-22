@@ -271,6 +271,10 @@ pub struct ClmSegment {
     pub assignment_indicator: Option<String>,         // CLM07
     pub benefits_assignment_indicator: Option<String>, // CLM08
     pub release_information_code: Option<String>,     // CLM09
+    pub related_causes_code: Option<String>,          // CLM10-1
+    pub accident_state: Option<String>,               // CLM10-4
+    pub special_program_code: Option<String>,         // CLM11
+    pub delay_reason_code: Option<String>,            // CLM20
 }
 
 impl ClmSegment {
@@ -298,6 +302,23 @@ impl ClmSegment {
                 (None, None, None)
             };
 
+        // CLM10 is a composite field (e.g., "AA:::IL") containing:
+        // - CLM10-1: Related Causes Code (AA=Auto Accident, EM=Employment, AB=Abuse)
+        // - CLM10-2: Related Causes Code 2 (secondary)
+        // - CLM10-3: Related Causes Code 3 (tertiary)
+        // - CLM10-4: State or Province Code (where accident occurred)
+        let clm10 = segment.get_optional(9);
+        let (related_causes_code, accident_state) =
+            if let Some(composite) = &clm10 {
+                let parts: Vec<&str> = composite.split(':').collect();
+                (
+                    parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                )
+            } else {
+                (None, None)
+            };
+
         Ok(Self {
             patient_control_number: segment.get_or_empty(0).to_string(),
             total_claim_charge_amount: charge_amount,
@@ -308,6 +329,10 @@ impl ClmSegment {
             assignment_indicator: segment.get_optional(6),         // CLM07
             benefits_assignment_indicator: segment.get_optional(7), // CLM08
             release_information_code: segment.get_optional(8),     // CLM09
+            related_causes_code,         // CLM10-1
+            accident_state,              // CLM10-3
+            special_program_code: segment.get_optional(10),        // CLM11
+            delay_reason_code: segment.get_optional(19),           // CLM20
         })
     }
 }
@@ -800,7 +825,7 @@ impl SvdSegment {
             (
                 parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(5).filter(|s| !s.is_empty()).map(|s| s.to_string()),
@@ -979,5 +1004,50 @@ mod tests {
         assert_eq!(clm.assignment_indicator, Some("A".to_string()));
         assert_eq!(clm.benefits_assignment_indicator, Some("Y".to_string()));
         assert_eq!(clm.release_information_code, Some("I".to_string()));
+    }
+
+    #[test]
+    fn test_clm_segment_extended() {
+        // Test CLM segment with extended fields (CLM10, CLM11, CLM20)
+        // CLM*FINAL-TEST-001*300.00***11:B:1*Y*A*Y*Y*AA:::TX*07*********5~
+        let segment = EdiSegment {
+            segment_id: "CLM".to_string(),
+            elements: vec![
+                "FINAL-TEST-001".to_string(),  // CLM01 - Patient Control Number
+                "300.00".to_string(),          // CLM02 - Total Charge Amount
+                "".to_string(),                // CLM03
+                "".to_string(),                // CLM04
+                "11:B:1".to_string(),          // CLM05 - Composite
+                "Y".to_string(),               // CLM06
+                "A".to_string(),               // CLM07
+                "Y".to_string(),               // CLM08
+                "Y".to_string(),               // CLM09
+                "AA:::TX".to_string(),         // CLM10 - Related causes composite
+                "07".to_string(),              // CLM11 - Special program code
+                "".to_string(),                // CLM12
+                "".to_string(),                // CLM13
+                "".to_string(),                // CLM14
+                "".to_string(),                // CLM15
+                "".to_string(),                // CLM16
+                "".to_string(),                // CLM17
+                "".to_string(),                // CLM18
+                "".to_string(),                // CLM19
+                "5".to_string(),               // CLM20 - Delay reason code
+            ],
+        };
+
+        let clm = ClmSegment::parse(&segment).unwrap();
+        assert_eq!(clm.patient_control_number, "FINAL-TEST-001");
+        assert_eq!(clm.total_claim_charge_amount, Decimal::new(30000, 2));
+        assert_eq!(clm.place_of_service_code, Some("11".to_string()));
+        assert_eq!(clm.facility_code_qualifier, Some("B".to_string()));
+        assert_eq!(clm.claim_frequency_code, Some("1".to_string()));
+        // CLM10 composite parsing
+        assert_eq!(clm.related_causes_code, Some("AA".to_string()));
+        assert_eq!(clm.accident_state, Some("TX".to_string()));
+        // CLM11
+        assert_eq!(clm.special_program_code, Some("07".to_string()));
+        // CLM20
+        assert_eq!(clm.delay_reason_code, Some("5".to_string()));
     }
 }

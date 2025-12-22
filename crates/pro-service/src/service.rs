@@ -462,7 +462,7 @@ pub fn run_service() -> Result<()> {
         let (shutdown_tx_completion, shutdown_rx_completion) = mpsc::channel::<()>(1);
 
         // Spawn SequencedBatchAcquirer
-        let acquirer = SequencedBatchAcquirer::new(db_pool.clone(), batch_size);
+        let acquirer = SequencedBatchAcquirer::new(db_pool.clone(), batch_size).await.expect("Failed to create SequencedBatchAcquirer");
         let batch_tx_for_acquirer = batch_tx.clone();
         let acquirer_handle = tokio::spawn(async move {
             if let Err(e) = acquirer.start(batch_tx_for_acquirer, shutdown_rx_acquirer).await {
@@ -526,7 +526,7 @@ pub fn run_service() -> Result<()> {
         }
 
         // Spawn SequentialCompletionManager
-        let completion_manager = SequentialCompletionManager::new(db_pool.clone());
+        let completion_manager = SequentialCompletionManager::new(db_pool.clone()).await.expect("Failed to create SequentialCompletionManager");
         let completion_handle = tokio::spawn(async move {
             if let Err(e) = completion_manager.start(result_rx, shutdown_rx_completion).await {
                 error!("SequentialCompletionManager error: {}", e);

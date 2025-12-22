@@ -19,6 +19,25 @@ impl EmbeddedMigration {
     }
 }
 
+/// Baseline schema (complete schema snapshot)
+/// Used for fresh installations - faster than running 60+ migrations
+pub const BASELINE: EmbeddedMigration = EmbeddedMigration {
+    version: "000",
+    name: "baseline_v2.12",
+    sql: include_str!("../../../migrations/000_baseline_v2.12.sql"),
+};
+
+/// Version at which the baseline was created
+/// All migrations up to and including this number are covered by the baseline
+pub const BASELINE_COVERS_THROUGH: u32 = 64;
+
+/// Get the baseline migration
+pub fn get_baseline() -> &'static EmbeddedMigration {
+    &BASELINE
+}
+
+/// Get all incremental migrations (excluding baseline)
+/// These are used for upgrades from existing installations
 pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
     vec![
         EmbeddedMigration {
@@ -325,6 +344,11 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             version: "063",
             name: "add_billing_date_to_encounter",
             sql: include_str!("../../../migrations/063_add_billing_date_to_encounter.sql"),
+        },
+        EmbeddedMigration {
+            version: "064",
+            name: "make_dates_nullable",
+            sql: include_str!("../../../migrations/064_make_dates_nullable.sql"),
         },
     ]
 }

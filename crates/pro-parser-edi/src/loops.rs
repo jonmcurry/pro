@@ -398,7 +398,12 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
     for segment in segments {
         match segment.segment_id.as_str() {
             "CLM" => {
+                debug_log(&format!("[CLM_PARSE] segment has {} elements", segment.elements.len()));
+                debug_log(&format!("[CLM_PARSE] element[9]={:?}, element[10]={:?}, element[19]={:?}",
+                    segment.get(9), segment.get(10), segment.get(19)));
                 let clm = ClmSegment::parse(segment)?;
+                debug_log(&format!("[CLM_PARSE] parsed: delay_reason={:?}, special_program={:?}, accident_state={:?}",
+                    clm.delay_reason_code, clm.special_program_code, clm.accident_state));
                 claim.patient_control_number = clm.patient_control_number;
                 claim.total_claim_charge_amount = clm.total_claim_charge_amount;
                 claim.place_of_service_code = clm.place_of_service_code;
@@ -407,6 +412,9 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 claim.assignment_indicator = clm.assignment_indicator;
                 claim.benefits_assignment_indicator = clm.benefits_assignment_indicator;
                 claim.release_of_information_code = clm.release_information_code;
+                claim.delay_reason_code = clm.delay_reason_code;
+                claim.special_program_code = clm.special_program_code;
+                claim.auto_accident_state = clm.accident_state;
             }
             "NM1" => {
                 let nm1 = Nm1Segment::parse(segment)?;
@@ -783,7 +791,7 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 } else {
                     // Other date types are claim-level only
                     match dtp.date_time_qualifier.as_str() {
-                        "433" => claim.onset_of_illness_date = Some(dtp.parse_date()?),
+                        "431" => claim.onset_of_illness_date = Some(dtp.parse_date()?),
                         "454" => claim.initial_treatment_date = Some(dtp.parse_date()?),
                         "304" => claim.last_seen_date = Some(dtp.parse_date()?),
                         "453" => claim.acute_manifestation_date = Some(dtp.parse_date()?),
@@ -802,13 +810,18 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
             }
             "HI" => {
                 let hi = HiSegment::parse(segment)?;
-                for (idx, (qualifier, code)) in hi.diagnoses.iter().enumerate() {
-                    claim.diagnoses.push(DiagnosisCode {
-                        sequence_number: (idx + 1) as i16,
-                        diagnosis_code_qualifier: qualifier.clone(),
-                        diagnosis_code: code.clone(),
-                        is_principal: idx == 0,
-                    });
+                for (qualifier, code) in hi.diagnoses.iter() {
+                    // Only include diagnosis codes (ABK=Principal, ABF=Additional)
+                    // Skip BP (procedure codes), BG (condition codes), etc.
+                    if qualifier == "ABK" || qualifier == "ABF" {
+                        let next_seq = claim.diagnoses.len() + 1;
+                        claim.diagnoses.push(DiagnosisCode {
+                            sequence_number: next_seq as i16,
+                            diagnosis_code_qualifier: qualifier.clone(),
+                            diagnosis_code: code.clone(),
+                            is_principal: qualifier == "ABK",
+                        });
+                    }
                 }
             }
             "REF" => {
@@ -1159,6 +1172,23 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 claim.referring_provider_last_name
             ));
         }
+    }
+
+    // If patient fields are empty, copy from subscriber (patient IS the subscriber)
+    // This handles the common case where NM1*IL exists but NM1*QC does not
+    if claim.patient_last_name.is_none() && !claim.subscriber_last_name.is_empty() {
+        claim.patient_last_name = Some(claim.subscriber_last_name.clone());
+        claim.patient_first_name = Some(claim.subscriber_first_name.clone());
+        claim.patient_middle_name = claim.subscriber_middle_name.clone();
+        claim.patient_name_suffix = claim.subscriber_name_suffix.clone();
+        claim.patient_date_of_birth = claim.subscriber_date_of_birth;
+        claim.patient_gender = claim.subscriber_gender.clone();
+        claim.patient_address_line1 = claim.subscriber_address_line1.clone();
+        claim.patient_address_line2 = claim.subscriber_address_line2.clone();
+        claim.patient_city = claim.subscriber_city.clone();
+        claim.patient_state = claim.subscriber_state.clone();
+        claim.patient_postal_code = claim.subscriber_postal_code.clone();
+        debug_log("[CLAIM] Copied subscriber info to patient fields (patient = subscriber)");
     }
 
     Ok(claim)

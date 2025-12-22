@@ -399,11 +399,7 @@ pub fn convert_claim_to_encounter(claim: &ParsedClaim, organization_id: i64) -> 
         subscriber_middle_name: claim.subscriber_middle_name.clone(),
         subscriber_name_suffix: claim.subscriber_name_suffix.clone(),
         subscriber_gender: claim.subscriber_gender.clone(),
-        subscriber_birth_date: claim.subscriber_date_of_birth.unwrap_or_else(|| {
-            // Default to a reasonable date if missing
-            chrono::NaiveDate::from_ymd_opt(1900, 1, 1)
-                .expect("Default date 1900-01-01 is always valid")
-        }),
+        subscriber_birth_date: claim.subscriber_date_of_birth,
         subscriber_address_line1: claim.subscriber_address_line1.clone(),
         subscriber_address_line2: claim.subscriber_address_line2.clone(),
         subscriber_city: claim.subscriber_city.clone(),

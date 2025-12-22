@@ -80,25 +80,12 @@ pub struct SequencedBatchAcquirer {
 }
 
 impl SequencedBatchAcquirer {
-    /// Create a new SequencedBatchAcquirer
-    /// Queries the database to get the next sequence number to avoid duplicates
-    pub async fn new(pool: PgPool, batch_size: usize) -> Result<Self> {
-        // Get the maximum existing sequence number from the database
-        let max_seq: Option<i32> = sqlx::query_scalar(
-            "SELECT MAX(sequence_number) FROM staging.batch_sequences"
-        )
-        .fetch_one(&pool)
-        .await
-        .context("Failed to query max sequence number")?;
-
-        let start_value = max_seq.unwrap_or(0) + 1;
-        info!("SequencedBatchAcquirer starting with sequence_number: {}", start_value);
-
-        Ok(Self {
+    pub fn new(pool: PgPool, batch_size: usize) -> Self {
+        Self {
             pool,
             batch_size,
-            sequence_counter: Arc::new(SequenceCounter::new(start_value)),
-        })
+            sequence_counter: Arc::new(SequenceCounter::new(1)),
+        }
     }
 
     /// Start the batch acquisition loop
@@ -315,25 +302,12 @@ pub struct SequentialCompletionManager {
 }
 
 impl SequentialCompletionManager {
-    /// Create a new SequentialCompletionManager
-    /// Queries the database to get the next expected sequence number
-    pub async fn new(pool: PgPool) -> Result<Self> {
-        // Get the maximum completed sequence number from the database
-        let max_completed: Option<i32> = sqlx::query_scalar(
-            "SELECT MAX(sequence_number) FROM staging.batch_sequences WHERE completed_at IS NOT NULL"
-        )
-        .fetch_one(&pool)
-        .await
-        .context("Failed to query max completed sequence number")?;
-
-        let next_expected = max_completed.unwrap_or(0) + 1;
-        info!("SequentialCompletionManager starting with next_expected_sequence: {}", next_expected);
-
-        Ok(Self {
+    pub fn new(pool: PgPool) -> Self {
+        Self {
             pool,
             pending_completions: Arc::new(Mutex::new(HashMap::new())),
-            next_expected_sequence: Arc::new(Mutex::new(next_expected)),
-        })
+            next_expected_sequence: Arc::new(Mutex::new(1)),
+        }
     }
 
     /// Start the completion manager loop

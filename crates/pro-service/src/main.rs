@@ -365,7 +365,9 @@ async fn run_console_mode() -> Result<()> {
                 let queue_id = importer.enqueue_file(&file_path).await?;
                 info!("File enqueued successfully: queue_id={}", queue_id);
 
-                Ok(())
+                // Return SKIP_MOVE error to prevent file_watcher from moving the file.
+                // The queue processor will move the file after Stage 1 processing is complete.
+                Err(anyhow::anyhow!("SKIP_MOVE: File enqueued for Stage 1 processing"))
             }
         }).await;
 
@@ -503,7 +505,7 @@ async fn run_console_mode() -> Result<()> {
     let (shutdown_tx_completion, shutdown_rx_completion) = mpsc::channel::<()>(1);
 
     // Spawn SequencedBatchAcquirer
-    let acquirer = SequencedBatchAcquirer::new(db_pool.clone(), batch_size);
+    let acquirer = SequencedBatchAcquirer::new(db_pool.clone(), batch_size).await?;
     let batch_tx_for_acquirer = batch_tx.clone();
     let acquirer_handle = tokio::spawn(async move {
         if let Err(e) = acquirer.start(batch_tx_for_acquirer, shutdown_rx_acquirer).await {
@@ -569,7 +571,7 @@ async fn run_console_mode() -> Result<()> {
     }
 
     // Spawn SequentialCompletionManager
-    let completion_manager = SequentialCompletionManager::new(db_pool.clone());
+    let completion_manager = SequentialCompletionManager::new(db_pool.clone()).await?;
     let completion_handle = tokio::spawn(async move {
         if let Err(e) = completion_manager.start(result_rx, shutdown_rx_completion).await {
             error!("SequentialCompletionManager error: {}", e);

@@ -256,17 +256,19 @@ impl BusinessRuleValidator {
             }
         }
 
-        // Rule 4: Validate subscriber birth date
-        if encounter.subscriber_birth_date > today {
-            errors.push("Subscriber birth date cannot be in the future".to_string());
-        }
+        // Rule 4: Validate subscriber birth date (only if provided)
+        if let Some(birth_date) = encounter.subscriber_birth_date {
+            if birth_date > today {
+                errors.push("Subscriber birth date cannot be in the future".to_string());
+            }
 
-        // Rule 5: Check age reasonability
-        let age = (encounter.date_of_service_from - encounter.subscriber_birth_date).num_days() / 365;
-        if age < 0 {
-            errors.push("Subscriber birth date is after date of service".to_string());
-        } else if age > 120 {
-            warnings.push("Subscriber age exceeds 120 years".to_string());
+            // Rule 5: Check age reasonability
+            let age = (encounter.date_of_service_from - birth_date).num_days() / 365;
+            if age < 0 {
+                errors.push("Subscriber birth date is after date of service".to_string());
+            } else if age > 120 {
+                warnings.push("Subscriber age exceeds 120 years".to_string());
+            }
         }
 
         // Rule 6: Validate total charge amount
@@ -420,7 +422,7 @@ pub struct EncounterValidation {
     pub patient_control_number: String,
     pub date_of_service_from: NaiveDate,
     pub date_of_service_to: Option<NaiveDate>,
-    pub subscriber_birth_date: NaiveDate,
+    pub subscriber_birth_date: Option<NaiveDate>,
     pub total_claim_charge_amount: Decimal,
     pub place_of_service_code: Option<String>,
     pub diagnosis_count: usize,

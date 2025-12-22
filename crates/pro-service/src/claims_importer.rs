@@ -728,6 +728,13 @@ impl ClaimsImporter {
                 claim.patient_control_number,
                 claim.date_of_service_from
             );
+            // DEBUG: Log extended CLM fields
+            info!("Claim {} extended: delay_reason={:?}, special_program={:?}, auto_accident_state={:?}",
+                idx + 1,
+                claim.delay_reason_code,
+                claim.special_program_code,
+                claim.auto_accident_state
+            );
 
             // Transform EDI ParsedClaim to match CSV database structure:
             // - encounter_fields: Main claim/subscriber/payer data (JSONB)
@@ -823,6 +830,20 @@ impl ClaimsImporter {
 
             // Claim identifiers
             encounter_fields.insert("claim_number".to_string(), serde_json::json!(claim.claim_number.clone().unwrap_or_default()));
+
+            // Transaction-level fields (from ST/NM1*41 segments, same for all claims in transaction)
+            // Submitter name: prefer organization name, fall back to last/first name
+            let submitter_name = transaction.submitter.submitter_organization_name.clone()
+                .or_else(|| {
+                    match (&transaction.submitter.submitter_last_name, &transaction.submitter.submitter_first_name) {
+                        (Some(last), Some(first)) => Some(format!("{}, {}", last, first)),
+                        (Some(last), None) => Some(last.clone()),
+                        _ => None
+                    }
+                })
+                .unwrap_or_default();
+            encounter_fields.insert("submitter_name".to_string(), serde_json::json!(submitter_name));
+            encounter_fields.insert("transaction_set_control_number".to_string(), serde_json::json!(transaction.transaction_set_header.transaction_set_control_number.clone()));
 
             // Claim note (will be inserted into encounter_note table separately)
             encounter_fields.insert("claim_note".to_string(), serde_json::json!(claim.claim_note.clone().unwrap_or_default()));
