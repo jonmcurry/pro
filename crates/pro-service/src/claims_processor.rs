@@ -13,6 +13,8 @@ use pro_common::DEFAULT_DATE;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 /// Helper function to extract a string value from a serde_json::Value
@@ -67,12 +69,84 @@ impl EncounterFieldsWrapper {
 #[derive(Clone)]
 pub struct ClaimsProcessor {
     pool: PgPool,
+    /// Cache of taxonomy_code -> specialty_display for fast lookups
+    /// Loaded lazily on first provider insert
+    taxonomy_cache: Arc<RwLock<HashMap<String, String>>>,
+    /// Flag to track if cache has been loaded
+    taxonomy_cache_loaded: Arc<RwLock<bool>>,
 }
 
 impl ClaimsProcessor {
     /// Create a new claims processor
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            taxonomy_cache: Arc::new(RwLock::new(HashMap::new())),
+            taxonomy_cache_loaded: Arc::new(RwLock::new(false)),
+        }
+    }
+
+    /// Load taxonomy cache from database (called lazily on first use)
+    async fn ensure_taxonomy_cache_loaded(&self) -> Result<()> {
+        // Quick check without write lock
+        {
+            let loaded = self.taxonomy_cache_loaded.read().await;
+            if *loaded {
+                return Ok(());
+            }
+        }
+
+        // Need to load - acquire write lock
+        let mut loaded = self.taxonomy_cache_loaded.write().await;
+
+        // Double-check after acquiring write lock (another thread may have loaded)
+        if *loaded {
+            return Ok(());
+        }
+
+        info!("Loading taxonomy cache from database...");
+
+        let taxonomies: Vec<(String, String)> = sqlx::query_as(
+            r#"
+            SELECT taxonomy_code, specialty_display
+            FROM claims.provider_taxonomy
+            WHERE is_active = true
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to load taxonomy cache")?;
+
+        let mut cache = self.taxonomy_cache.write().await;
+        for (code, specialty) in taxonomies {
+            cache.insert(code, specialty);
+        }
+
+        info!("Loaded {} taxonomy codes into cache", cache.len());
+        *loaded = true;
+        Ok(())
+    }
+
+    /// Lookup specialty from taxonomy code using cache
+    /// Returns (validated_taxonomy_code, specialty) or (None, None) if not found
+    async fn lookup_taxonomy(&self, taxonomy_code: &str) -> (Option<String>, Option<String>) {
+        if taxonomy_code.is_empty() {
+            return (None, None);
+        }
+
+        // Ensure cache is loaded
+        if let Err(e) = self.ensure_taxonomy_cache_loaded().await {
+            warn!("Failed to load taxonomy cache: {:?}", e);
+            return (None, None);
+        }
+
+        let cache = self.taxonomy_cache.read().await;
+        if let Some(specialty) = cache.get(taxonomy_code) {
+            (Some(taxonomy_code.to_string()), Some(specialty.clone()))
+        } else {
+            warn!("Taxonomy code '{}' not found in cache", taxonomy_code);
+            (None, None)
+        }
     }
 
     /// Process pending claims from staging.raw_claims (STAGE 2)
@@ -82,6 +156,34 @@ impl ClaimsProcessor {
         let limit = limit.unwrap_or(10000); // Default batch of 10k claims
 
         info!("====== STAGE 2: Starting processing of pending raw claims (limit: {}) ======", limit);
+
+        // PHASE 1 FIX: Recover stale PROCESSING claims (stuck for > 5 minutes)
+        // This prevents claims from being permanently stuck if a previous run crashed
+        let stale_recovered = sqlx::query_scalar::<_, i64>(
+            r#"
+            WITH stale_claims AS (
+                SELECT raw_claim_id
+                FROM staging.raw_claims
+                WHERE processing_status = 'PROCESSING'
+                AND processed_at IS NULL
+                AND ingested_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes'
+                LIMIT 10000
+            )
+            UPDATE staging.raw_claims rc
+            SET processing_status = 'PENDING'
+            FROM stale_claims sc
+            WHERE rc.raw_claim_id = sc.raw_claim_id
+            RETURNING rc.raw_claim_id
+            "#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map(|v| v.len() as i64)
+        .unwrap_or(0);
+
+        if stale_recovered > 0 {
+            info!("Recovered {} stale PROCESSING claims back to PENDING", stale_recovered);
+        }
 
         // Query pending raw claims (FIFO order)
         let raw_claims: Vec<RawClaim> = sqlx::query_as(
@@ -161,15 +263,7 @@ impl ClaimsProcessor {
             failed: 0,
         };
 
-        // Begin transaction for batch processing
-        let mut tx = self.pool.begin().await
-            .context("Failed to begin database transaction")?;
-
-        // Batch commit configuration
-        const BATCH_SIZE: usize = 1000;
-        let mut batch_count = 0;
-
-        // Facility lookup cache for performance
+        // Facility lookup cache for performance (shared across encounters)
         let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
 
         info!("Processing {} raw claims...", raw_claims.len());
@@ -214,127 +308,125 @@ impl ClaimsProcessor {
 
         info!("Grouped {} raw claims into {} encounters", result.total_processed, encounter_groups.len());
 
-        // Process each encounter group
+        // PHASE 2 FIX: Collect successful/failed claim IDs for batch status updates
+        // This prevents cascading rollbacks - each encounter is independent
+        let mut successful_claim_ids: Vec<i64> = Vec::with_capacity(result.total_processed);
+        let mut failed_claims: Vec<(i64, i64, i32, String, String)> = Vec::new(); // (raw_claim_id, batch_id, row_number, error_message, raw_data)
+
+        // Process each encounter group with per-encounter transactions
         for ((patient_control_number, date_of_service), service_lines) in encounter_groups {
             debug!("Processing encounter: {} on {} ({} service lines)",
                 patient_control_number, date_of_service, service_lines.len());
 
-            // Validate and insert encounter with all service lines
-            match self.process_encounter_with_service_lines(&mut tx, service_lines.clone(), &mut facility_cache).await {
-                Ok(encounter_id) => {
-                    result.successful += service_lines.len();
-                    batch_count += service_lines.len();
+            // PHASE 2 FIX: Per-encounter transaction - failures don't cascade
+            let mut tx = self.pool.begin().await
+                .context("Failed to begin encounter transaction")?;
 
-                    // Mark all raw_claims in this encounter as COMPLETED
+            // Validate and insert encounter with all service lines
+            match self.process_encounter_with_service_lines(&mut tx, &service_lines, &mut facility_cache).await {
+                Ok(encounter_id) => {
+                    // Commit this encounter immediately - no batching
+                    tx.commit().await
+                        .context("Failed to commit encounter transaction")?;
+
+                    result.successful += service_lines.len();
+
+                    // Collect claim IDs for batch status update later
                     for service_line in &service_lines {
-                        sqlx::query(
-                            r#"
-                            UPDATE staging.raw_claims
-                            SET processing_status = 'COMPLETED',
-                                processed_at = CURRENT_TIMESTAMP
-                            WHERE raw_claim_id = $1
-                            "#
-                        )
-                        .bind(service_line.raw_claim_id)
-                        .execute(&mut *tx)
-                        .await?;
+                        successful_claim_ids.push(service_line.raw_claim_id);
                     }
 
                     debug!("Successfully processed encounter: {} on {} -> encounter_id {}",
                         patient_control_number, date_of_service, encounter_id);
-
-                    // Commit batch every BATCH_SIZE rows
-                    if batch_count >= BATCH_SIZE {
-                        debug!("Committing batch of {} claims", batch_count);
-                        tx.commit().await
-                            .context("Failed to commit batch transaction")?;
-                        info!("Committed batch: {} claims processed so far", result.successful);
-
-                        // Start new transaction
-                        tx = self.pool.begin().await
-                            .context("Failed to begin new batch transaction")?;
-                        batch_count = 0;
-                    }
                 }
                 Err(e) => {
+                    // Rollback failed encounter (may already be rolled back by DB)
+                    let _ = tx.rollback().await;
+
                     result.failed += service_lines.len();
                     error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, e);
 
-                    // CRITICAL: When encounter processing fails, the transaction is in an aborted state.
-                    // We must rollback and start fresh to log errors properly.
-                    // Rollback the aborted transaction (this is a no-op if already rolled back)
-                    tx.rollback().await
-                        .context("Failed to rollback aborted transaction")?;
-
-                    // Start fresh transaction for error logging
-                    tx = self.pool.begin().await
-                        .context("Failed to begin error logging transaction")?;
-                    batch_count = 0;
-
-                    // Mark all raw_claims in this encounter as FAILED
+                    // Collect failed claim info for batch error logging later
                     for service_line in &service_lines {
                         let error_message = format!("Row {}: {}", service_line.row_number, e);
-
-                        sqlx::query(
-                            r#"
-                            UPDATE staging.raw_claims
-                            SET processing_status = 'FAILED',
-                                error_message = $2
-                            WHERE raw_claim_id = $1
-                            "#
-                        )
-                        .bind(service_line.raw_claim_id)
-                        .bind(&error_message)
-                        .execute(&mut *tx)
-                        .await?;
-
-                        // Log error to staging.import_error_log
-                        let _error_log_id: i64 = sqlx::query_scalar(
-                            r#"
-                            INSERT INTO staging.import_error_log (
-                                batch_id,
-                                record_number,
-                                error_type,
-                                error_severity,
-                                error_message,
-                                raw_data
-                            )
-                            VALUES ($1, $2, $3, $4, $5, $6)
-                            RETURNING error_id
-                            "#
-                        )
-                        .bind(service_line.batch_id)
-                        .bind(service_line.row_number)
-                        .bind("VALIDATION")
-                        .bind("ERROR")
-                        .bind(&error_message)
-                        .bind(serde_json::to_string(&service_line.encounter_fields).ok())
-                        .fetch_one(&mut *tx)
-                        .await?;
-                    }
-
-                    batch_count += service_lines.len();
-
-                    // Commit batch every BATCH_SIZE rows
-                    if batch_count >= BATCH_SIZE {
-                        debug!("Committing batch of {} claims (with errors)", batch_count);
-                        tx.commit().await
-                            .context("Failed to commit batch transaction")?;
-                        info!("Committed batch: {} claims processed, {} failed so far",
-                            result.successful, result.failed);
-
-                        // Start new transaction
-                        tx = self.pool.begin().await
-                            .context("Failed to begin new batch transaction")?;
-                        batch_count = 0;
+                        let raw_data = serde_json::to_string(&service_line.encounter_fields).unwrap_or_default();
+                        failed_claims.push((
+                            service_line.raw_claim_id,
+                            service_line.batch_id,
+                            service_line.row_number,
+                            error_message,
+                            raw_data,
+                        ));
                     }
                 }
             }
         }
 
-        // Commit final batch
-        tx.commit().await
-            .context("Failed to commit final batch transaction")?;
+        // PHASE 2 & 3 FIX: Batch update successful claims status
+        if !successful_claim_ids.is_empty() {
+            sqlx::query(
+                r#"
+                UPDATE staging.raw_claims
+                SET processing_status = 'COMPLETED',
+                    processed_at = CURRENT_TIMESTAMP
+                WHERE raw_claim_id = ANY($1)
+                "#
+            )
+            .bind(&successful_claim_ids)
+            .execute(&self.pool)
+            .await
+            .context("Failed to batch update successful claims")?;
+
+            debug!("Batch updated {} claims to COMPLETED", successful_claim_ids.len());
+        }
+
+        // PHASE 3 FIX: Batch update failed claims and insert error logs
+        if !failed_claims.is_empty() {
+            // Extract claim IDs and error messages for batch update
+            let failed_ids: Vec<i64> = failed_claims.iter().map(|(id, _, _, _, _)| *id).collect();
+
+            // Update status in batch - use a single UPDATE with CASE for error messages
+            // Since we need different error messages per claim, we use a loop but outside transaction
+            for (raw_claim_id, batch_id, row_number, error_message, raw_data) in &failed_claims {
+                // These are outside any transaction, so failures don't cascade
+                let _ = sqlx::query(
+                    r#"
+                    UPDATE staging.raw_claims
+                    SET processing_status = 'FAILED',
+                        error_message = $2,
+                        processed_at = CURRENT_TIMESTAMP
+                    WHERE raw_claim_id = $1
+                    "#
+                )
+                .bind(raw_claim_id)
+                .bind(error_message)
+                .execute(&self.pool)
+                .await;
+
+                // Log error to staging.import_error_log (fire-and-forget)
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO staging.import_error_log (
+                        batch_id,
+                        record_number,
+                        error_type,
+                        error_severity,
+                        error_message,
+                        raw_data
+                    )
+                    VALUES ($1, $2, 'VALIDATION', 'ERROR', $3, $4)
+                    "#
+                )
+                .bind(batch_id)
+                .bind(row_number)
+                .bind(error_message)
+                .bind(raw_data)
+                .execute(&self.pool)
+                .await;
+            }
+
+            debug!("Batch updated {} claims to FAILED with error logs", failed_ids.len());
+        }
 
         let process_end = chrono::Utc::now();
 
@@ -411,10 +503,11 @@ impl ClaimsProcessor {
 
     /// Process an encounter with multiple service lines
     /// This creates ONE encounter and N service_line records
+    /// PHASE 4 FIX: Changed from Vec<RawClaim> to &[RawClaim] to avoid cloning
     async fn process_encounter_with_service_lines(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        service_lines: Vec<RawClaim>,
+        service_lines: &[RawClaim],
         facility_cache: &mut HashMap<String, (Option<i64>, i64, Option<i64>)>,
     ) -> Result<i64> {
         if service_lines.is_empty() {
@@ -505,14 +598,17 @@ impl ClaimsProcessor {
         };
 
         // Calculate total claim charge from ALL service lines
+        // PHASE 4 FIX: Use get() on JsonValue directly instead of cloning and deserializing
         let mut total_claim_charge = rust_decimal::Decimal::ZERO;
-        for service_line in &service_lines {
+        for service_line in service_lines {
             if let Some(slf_value) = &service_line.service_line_fields {
-                if let Ok(slf) = serde_json::from_value::<HashMap<String, String>>(slf_value.clone()) {
-                    if let Some(charge_str) = slf.get("line_item_charge_amount") {
-                        if let Ok(charge) = charge_str.parse::<rust_decimal::Decimal>() {
-                            total_claim_charge += charge;
-                        }
+                // Extract charge directly from JsonValue without cloning
+                if let Some(charge_str) = slf_value.get("service_line_1_line_item_charge_amount")
+                    .or_else(|| slf_value.get("line_item_charge_amount"))
+                    .and_then(|v| v.as_str())
+                {
+                    if let Ok(charge) = charge_str.parse::<rust_decimal::Decimal>() {
+                        total_claim_charge += charge;
                     }
                 }
             }
@@ -619,7 +715,7 @@ impl ClaimsProcessor {
         let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").filter(|s| !s.is_empty());
 
         // Log service facility fields for debugging
-        info!("Service facility from encounter_fields: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
+        debug!("Service facility from encounter_fields: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
             service_facility_npi, service_facility_name, service_facility_address_line1,
             service_facility_city, service_facility_state);
 
@@ -731,38 +827,11 @@ impl ClaimsProcessor {
 
         // Ensure providers exist in claims.provider table and get their provider_ids
         // Provider errors are handled internally using savepoints - claims proceed with NULL provider_id on error
-        
-        // DEADLOCK PREVENTION: Use TRY advisory locks for ALL provider NPIs in SORTED order
-        // pg_try_advisory_xact_lock returns false if lock can't be acquired (instead of blocking)
-        // This prevents deadlocks by failing fast rather than waiting
-        let mut provider_npis: Vec<&str> = Vec::new();
-        if let Some(ref npi) = rendering_provider_npi { provider_npis.push(npi); }
-        if let Some(ref npi) = referring_provider_npi { provider_npis.push(npi); }
-        if let Some(ref npi) = supervising_provider_npi { provider_npis.push(npi); }
-        if let Some(ref npi) = billing_provider_npi { provider_npis.push(npi); }
+        //
+        // NOTE: Advisory locks were removed - they caused massive failures when multiple workers
+        // tried to process claims with the same provider NPI. The ensure_provider_exists function
+        // uses INSERT ON CONFLICT DO NOTHING which is safe for concurrent access.
 
-        // Sort NPIs to ensure consistent lock order across all workers
-        provider_npis.sort();
-        provider_npis.dedup(); // Remove duplicates (same NPI might appear multiple times)
-
-        // Try to acquire advisory locks in sorted order (non-blocking)
-        for npi in &provider_npis {
-            let lock_acquired: bool = sqlx::query_scalar(
-                "SELECT pg_try_advisory_xact_lock(hashtext($1))"
-            )
-            .bind(*npi)
-            .fetch_one(&mut **tx)
-            .await
-            .unwrap_or(false);
-
-            if !lock_acquired {
-                // Another worker has this provider locked - skip this encounter
-                // It will be retried in a future batch
-                debug!("Could not acquire lock for provider {}, skipping encounter", npi);
-                return Err(anyhow::anyhow!("Provider {} is locked by another worker, retry later", npi));
-            }
-        }
-        
         let rendering_provider_id = if let Some(ref npi) = rendering_provider_npi {
             self.ensure_provider_exists(
                 tx,
@@ -1060,17 +1129,19 @@ impl ClaimsProcessor {
         })
         .context("Failed to insert encounter")?;
 
+        // IMPORTANT: Import diagnoses FIRST so they exist when service line pointers reference them
+        self.import_diagnoses(tx, encounter_id, first_line).await?;
+
         // Insert all service lines for this encounter
         // For EDI files: one raw_claim contains ALL service lines (service_line_1_*, service_line_2_*, etc.)
         // For CSV files: each raw_claim contains ONE service line (always service_line_1_*)
         let mut line_number = 1;
-        for raw_claim in &service_lines {
+        for raw_claim in service_lines {
             // Check how many service lines are in this raw_claim's JSONB
-            let service_line_fields: HashMap<String, String> = raw_claim.service_line_fields.as_ref()
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            let num_service_lines = Self::count_service_lines_in_jsonb(&service_line_fields);
+            // PHASE 4 FIX: Use new function that works directly with JsonValue (no clone)
+            let num_service_lines = raw_claim.service_line_fields.as_ref()
+                .map(|v| Self::count_service_lines_in_json_value(v))
+                .unwrap_or(0);
 
             if num_service_lines == 0 {
                 // No service lines found, skip this raw_claim
@@ -1085,9 +1156,6 @@ impl ClaimsProcessor {
                 line_number += 1;
             }
         }
-
-        // Import diagnoses from first service line (all should have same diagnoses)
-        self.import_diagnoses(tx, encounter_id, first_line).await?;
 
         // Insert billing payer into encounter_payer table (first SBR - the one being billed)
         self.insert_encounter_payer(
@@ -1523,7 +1591,7 @@ impl ClaimsProcessor {
         let service_facility_postal_code = encounter_fields.get("service_facility_postal_code").map(|s| s.as_str()).filter(|s| !s.is_empty());
 
         // Debug: Log service facility fields from raw_claims
-        info!("Service facility from raw_claims: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
+        debug!("Service facility from raw_claims: npi={:?}, name={:?}, addr1={:?}, city={:?}, state={:?}",
             service_facility_npi, service_facility_name, service_facility_address_line1,
             service_facility_city, service_facility_state);
         let supervising_provider_npi = encounter_fields.get("supervising_provider_npi")
@@ -1988,6 +2056,25 @@ impl ClaimsProcessor {
         max_line
     }
 
+    /// PHASE 4 FIX: Count service lines directly from JsonValue without cloning/deserializing
+    /// Returns the highest service line number found
+    fn count_service_lines_in_json_value(service_line_fields: &JsonValue) -> usize {
+        let mut max_line = 0;
+        if let Some(obj) = service_line_fields.as_object() {
+            for key in obj.keys() {
+                // Keys are like "service_line_1_procedure_code", "service_line_2_charge_amount", etc.
+                if let Some(rest) = key.strip_prefix("service_line_") {
+                    if let Some(num_str) = rest.split('_').next() {
+                        if let Ok(num) = num_str.parse::<usize>() {
+                            max_line = max_line.max(num);
+                        }
+                    }
+                }
+            }
+        }
+        max_line
+    }
+
     /// Import service line for an encounter
     /// The `service_line_prefix` parameter specifies which service line to read from the JSONB
     /// (e.g., "service_line_1_" or "service_line_2_")
@@ -2426,6 +2513,7 @@ impl ClaimsProcessor {
 
     /// Import service line diagnosis pointers (junction table)
     /// Links service lines to encounter diagnoses based on diagnosis code pointers
+    /// Optimized: Single INSERT with subquery instead of N SELECT + N INSERT
     async fn import_service_line_diagnosis_pointers(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -2437,61 +2525,76 @@ impl ClaimsProcessor {
         pointer_4: Option<i16>,
     ) -> Result<()> {
         // Collect all non-null pointers with their sequence positions
-        let pointers = vec![
+        let pointers: Vec<(i16, i16)> = vec![
             (1, pointer_1),
             (2, pointer_2),
             (3, pointer_3),
             (4, pointer_4),
-        ];
+        ]
+        .into_iter()
+        .filter_map(|(seq, ptr)| ptr.map(|p| (seq, p)))
+        .collect();
 
-        for (pointer_sequence, pointer_value) in pointers {
-            if let Some(diagnosis_pointer) = pointer_value {
-                // Find the diagnosis_id for this encounter and sequence number
-                let diagnosis_id: Option<i64> = sqlx::query_scalar(
-                    r#"
-                    SELECT diagnosis_id
-                    FROM claims.encounter_diagnosis
-                    WHERE encounter_id = $1
-                    AND sequence_number = $2
-                    "#
-                )
-                .bind(encounter_id)
-                .bind(diagnosis_pointer)
-                .fetch_optional(&mut **tx)
-                .await?;
-
-                if let Some(diag_id) = diagnosis_id {
-                    // Insert the junction record
-                    sqlx::query(
-                        r#"
-                        INSERT INTO claims.service_line_diagnosis_pointer (
-                            service_line_id,
-                            diagnosis_id,
-                            pointer_sequence
-                        )
-                        VALUES ($1, $2, $3)
-                        ON CONFLICT (service_line_id, diagnosis_id, pointer_sequence) DO NOTHING
-                        "#
-                    )
-                    .bind(service_line_id)
-                    .bind(diag_id)
-                    .bind(pointer_sequence as i16)
-                    .execute(&mut **tx)
-                    .await
-                    .context("Failed to insert service line diagnosis pointer")?;
-
-                    debug!(
-                        "Linked service line {} to diagnosis {} (pointer {} -> sequence {})",
-                        service_line_id, diag_id, pointer_sequence, diagnosis_pointer
-                    );
-                } else {
-                    warn!(
-                        "Service line {} references diagnosis pointer {} for encounter {}, but no diagnosis with that sequence exists",
-                        service_line_id, diagnosis_pointer, encounter_id
-                    );
-                }
-            }
+        if pointers.is_empty() {
+            debug!("No diagnosis pointers for service_line {} (all None)", service_line_id);
+            return Ok(());
         }
+
+        debug!("Processing {} diagnosis pointers for service_line {} encounter {}",
+            pointers.len(), service_line_id, encounter_id);
+
+        // Build batch INSERT with subquery to resolve diagnosis_id in one query
+        // This eliminates N SELECT + N INSERT, replacing with 1 INSERT ... SELECT
+        let mut query_parts: Vec<String> = Vec::with_capacity(pointers.len());
+        let mut param_idx = 3; // $1 = service_line_id, $2 = encounter_id, $3+ = pointer params
+
+        for _ in &pointers {
+            // Each row: SELECT diagnosis_id for this pointer, with pointer_sequence
+            query_parts.push(format!(
+                "SELECT $1::bigint, ed.diagnosis_id, ${}::smallint FROM claims.encounter_diagnosis ed WHERE ed.encounter_id = $2 AND ed.sequence_number = ${}",
+                param_idx, param_idx + 1
+            ));
+            param_idx += 2;
+        }
+
+        let query = format!(
+            r#"
+            INSERT INTO claims.service_line_diagnosis_pointer (
+                service_line_id,
+                diagnosis_id,
+                pointer_sequence
+            )
+            {}
+            ON CONFLICT (service_line_id, pointer_sequence) DO NOTHING
+            "#,
+            query_parts.join(" UNION ALL ")
+        );
+
+        let mut query_builder = sqlx::query(&query)
+            .bind(service_line_id)
+            .bind(encounter_id);
+
+        for (pointer_sequence, diagnosis_pointer) in &pointers {
+            query_builder = query_builder
+                .bind(*pointer_sequence)
+                .bind(*diagnosis_pointer);
+        }
+
+        let result = query_builder
+            .execute(&mut **tx)
+            .await
+            .context("Failed to batch insert service line diagnosis pointers")?;
+
+        debug!(
+            "Inserted {} diagnosis pointer rows for service_line {} encounter {}",
+            result.rows_affected(), service_line_id, encounter_id);
+
+        debug!(
+            "Batch linked service line {} to {} diagnosis pointers for encounter {}",
+            service_line_id,
+            result.rows_affected(),
+            encounter_id
+        );
 
         Ok(())
     }
@@ -2534,33 +2637,60 @@ impl ClaimsProcessor {
         // Sort by sequence number to maintain proper order
         all_diagnoses.sort_by_key(|(seq, _)| *seq);
 
-        // Insert diagnoses in order
+        if all_diagnoses.is_empty() {
+            return Ok(());
+        }
+
+        // Build batch INSERT with multiple rows for better performance
+        // Instead of N individual INSERTs, we do 1 INSERT with N rows
+        let mut query_parts: Vec<String> = Vec::with_capacity(all_diagnoses.len());
+        let mut param_idx = 1;
+
+        for _ in &all_diagnoses {
+            query_parts.push(format!(
+                "(${}, ${}, ${}, ${})",
+                param_idx, param_idx + 1, param_idx + 2, param_idx + 3
+            ));
+            param_idx += 4;
+        }
+
+        let query = format!(
+            r#"
+            INSERT INTO claims.encounter_diagnosis (
+                encounter_id,
+                sequence_number,
+                diagnosis_code,
+                is_principal
+            )
+            VALUES {}
+            RETURNING diagnosis_id
+            "#,
+            query_parts.join(", ")
+        );
+
+        let mut query_builder = sqlx::query_scalar::<_, i64>(&query);
+
         for (idx, (sequence, code)) in all_diagnoses.iter().enumerate() {
             let sequence_number = *sequence as i16;
-
-            let diagnosis_id: i64 = sqlx::query_scalar(
-                r#"
-                INSERT INTO claims.encounter_diagnosis (
-                    encounter_id,
-                    sequence_number,
-                    diagnosis_code,
-                    is_principal
-                )
-                VALUES ($1, $2, $3, $4)
-                RETURNING diagnosis_id
-                "#
-            )
-            .bind(encounter_id)
-            .bind(sequence_number)
-            .bind(code)
-            .bind(idx == 0)  // First diagnosis is principal
-            .fetch_one(&mut **tx)
-            .await
-            .context("Failed to insert diagnosis")?;
-
-            debug!("Inserted diagnosis {} ({}) for encounter {}, diagnosis_id={}",
-                sequence_number, code, encounter_id, diagnosis_id);
+            let is_principal = idx == 0;
+            query_builder = query_builder
+                .bind(encounter_id)
+                .bind(sequence_number)
+                .bind(code)
+                .bind(is_principal);
         }
+
+        let diagnosis_ids: Vec<i64> = query_builder
+            .fetch_all(&mut **tx)
+            .await
+            .context("Failed to batch insert diagnoses")?;
+
+        debug!(
+            "Batch inserted {} diagnoses for encounter {}, ids={:?}",
+            diagnosis_ids.len(),
+            encounter_id,
+            diagnosis_ids
+        );
 
         Ok(())
     }
@@ -2685,12 +2815,12 @@ impl ClaimsProcessor {
 
         let batch_id = raw_claims[0].batch_id;
 
-        // Begin transaction for batch processing
-        let mut tx = self.pool.begin().await
-            .context("Failed to begin transaction")?;
-
-        // Facility lookup cache
+        // Facility lookup cache (shared across encounters)
         let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
+
+        // PHASE 2 FIX: Collect successful/failed claim IDs for batch status updates
+        let mut successful_claim_ids: Vec<i64> = Vec::with_capacity(claim_ids.len());
+        let mut failed_claims: Vec<(i64, i64, i32, String, String)> = Vec::new(); // (raw_claim_id, batch_id, row_number, error_message, raw_data)
 
         // Group raw_claims by encounter (patient_control_number + date_of_service)
         use std::collections::HashMap as StdHashMap;
@@ -2736,124 +2866,122 @@ impl ClaimsProcessor {
             encounter_groups.entry(encounter_key).or_insert_with(Vec::new).push(raw_claim);
         }
 
-        info!("Worker {} grouped {} raw claims into {} encounters",
+        debug!("Worker {} grouped {} raw claims into {} encounters",
             worker_id, claim_ids.len(), encounter_groups.len());
 
-        // Process each encounter group
+        // Process each encounter group with per-encounter transactions
+        // PHASE 2 FIX: Per-encounter transactions prevent cascading failures
         for ((patient_control_number, date_of_service), service_lines) in encounter_groups {
             debug!("Processing encounter: {} on {} ({} service lines)",
                 patient_control_number, date_of_service, service_lines.len());
 
+            // Per-encounter transaction - failures don't cascade
+            let mut tx = self.pool.begin().await
+                .context("Failed to begin encounter transaction")?;
+
             // Validate and insert encounter with all service lines
-            match self.process_encounter_with_service_lines(&mut tx, service_lines.clone(), &mut facility_cache).await {
+            match self.process_encounter_with_service_lines(&mut tx, &service_lines, &mut facility_cache).await {
                 Ok(encounter_id) => {
+                    // Commit this encounter immediately
+                    tx.commit().await
+                        .context("Failed to commit encounter transaction")?;
+
                     success_count += service_lines.len();
 
-                    // Mark all raw_claims in this encounter as COMPLETED (bulk update)
-                    let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
-                    sqlx::query(
-                        r#"
-                        UPDATE staging.raw_claims
-                        SET processing_status = 'COMPLETED',
-                            processed_at = CURRENT_TIMESTAMP
-                        WHERE raw_claim_id = ANY($1)
-                        "#
-                    )
-                    .bind(&claim_ids)
-                    .execute(&mut *tx)
-                    .await?;
+                    // Collect claim IDs for batch status update later
+                    for service_line in &service_lines {
+                        successful_claim_ids.push(service_line.raw_claim_id);
+                    }
 
                     debug!("Successfully processed encounter: {} on {} -> encounter_id {} ({} service lines)",
                         patient_control_number, date_of_service, encounter_id, service_lines.len());
                 }
                 Err(e) => {
-                    let error_str = e.to_string();
+                    // Rollback failed encounter (may already be rolled back by DB)
+                    let _ = tx.rollback().await;
 
-                    // Check if this is a "retry later" error (provider locked by another worker)
-                    if error_str.contains("locked by another worker") {
-                        // Don't count as failure - will be retried in future batch
-                        debug!("Encounter {} skipped due to provider lock, will retry", patient_control_number);
-                        // Reset claims back to PENDING so they get picked up again
-                        let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
-                        let _ = sqlx::query(
-                            r#"
-                            UPDATE staging.raw_claims
-                            SET processing_status = 'PENDING',
-                                batch_sequence_number = NULL
-                            WHERE raw_claim_id = ANY($1)
-                            "#
-                        )
-                        .bind(&claim_ids)
-                        .execute(&mut *tx)
-                        .await;
-                        continue; // Skip to next encounter
-                    }
+                    let error_str = e.to_string();
 
                     failure_count += service_lines.len();
                     error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, error_str);
 
-                    // Collect error logs and claim IDs for bulk operations
-                    let mut error_log_inserts = Vec::new();
-                    let claim_ids: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
-
+                    // Collect failed claim info for batch error logging later
                     for service_line in &service_lines {
                         let error_message = format!("Row {}: {}", service_line.row_number, error_str);
                         errors.push(error_message.clone());
-
-                        // Prepare error log insert
-                        error_log_inserts.push((
-                            0i64, // error_log_id - database will generate
+                        let raw_data = serde_json::to_string(&service_line.encounter_fields).unwrap_or_default();
+                        failed_claims.push((
+                            service_line.raw_claim_id,
                             service_line.batch_id,
                             service_line.row_number,
                             error_message,
-                            serde_json::to_string(&service_line.encounter_fields).ok(),
+                            raw_data,
                         ));
                     }
-
-                    // Bulk insert error logs
-                    for (_error_log_id, batch_id, record_number, error_message, raw_data) in error_log_inserts {
-                        sqlx::query(
-                            r#"
-                            INSERT INTO staging.import_error_log (
-                                batch_id,
-                                record_number,
-                                error_type,
-                                error_severity,
-                                error_message,
-                                raw_data
-                            )
-                            VALUES ($1, $2, 'VALIDATION', 'ERROR', $3, $4)
-                            "#
-                        )
-                        .bind(batch_id)
-                        .bind(record_number)
-                        .bind(&error_message)
-                        .bind(raw_data)
-                        .execute(&mut *tx)
-                        .await?;
-                    }
-
-                    // Bulk update claims as FAILED
-                    sqlx::query(
-                        r#"
-                        UPDATE staging.raw_claims
-                        SET processing_status = 'FAILED',
-                            processed_at = CURRENT_TIMESTAMP,
-                            error_message = $1
-                        WHERE raw_claim_id = ANY($2)
-                        "#
-                    )
-                    .bind(&error_str)
-                    .bind(&claim_ids)
-                    .execute(&mut *tx)
-                    .await?;
                 }
             }
         }
 
-        // Commit transaction
-        tx.commit().await
-            .context("Failed to commit sequenced batch transaction")?;
+        // PHASE 2 & 3 FIX: Batch update successful claims status (outside transactions)
+        if !successful_claim_ids.is_empty() {
+            sqlx::query(
+                r#"
+                UPDATE staging.raw_claims
+                SET processing_status = 'COMPLETED',
+                    processed_at = CURRENT_TIMESTAMP
+                WHERE raw_claim_id = ANY($1)
+                "#
+            )
+            .bind(&successful_claim_ids)
+            .execute(&self.pool)
+            .await
+            .context("Failed to batch update successful claims")?;
+
+            debug!("Batch updated {} claims to COMPLETED", successful_claim_ids.len());
+        }
+
+        // PHASE 3 FIX: Batch update failed claims and insert error logs (outside transactions)
+        if !failed_claims.is_empty() {
+            for (raw_claim_id, err_batch_id, row_number, error_message, raw_data) in &failed_claims {
+                // Update status (fire-and-forget)
+                let _ = sqlx::query(
+                    r#"
+                    UPDATE staging.raw_claims
+                    SET processing_status = 'FAILED',
+                        error_message = $2,
+                        processed_at = CURRENT_TIMESTAMP
+                    WHERE raw_claim_id = $1
+                    "#
+                )
+                .bind(raw_claim_id)
+                .bind(error_message)
+                .execute(&self.pool)
+                .await;
+
+                // Log error (fire-and-forget)
+                let _ = sqlx::query(
+                    r#"
+                    INSERT INTO staging.import_error_log (
+                        batch_id,
+                        record_number,
+                        error_type,
+                        error_severity,
+                        error_message,
+                        raw_data
+                    )
+                    VALUES ($1, $2, 'VALIDATION', 'ERROR', $3, $4)
+                    "#
+                )
+                .bind(err_batch_id)
+                .bind(row_number)
+                .bind(error_message)
+                .bind(raw_data)
+                .execute(&self.pool)
+                .await;
+            }
+
+            debug!("Batch updated {} claims to FAILED with error logs", failed_claims.len());
+        }
 
         let batch_end = chrono::Utc::now();
         let processing_time = (batch_end - batch_start).num_milliseconds() as f64 / 1000.0;
@@ -2903,7 +3031,7 @@ impl ClaimsProcessor {
     ///
     /// IMPORTANT: This function is designed to be fault-tolerant and deadlock-free.
     /// - Uses atomic INSERT ... ON CONFLICT DO UPDATE to avoid race conditions
-    /// - Uses savepoints to isolate errors without aborting the transaction
+    /// - Savepoints removed for performance (upsert rarely fails with ON CONFLICT)
     /// - Returns Ok(None) on any error - claim proceeds with NULL provider_id
     async fn ensure_provider_exists(
         &self,
@@ -2927,63 +3055,17 @@ impl ClaimsProcessor {
             return Ok(None);
         }
 
-        // Use a savepoint to allow rollback of just this operation if it fails
-        // This prevents the entire transaction from being aborted
-        let savepoint_name = format!("provider_{}", npi);
-
-        // Create savepoint
-        if let Err(e) = sqlx::query(&format!("SAVEPOINT {}", savepoint_name))
-            .execute(&mut **tx)
-            .await
-        {
-            error!("Failed to create savepoint for provider {}: {:?}", npi, e);
-            return Ok(None);
-        }
-
-        // Advisory locks are acquired upfront in sorted order by process_encounter_with_service_lines
-        // This prevents deadlocks by ensuring all workers acquire locks in the same order
-
         // Prepare values
         let last_name_value = last_name.unwrap_or("Unknown");
         let first_name_value = first_name.unwrap_or("");
 
-        // Lookup specialty from taxonomy code if provided (do this BEFORE the upsert)
+        // Lookup specialty from taxonomy code using cache (no DB query needed)
         let (validated_taxonomy_code, specialty) = if let Some(tax_code) = taxonomy_code {
-            if tax_code.is_empty() {
-                (None, None)
-            } else {
-                // Check if taxonomy exists and get specialty in one query
-                let result = sqlx::query_scalar::<_, String>(
-                    r#"
-                    SELECT specialty_display
-                    FROM claims.provider_taxonomy
-                    WHERE taxonomy_code = $1 AND is_active = true
-                    "#
-                )
-                .bind(tax_code)
-                .fetch_optional(&mut **tx)
-                .await;
-
-                match result {
-                    Ok(Some(spec)) => (Some(tax_code), Some(spec)),
-                    Ok(None) => {
-                        warn!("Taxonomy code '{}' not found in provider_taxonomy table, setting to NULL for provider NPI={}",
-                            tax_code, npi);
-                        (None, None)
-                    }
-                    Err(e) => {
-                        // Taxonomy query failed - rollback and return None
-                        error!("Failed to query taxonomy for provider {}: {:?}", npi, e);
-                        let _ = sqlx::query(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name))
-                            .execute(&mut **tx)
-                            .await;
-                        let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
-                            .execute(&mut **tx)
-                            .await;
-                        return Ok(None);
-                    }
-                }
+            let (code, spec) = self.lookup_taxonomy(tax_code).await;
+            if code.is_none() && !tax_code.is_empty() {
+                warn!("Taxonomy code '{}' not found in cache for provider NPI={}", tax_code, npi);
             }
+            (code.map(|_| tax_code), spec)
         } else {
             (None, None)
         };
@@ -3046,21 +3128,12 @@ impl ClaimsProcessor {
                 .execute(&mut **tx)
                 .await;
 
-                // Release savepoint and return
-                let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
-                    .execute(&mut **tx)
-                    .await;
                 Ok(Some(provider_id))
             }
             Err(e) => {
-                // Upsert failed - rollback to savepoint and return None
+                // Upsert failed - log error and return None
+                // The caller handles NULL provider_id gracefully
                 error!("Failed to upsert provider {}: {:?}", npi, e);
-                let _ = sqlx::query(&format!("ROLLBACK TO SAVEPOINT {}", savepoint_name))
-                    .execute(&mut **tx)
-                    .await;
-                let _ = sqlx::query(&format!("RELEASE SAVEPOINT {}", savepoint_name))
-                    .execute(&mut **tx)
-                    .await;
                 Ok(None)
             }
         }

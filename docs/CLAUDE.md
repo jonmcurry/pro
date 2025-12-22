@@ -12,6 +12,8 @@ Rule 9:  No shortcuts - fully resolve issues by solving it the right way and not
 Rule 10: Rebuild the installer after every change.
 Rule 11: Version the build after every change and determine if it's a minor or major version change.
 Rule 12: Absolutely no manual fixes.
+Rule 13: Keep track of changes in an .md file (all changes go into this one file to keep track)
+Rule 14: Read CHANGELOG.md of previous changes.
 
 ## Collaboration Guidelines
 - **Challenge and question**: Don't immediately agree or proceed with requests that seem suboptimal, unclear, or potentially problematic

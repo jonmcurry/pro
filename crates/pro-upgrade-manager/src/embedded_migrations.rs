@@ -350,5 +350,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "make_dates_nullable",
             sql: include_str!("../../../migrations/064_make_dates_nullable.sql"),
         },
+        EmbeddedMigration {
+            version: "065",
+            name: "cte_batch_acquisition_indexes",
+            sql: include_str!("../../../migrations/065_cte_batch_acquisition_indexes.sql"),
+        },
     ]
 }

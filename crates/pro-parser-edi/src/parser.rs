@@ -193,13 +193,13 @@ impl EdiParser {
 
     /// Identify loop boundaries in the segment list
     fn identify_loops(&self, segments: &[EdiSegment]) -> Result<HashMap<String, Vec<EdiSegment>>> {
-        use tracing::info;
+        use tracing::debug;
 
         let mut loop_map: HashMap<String, Vec<EdiSegment>> = HashMap::new();
         let mut current_loop: Option<String> = None;
         let mut loop_segments: Vec<EdiSegment> = Vec::new();
 
-        info!("[LOOP_DEBUG] Starting loop identification for {} segments", segments.len());
+        debug!("[LOOP_DEBUG] Starting loop identification for {} segments", segments.len());
 
         for segment in segments {
             match segment.segment_id.as_str() {
@@ -233,9 +233,9 @@ impl EdiParser {
                 }
                 "HL" => {
                     // Hierarchical level indicates new loop
-                    info!("[LOOP_DEBUG] Found HL segment with {} elements: {:?}", segment.elements.len(), segment.elements);
+                    debug!("[LOOP_DEBUG] Found HL segment with {} elements: {:?}", segment.elements.len(), segment.elements);
                     if let Some(level_code) = segment.get(2) {
-                        info!("[LOOP_DEBUG] HL level_code = '{}'", level_code);
+                        debug!("[LOOP_DEBUG] HL level_code = '{}'", level_code);
                         let new_loop = match level_code {
                             "20" => Some("2000A".to_string()), // Billing Provider Level
                             "22" => Some("2000B".to_string()), // Subscriber Level
@@ -244,15 +244,15 @@ impl EdiParser {
                         };
 
                         if let Some(loop_name) = new_loop {
-                            info!("[LOOP_DEBUG] Starting loop: {}", loop_name);
+                            debug!("[LOOP_DEBUG] Starting loop: {}", loop_name);
                             if let Some(prev_loop) = current_loop.take() {
-                                info!("[LOOP_DEBUG] Saving previous loop: {} with {} segments", prev_loop, loop_segments.len());
+                                debug!("[LOOP_DEBUG] Saving previous loop: {} with {} segments", prev_loop, loop_segments.len());
                                 loop_map.insert(prev_loop, loop_segments.clone());
                                 loop_segments.clear();
                             }
                             current_loop = Some(loop_name);
                         } else {
-                            info!("[LOOP_DEBUG] HL level_code '{}' does not match any known loop", level_code);
+                            debug!("[LOOP_DEBUG] HL level_code '{}' does not match any known loop", level_code);
                         }
                     }
                 }
@@ -266,15 +266,15 @@ impl EdiParser {
 
         // Save last loop
         if let Some(loop_name) = current_loop {
-            info!("[LOOP_DEBUG] Saving final loop: {} with {} segments", loop_name, loop_segments.len());
+            debug!("[LOOP_DEBUG] Saving final loop: {} with {} segments", loop_name, loop_segments.len());
             loop_map.insert(loop_name, loop_segments);
         }
 
-        info!("[LOOP_DEBUG] Loop identification complete. Found loops: {:?}", loop_map.keys().collect::<Vec<_>>());
+        debug!("[LOOP_DEBUG] Loop identification complete. Found loops: {:?}", loop_map.keys().collect::<Vec<_>>());
 
         // Log if Loop 2000A is missing
         if !loop_map.contains_key("2000A") {
-            info!("[LOOP_DEBUG] WARNING: Loop 2000A (Billing Provider Level) was NOT found!");
+            debug!("[LOOP_DEBUG] WARNING: Loop 2000A (Billing Provider Level) was NOT found!");
         }
 
         Ok(loop_map)
