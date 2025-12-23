@@ -184,7 +184,12 @@
       "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -dSolutionDir=\"C:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\\" -out Product.wixobj Product.wxs)",
       "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -dSolutionDir=\"C:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\\" -out DatabaseConfigDlg.wixobj DatabaseConfigDlg.wxs)",
       "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -dSolutionDir=\"C:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\\" -out PrerequisiteDlg.wixobj PrerequisiteDlg.wxs)",
-      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)"
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
+      "Bash(powershell -ExecutionPolicy Bypass -File .build-msi.ps1)",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command:*)",
+      "Bash(powershell -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro''; cargo build --release\")",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)"
     ],
     "deny": [],
     "ask": []

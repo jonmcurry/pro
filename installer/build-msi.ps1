@@ -105,14 +105,26 @@ if (-not $NoBuild) {
     Push-Location ..
 
     try {
-        & cargo build --release 2>&1 | ForEach-Object {
-            Write-Host $_ -ForegroundColor Gray
+        $ErrorActionPreference = "Continue"
+        $cargoOutput = & cargo build --release 2>&1
+        $cargoExitCode = $LASTEXITCODE
+        $ErrorActionPreference = "Stop"
+
+        # Display output (warnings are normal)
+        $cargoOutput | ForEach-Object {
+            if ($_ -match "^error") {
+                Write-Host $_ -ForegroundColor Red
+            } elseif ($_ -match "^warning") {
+                Write-Host $_ -ForegroundColor Yellow
+            } else {
+                Write-Host $_ -ForegroundColor Gray
+            }
         }
 
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Cargo build failed with exit code $LASTEXITCODE"
+        if ($cargoExitCode -ne 0) {
+            Write-Error "Cargo build failed with exit code $cargoExitCode"
             Pop-Location
-            exit $LASTEXITCODE
+            exit $cargoExitCode
         }
 
         Write-Host "Rust binaries built successfully" -ForegroundColor Green
@@ -129,6 +141,12 @@ if (-not $NoBuild) {
 # Build MSI with WiX
 Write-Host "Compiling WiX files..." -ForegroundColor Cyan
 
+# Add WiX to PATH if not already present
+$wixPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
+if (Test-Path $wixPath) {
+    $env:PATH = $env:PATH + ";$wixPath"
+}
+
 $candle = "candle"
 $light = "light"
 
@@ -140,9 +158,12 @@ try {
     exit 1
 }
 
+# Get solution directory for WiX variables
+$solutionDir = (Resolve-Path "..").Path + "\"
+
 # Compile .wxs files
 Write-Host "Running candle..." -ForegroundColor Gray
-& $candle Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs 2>&1 | ForEach-Object {
+& $candle -dSolutionDir="$solutionDir" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs 2>&1 | ForEach-Object {
     Write-Host $_ -ForegroundColor DarkGray
 }
 
@@ -156,7 +177,7 @@ Write-Host ""
 
 # Link .wixobj files
 Write-Host "Running light..." -ForegroundColor Gray
-& $light -ext WixUIExtension Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj -out ProfessionalSMART.msi 2>&1 | ForEach-Object {
+& $light -ext WixUIExtension -ext WixUtilExtension Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj -out ProfessionalSMART.msi 2>&1 | ForEach-Object {
     Write-Host $_ -ForegroundColor DarkGray
 }
 

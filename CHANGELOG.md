@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.12.22.0] - 2025-12-23
+
+### Added
+- **PostgreSQL Settings Enforcement Migration**: Added migration 066 to automatically enforce critical PostgreSQL settings during install/upgrade.
+  - Migration: `migrations/066_enforce_postgresql_settings.sql`
+  - Ensures `autovacuum = 'on'` to prevent table bloat (fixes issue from v2.12.19.0)
+  - Sets `work_mem = '64MB'` to prevent memory exhaustion (fixes issue from v2.12.19.0)
+  - Reloads PostgreSQL configuration automatically
+  - Verifies settings were applied with NOTICE logging
+  - Previously these were manual fixes; now enforced automatically on every install/upgrade
+
+### Fixed
+- **Build Script WiX Path**: Fixed `build-msi.ps1` to automatically add WiX Toolset to PATH and pass SolutionDir variable to candle.
+
 ## [2.12.21.0] - 2025-12-22
 
 ### Fixed
