@@ -12,6 +12,11 @@
   - Automatically populated during claim ingestion from service line modifiers
   - File: `crates/pro-service/src/claims_processor.rs` - added `insert_encounter_procedure_modifiers()` function
 
+### Fixed
+- **Embedded Migrations**: Added migrations 066 and 067 to `crates/pro-upgrade-manager/src/embedded_migrations.rs` so they are included in the installer.
+- **Baseline Migration**: Updated `migrations/000_baseline_v2.12.sql` to include migrations 065-067 (now covers 001-067).
+- **CLAUDE.md Documentation**: Added installer build process documentation with step-by-step guide for adding new migrations.
+
 ## [2.12.22.0] - 2025-12-23
 
 ### Added

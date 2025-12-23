@@ -1,7 +1,7 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-064
--- Date: 2024-12-20
+-- Description: Complete schema baseline generated from migrations 001-067
+-- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
 -- For fresh installations, only this file needs to run.
@@ -10087,3 +10087,116 @@ ALTER TABLE claims.encounter
 ALTER COLUMN subscriber_birth_date DROP NOT NULL;
 
 COMMENT ON COLUMN claims.encounter.subscriber_birth_date IS 'Patient date of birth (nullable - may not be provided in all 837P files)';
+
+-- ============================================================================
+-- Source: 065_cte_batch_acquisition_indexes.sql
+-- ============================================================================
+
+-- Migration 065: Expression indexes for CTE-based batch acquisition
+-- Problem: CTE batch acquisition query taking 2.5+ seconds per batch
+-- Root cause: No indexes on JSONB expressions used in GROUP BY, JOIN, and ORDER BY
+
+-- Index 1: Expression index on patient_control_number for grouping and joining
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_raw_claims_pcn_expr
+ON staging.raw_claims ((encounter_fields->>'patient_control_number'))
+WHERE processing_status = 'PENDING' AND batch_sequence_number IS NULL;
+
+-- Index 2: Expression index on date_of_service_from for grouping and joining
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_raw_claims_dos_expr
+ON staging.raw_claims ((encounter_fields->>'date_of_service_from'))
+WHERE processing_status = 'PENDING' AND batch_sequence_number IS NULL;
+
+-- Index 3: Composite expression index for the encounter grouping in CTE
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_raw_claims_encounter_fifo
+ON staging.raw_claims (
+    (encounter_fields->>'patient_control_number'),
+    (encounter_fields->>'date_of_service_from'),
+    ingested_at ASC
+)
+WHERE processing_status = 'PENDING' AND batch_sequence_number IS NULL;
+
+-- Index 4: Expression index for NULL checks on JSONB fields
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_raw_claims_encounter_notnull
+ON staging.raw_claims (ingested_at ASC)
+WHERE processing_status = 'PENDING'
+  AND batch_sequence_number IS NULL
+  AND encounter_fields->>'patient_control_number' IS NOT NULL
+  AND encounter_fields->>'date_of_service_from' IS NOT NULL;
+
+ANALYZE staging.raw_claims;
+
+COMMENT ON INDEX staging.idx_raw_claims_pcn_expr IS
+'Expression index for batch acquisition CTE - enables index scan on patient_control_number JSONB extraction';
+
+COMMENT ON INDEX staging.idx_raw_claims_dos_expr IS
+'Expression index for batch acquisition CTE - enables index scan on date_of_service_from JSONB extraction';
+
+COMMENT ON INDEX staging.idx_raw_claims_encounter_fifo IS
+'Composite expression index for batch acquisition CTE - covers GROUP BY and ORDER BY for FIFO processing';
+
+COMMENT ON INDEX staging.idx_raw_claims_encounter_notnull IS
+'Partial index for batch acquisition CTE - pre-filters valid encounter records for FIFO ordering';
+
+-- ============================================================================
+-- Source: 066_enforce_postgresql_settings.sql
+-- ============================================================================
+
+-- Migration: 066_enforce_postgresql_settings
+-- Description: Enforce critical PostgreSQL settings to prevent performance issues
+
+-- Enable autovacuum (critical for preventing table bloat)
+ALTER SYSTEM SET autovacuum = 'on';
+
+-- Set reasonable work_mem (64MB is safe for concurrent connections)
+ALTER SYSTEM SET work_mem = '64MB';
+
+-- Reload configuration to apply changes immediately
+SELECT pg_reload_conf();
+
+-- Verify settings were applied
+DO $$
+DECLARE
+    v_autovacuum text;
+    v_work_mem text;
+BEGIN
+    SELECT current_setting('autovacuum') INTO v_autovacuum;
+    SELECT current_setting('work_mem') INTO v_work_mem;
+
+    RAISE NOTICE 'PostgreSQL settings verified:';
+    RAISE NOTICE '  autovacuum = %', v_autovacuum;
+    RAISE NOTICE '  work_mem = %', v_work_mem;
+END $$;
+
+-- ============================================================================
+-- Source: 067_create_encounter_procedure_modifiers.sql
+-- ============================================================================
+
+-- Migration: 067_create_encounter_procedure_modifiers
+-- Description: Create table to store aggregated procedure modifiers at encounter level
+
+-- Ensure pg_trgm extension exists for GIN index
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+-- Encounter procedure modifiers table
+-- Stores comma-separated list of unique modifiers from all service lines on an encounter
+CREATE TABLE claims.encounter_procedure_modifier (
+    encounter_id BIGINT PRIMARY KEY REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
+    modifiers VARCHAR(20) NOT NULL, -- Comma-separated list e.g., "24,25,59"
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for searching by modifiers (useful for finding encounters with specific modifiers)
+CREATE INDEX idx_encounter_proc_mod_modifiers ON claims.encounter_procedure_modifier(modifiers);
+
+-- GIN index for pattern matching on modifiers (e.g., WHERE modifiers LIKE '%25%')
+CREATE INDEX idx_encounter_proc_mod_modifiers_gin ON claims.encounter_procedure_modifier
+    USING gin(modifiers gin_trgm_ops);
+
+-- Trigger for updated_at
+CREATE TRIGGER update_encounter_proc_mod_updated_at
+    BEFORE UPDATE ON claims.encounter_procedure_modifier
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+COMMENT ON TABLE claims.encounter_procedure_modifier IS 'Aggregated procedure modifiers from all service lines on an encounter, stored as comma-separated list';
+COMMENT ON COLUMN claims.encounter_procedure_modifier.modifiers IS 'Comma-separated list of unique procedure modifiers (e.g., "24,25,59"), sorted and deduplicated';

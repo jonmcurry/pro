@@ -355,5 +355,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "cte_batch_acquisition_indexes",
             sql: include_str!("../../../migrations/065_cte_batch_acquisition_indexes.sql"),
         },
+        EmbeddedMigration {
+            version: "066",
+            name: "enforce_postgresql_settings",
+            sql: include_str!("../../../migrations/066_enforce_postgresql_settings.sql"),
+        },
+        EmbeddedMigration {
+            version: "067",
+            name: "create_encounter_procedure_modifiers",
+            sql: include_str!("../../../migrations/067_create_encounter_procedure_modifiers.sql"),
+        },
     ]
 }

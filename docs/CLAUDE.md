@@ -1,5 +1,6 @@
 # CLAUDE.md
-w### Claude Rules
+
+### Claude Rules
 Rule 1: NEVER disable or remove a feature to fix a bug or error.
 Rule 2: NEVER fix an error or bug by hiding it.
 Rule 3: NO silent fallbacks or silent failures, all problems should be loud and proud.
@@ -14,6 +15,60 @@ Rule 11: Version the build after every change and determine if it's a minor or m
 Rule 12: Absolutely no manual fixes.
 Rule 13: Keep track of changes in an .md file (all changes go into this one file to keep track)
 Rule 14: Read CHANGELOG.md of previous changes.
+
+## Installer Build Process
+
+### Build Command
+```powershell
+cd c:\Users\jonmc\dev\pro\installer
+.\build-msi.ps1 -Version "X.Y.Z.W"
+```
+
+### Build Options
+- `-Version "X.Y.Z.W"` - Specify version (required for version changes)
+- `-NoBuild` - Skip Rust compilation (use existing binaries)
+
+### Version Numbering (X.Y.Z.W)
+- **X** (Major): Breaking changes, major rewrites
+- **Y** (Minor): New features, new migrations
+- **Z** (Patch): Bug fixes, performance improvements
+- **W** (Build): Incremental builds
+
+### Adding New Migrations
+When adding a new migration (e.g., `068_new_feature.sql`):
+
+1. **Create the migration file**: `migrations/068_new_feature.sql`
+
+2. **Add to embedded migrations**: Edit `crates/pro-upgrade-manager/src/embedded_migrations.rs`:
+   ```rust
+   EmbeddedMigration {
+       version: "068",
+       name: "new_feature",
+       sql: include_str!("../../../migrations/068_new_feature.sql"),
+   },
+   ```
+
+3. **Update the baseline**: Append the migration SQL to `migrations/000_baseline_v2.12.sql`:
+   ```sql
+   -- ============================================================================
+   -- Source: 068_new_feature.sql
+   -- ============================================================================
+
+   -- [migration content here]
+   ```
+
+4. **Update baseline header**: Change description line to include new migration range:
+   ```sql
+   -- Description: Complete schema baseline generated from migrations 001-068
+   ```
+
+5. **Update CHANGELOG.md**: Add entry for the new version
+
+6. **Rebuild installer**: `.\build-msi.ps1 -Version "X.Y.Z.W"`
+
+### Output
+- MSI location: `c:\Users\jonmc\dev\pro\installer\ProfessionalSMART.msi`
+- Version file: `c:\Users\jonmc\dev\pro\installer\version.txt`
 
 ## Collaboration Guidelines
 - **Challenge and question**: Don't immediately agree or proceed with requests that seem suboptimal, unclear, or potentially problematic
