@@ -1157,6 +1157,9 @@ impl ClaimsProcessor {
             }
         }
 
+        // Aggregate and insert procedure modifiers from all service lines
+        self.insert_encounter_procedure_modifiers(tx, encounter_id).await?;
+
         // Insert billing payer into encounter_payer table (first SBR - the one being billed)
         self.insert_encounter_payer(
             tx,
@@ -1462,6 +1465,73 @@ impl ClaimsProcessor {
             debug!("[COB] Inserted other_insurance: payer_resp={}, payer_id={:?}, payer_name={:?}, paid_amount={:?}",
                 payer_resp, payer_id, payer_name, paid_amount);
         }
+
+        Ok(())
+    }
+
+    /// Insert aggregated procedure modifiers from all service lines into encounter_procedure_modifier table
+    /// Collects all unique modifiers, sorts them, and stores as comma-separated string
+    async fn insert_encounter_procedure_modifiers(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        encounter_id: i64,
+    ) -> Result<()> {
+        // Query all unique modifiers from service lines for this encounter
+        let modifiers: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT DISTINCT modifier
+            FROM claims.service_line,
+                 LATERAL (
+                     VALUES
+                         (procedure_modifier_1),
+                         (procedure_modifier_2),
+                         (procedure_modifier_3),
+                         (procedure_modifier_4)
+                 ) AS m(modifier)
+            WHERE encounter_id = $1
+              AND modifier IS NOT NULL
+              AND modifier != ''
+            ORDER BY modifier
+            "#
+        )
+        .bind(encounter_id)
+        .fetch_all(&mut **tx)
+        .await
+        .context("Failed to query service line modifiers")?;
+
+        // Only insert if there are modifiers
+        if modifiers.is_empty() {
+            return Ok(());
+        }
+
+        // Join modifiers with commas (already sorted by query)
+        let modifiers_csv = modifiers.join(",");
+
+        // Truncate to 20 chars if necessary (VARCHAR(20))
+        let modifiers_csv = if modifiers_csv.len() > 20 {
+            &modifiers_csv[..20]
+        } else {
+            &modifiers_csv
+        };
+
+        // Insert into encounter_procedure_modifier table
+        sqlx::query(
+            r#"
+            INSERT INTO claims.encounter_procedure_modifier (encounter_id, modifiers)
+            VALUES ($1, $2)
+            ON CONFLICT (encounter_id) DO UPDATE SET
+                modifiers = EXCLUDED.modifiers,
+                updated_at = CURRENT_TIMESTAMP
+            "#
+        )
+        .bind(encounter_id)
+        .bind(modifiers_csv)
+        .execute(&mut **tx)
+        .await
+        .context("Failed to insert encounter_procedure_modifier")?;
+
+        debug!("[MODIFIERS] Inserted encounter modifiers: encounter_id={}, modifiers={}",
+            encounter_id, modifiers_csv);
 
         Ok(())
     }

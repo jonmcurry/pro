@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.23.0] - 2025-12-23
+
+### Added
+- **Encounter Procedure Modifiers Table**: Added new table `claims.encounter_procedure_modifier` to store aggregated procedure modifiers at encounter level.
+  - Migration: `migrations/067_create_encounter_procedure_modifiers.sql`
+  - Stores comma-separated list of unique modifiers from all service lines (e.g., "24,25,59")
+  - VARCHAR(20) column for modifiers, deduplicated and sorted
+  - Foreign key reference to `claims.encounter` with CASCADE delete
+  - GIN index for pattern matching (e.g., finding encounters with modifier "25")
+  - Automatically populated during claim ingestion from service line modifiers
+  - File: `crates/pro-service/src/claims_processor.rs` - added `insert_encounter_procedure_modifiers()` function
+
 ## [2.12.22.0] - 2025-12-23
 
 ### Added
