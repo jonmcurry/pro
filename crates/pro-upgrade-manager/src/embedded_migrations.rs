@@ -365,5 +365,15 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "create_encounter_procedure_modifiers",
             sql: include_str!("../../../migrations/067_create_encounter_procedure_modifiers.sql"),
         },
+        EmbeddedMigration {
+            version: "068",
+            name: "create_encounter_view",
+            sql: include_str!("../../../migrations/068_create_encounter_view.sql"),
+        },
+        EmbeddedMigration {
+            version: "069",
+            name: "setup_smartproaudit_fdw",
+            sql: include_str!("../../../migrations/069_setup_smartproaudit_fdw.sql"),
+        },
     ]
 }

@@ -1,5 +1,72 @@
 # Changelog
 
+## [2.12.29.0] - 2025-12-26
+
+### Changed
+- **Unique Username Constraint**: Changed `idx_security_user_name` from regular index to UNIQUE index.
+  - Enforces unique usernames in `security.security_user` table
+  - Prevents duplicate user registrations
+
+## [2.12.28.0] - 2025-12-26
+
+### Added
+- **SmartProAudit Foreign Data Wrapper**: Added cross-database querying capability for project databases.
+  - Migration: `migrations/069_setup_smartproaudit_fdw.sql`
+  - Enables `postgres_fdw` extension in each project database
+  - Creates `smartproaudit` schema with foreign tables linked to SmartProAudit database
+  - Foreign tables: `security_role`, `security_user`, `security_user_role`, `lookup_field_definitions`, `project`
+  - Convenience view: `smartproaudit.user_roles` - Shows users with their assigned roles
+  - Helper function: `smartproaudit.user_has_role(user_name, role_name)` - Check user permissions
+  - Helper function: `smartproaudit.get_field_definitions(table_name)` - Get friendly column names
+  - Allows project databases (professional_smart_clientA, etc.) to query centralized security and field definitions
+
+## [2.12.27.0] - 2025-12-26
+
+### Added
+- **Security Schema Indexes**: Added performance and integrity indexes to security tables.
+  - `idx_security_role_name` (UNIQUE) - Fast role lookup by name, enforces unique role names
+  - `idx_security_user_role_unique` (UNIQUE) - Prevents duplicate user-role assignments
+
+## [2.12.26.0] - 2025-12-26
+
+### Added
+- **Security Schema**: Added `security` schema to SmartProAudit master database for user authentication and role-based access control.
+  - `security.security_role` table with role_name and role_description
+  - `security.security_user` table with user_name and active status
+  - `security.security_user_role` junction table for user-role assignments
+  - Pre-populated with Admin, Super User, and User roles
+  - Default user 'MWELLINGTO002' with Admin role
+
+## [2.12.25.0] - 2025-12-26
+
+### Added
+- **SmartProAudit Master Database**: New PostgreSQL database for centralized project management.
+  - Schema file: `migrations/smartproaudit/000_baseline.sql`
+  - **projects schema**: Tracks all Professional SMART project databases
+    - `projects.project` table with project_name, organization, versions, connection info
+    - `projects.schema_migrations` table for SmartProAudit upgrades
+  - **fields schema**: Field metadata for claims data display and export
+    - `fields.lookup_field_definitions` table with friendly names for columns
+    - Pre-populated with encounter, service_line, encounter_diagnosis, encounter_payer, encounter_view fields
+  - Replaces file-based `projects.json` registry with PostgreSQL-based registry
+  - Automatically created during installation if it doesn't exist
+  - Each project database is registered in SmartProAudit during creation
+
+### Changed
+- **Installer**: Modified `CreateDatabase.vbs` to create and initialize SmartProAudit database
+- **Product.wxs**: Added SmartProAudit migration files to installer package
+
+## [2.12.24.0] - 2025-12-26
+
+### Added
+- **Encounter View**: Added `claims.encounter_view` for denormalized access to encounter data.
+  - Migration: `migrations/068_create_encounter_view.sql`
+  - Joins encounter with all provider types (billing, referring, rendering, supervising)
+  - Includes payer hierarchy (primary, secondary, tertiary) from `encounter_payer` table
+  - Aggregates diagnosis codes as comma-separated list ordered by sequence
+  - Includes service facility details
+  - Useful for reporting and data export without complex joins
+
 ## [2.12.23.0] - 2025-12-23
 
 ### Added

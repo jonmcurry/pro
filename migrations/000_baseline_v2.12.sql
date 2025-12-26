@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-067
+-- Description: Complete schema baseline generated from migrations 001-069
 -- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
@@ -10200,3 +10200,239 @@ CREATE TRIGGER update_encounter_proc_mod_updated_at
 
 COMMENT ON TABLE claims.encounter_procedure_modifier IS 'Aggregated procedure modifiers from all service lines on an encounter, stored as comma-separated list';
 COMMENT ON COLUMN claims.encounter_procedure_modifier.modifiers IS 'Comma-separated list of unique procedure modifiers (e.g., "24,25,59"), sorted and deduplicated';
+
+-- ============================================================================
+-- Source: 068_create_encounter_view.sql
+-- ============================================================================
+
+-- Migration: 068_create_encounter_view
+-- Description: Create encounter view with provider, payer, and diagnosis details
+-- Date: 2025-12-26
+
+-- Encounter view joining encounter data with providers, payers, and diagnoses
+CREATE OR REPLACE VIEW claims.encounter_view AS
+SELECT
+    e.encounter_id,
+    e.encounter_group_id,
+    e.billing_date,
+    e.submitter_id,
+    e.patient_control_number,
+    e.subscriber_birth_date,
+    e.patient_date_of_birth,
+    e.patient_gender,
+    -- Primary payer
+    epp.payer_id AS primary_payer_id,
+    epp.payer_name AS primary_payer_name,
+    epp.claim_filing_indicator AS primary_claim_filing_indicator,
+    epp.is_billing_payer AS primary_is_billing_payer,
+    -- Secondary payer
+    eps.payer_id AS secondary_payer_id,
+    eps.payer_name AS secondary_payer_name,
+    eps.claim_filing_indicator AS secondary_claim_filing_indicator,
+    eps.is_billing_payer AS secondary_is_billing_payer,
+    -- Tertiary payer
+    ept.payer_id AS tertiary_payer_id,
+    ept.payer_name AS tertiary_payer_name,
+    ept.claim_filing_indicator AS tertiary_claim_filing_indicator,
+    ept.is_billing_payer AS tertiary_is_billing_payer,
+    -- Claim details
+    e.total_claim_charge_amount,
+    e.place_of_service_code,
+    e.date_of_service_from,
+    e.date_of_service_to,
+    -- Billing provider
+    e.billing_provider_id,
+    bpid.npi AS billing_provider_npi,
+    bpid.last_name AS billing_provider_last,
+    bpid.taxonomy_code AS billing_provider_taxonomy_code,
+    bpid.specialty AS billing_provider_specialty,
+    -- Referring provider
+    e.referring_provider_id,
+    rpid.npi AS referring_provider_npi,
+    rpid.last_name AS referring_provider_last,
+    rpid.taxonomy_code AS referring_provider_taxonomy_code,
+    rpid.specialty AS referring_provider_specialty,
+    -- Rendering provider
+    e.rendering_provider_id,
+    repid.npi AS rendering_provider_npi,
+    repid.last_name AS rendering_provider_last,
+    repid.taxonomy_code AS rendering_provider_taxonomy_code,
+    repid.specialty AS rendering_provider_specialty,
+    -- Supervising provider
+    e.supervising_provider_id,
+    spid.npi AS supervising_provider_npi,
+    spid.last_name AS supervising_provider_last,
+    spid.taxonomy_code AS supervising_provider_taxonomy_code,
+    spid.specialty AS supervising_provider_specialty,
+    -- Diagnosis codes (aggregated)
+    dx.diagnosis_codes,
+    -- Service facility
+    e.service_facility_npi,
+    e.service_facility_name,
+    e.service_facility_city,
+    e.service_facility_state
+FROM claims.encounter e
+-- Diagnosis codes aggregation
+LEFT JOIN (
+    SELECT
+        encounter_id,
+        string_agg(diagnosis_code, ', ' ORDER BY sequence_number) AS diagnosis_codes
+    FROM claims.encounter_diagnosis
+    WHERE diagnosis_code IS NOT NULL
+    GROUP BY encounter_id
+) dx ON dx.encounter_id = e.encounter_id
+-- Provider joins
+LEFT JOIN claims.provider bpid ON e.billing_provider_id = bpid.provider_id
+LEFT JOIN claims.provider rpid ON e.referring_provider_id = rpid.provider_id
+LEFT JOIN claims.provider repid ON e.rendering_provider_id = repid.provider_id
+LEFT JOIN claims.provider spid ON e.supervising_provider_id = spid.provider_id
+-- Payer joins by responsibility code
+LEFT JOIN claims.encounter_payer epp ON e.encounter_id = epp.encounter_id AND epp.payer_responsibility_code = 'P'
+LEFT JOIN claims.encounter_payer eps ON e.encounter_id = eps.encounter_id AND eps.payer_responsibility_code = 'S'
+LEFT JOIN claims.encounter_payer ept ON e.encounter_id = ept.encounter_id AND ept.payer_responsibility_code = 'T';
+
+COMMENT ON VIEW claims.encounter_view IS 'Denormalized encounter view with provider details, payer hierarchy, and aggregated diagnosis codes';
+
+-- ============================================================================
+-- Source: 069_setup_smartproaudit_fdw.sql
+-- ============================================================================
+
+-- Migration: 069_setup_smartproaudit_fdw
+-- Description: Set up Foreign Data Wrapper to query SmartProAudit database
+
+-- Enable the postgres_fdw extension
+CREATE EXTENSION IF NOT EXISTS postgres_fdw;
+
+-- Create a schema to hold foreign tables from SmartProAudit
+CREATE SCHEMA IF NOT EXISTS smartproaudit;
+
+COMMENT ON SCHEMA smartproaudit IS 'Foreign tables linked to SmartProAudit master database';
+
+-- Create the foreign server connection to SmartProAudit
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'smartproaudit_server') THEN
+        CREATE SERVER smartproaudit_server
+            FOREIGN DATA WRAPPER postgres_fdw
+            OPTIONS (host 'localhost', port '5432', dbname 'SmartProAudit');
+    END IF;
+END $$;
+
+-- Create user mapping for postgres user
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_user_mappings
+        WHERE srvname = 'smartproaudit_server' AND usename = current_user
+    ) THEN
+        EXECUTE format(
+            'CREATE USER MAPPING FOR %I SERVER smartproaudit_server OPTIONS (user ''postgres'')',
+            current_user
+        );
+    END IF;
+END $$;
+
+-- Foreign tables for security schema
+CREATE FOREIGN TABLE IF NOT EXISTS smartproaudit.security_role (
+    id BIGINT,
+    role_name VARCHAR(50),
+    role_description VARCHAR(100)
+)
+SERVER smartproaudit_server
+OPTIONS (schema_name 'security', table_name 'security_role');
+
+CREATE FOREIGN TABLE IF NOT EXISTS smartproaudit.security_user (
+    id BIGINT,
+    user_name VARCHAR(100),
+    active BOOLEAN
+)
+SERVER smartproaudit_server
+OPTIONS (schema_name 'security', table_name 'security_user');
+
+CREATE FOREIGN TABLE IF NOT EXISTS smartproaudit.security_user_role (
+    id BIGINT,
+    user_id BIGINT,
+    role_id BIGINT
+)
+SERVER smartproaudit_server
+OPTIONS (schema_name 'security', table_name 'security_user_role');
+
+-- Foreign tables for fields schema
+CREATE FOREIGN TABLE IF NOT EXISTS smartproaudit.lookup_field_definitions (
+    id INTEGER,
+    table_name VARCHAR(255),
+    column_name VARCHAR(255),
+    column_sort_order INTEGER,
+    data_type VARCHAR(255),
+    friendly_name VARCHAR(255),
+    source VARCHAR(10)
+)
+SERVER smartproaudit_server
+OPTIONS (schema_name 'fields', table_name 'lookup_field_definitions');
+
+-- Foreign table for projects schema
+CREATE FOREIGN TABLE IF NOT EXISTS smartproaudit.project (
+    id INTEGER,
+    project_name VARCHAR(255),
+    organization VARCHAR(255),
+    application_version VARCHAR(50),
+    backend_version VARCHAR(50),
+    database_version VARCHAR(50),
+    connection_information VARCHAR(500),
+    database_name VARCHAR(255),
+    created_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ,
+    last_used_at TIMESTAMPTZ,
+    is_active BOOLEAN,
+    notes TEXT
+)
+SERVER smartproaudit_server
+OPTIONS (schema_name 'projects', table_name 'project');
+
+-- Convenience view for user roles
+CREATE OR REPLACE VIEW smartproaudit.user_roles AS
+SELECT
+    u.id AS user_id,
+    u.user_name,
+    u.active,
+    r.id AS role_id,
+    r.role_name,
+    r.role_description
+FROM smartproaudit.security_user u
+LEFT JOIN smartproaudit.security_user_role ur ON u.id = ur.user_id
+LEFT JOIN smartproaudit.security_role r ON ur.role_id = r.id;
+
+-- Function to check if user has a role
+CREATE OR REPLACE FUNCTION smartproaudit.user_has_role(p_user_name VARCHAR, p_role_name VARCHAR)
+RETURNS BOOLEAN AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1
+        FROM smartproaudit.user_roles
+        WHERE user_name = p_user_name
+          AND role_name = p_role_name
+          AND active = true
+    );
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+-- Function to get field definitions for a table
+CREATE OR REPLACE FUNCTION smartproaudit.get_field_definitions(p_table_name VARCHAR)
+RETURNS TABLE (
+    column_name VARCHAR,
+    friendly_name VARCHAR,
+    data_type VARCHAR,
+    sort_order INTEGER
+) AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        lfd.column_name,
+        lfd.friendly_name,
+        lfd.data_type,
+        lfd.column_sort_order
+    FROM smartproaudit.lookup_field_definitions lfd
+    WHERE lfd.table_name = p_table_name
+    ORDER BY lfd.column_sort_order;
+END;
+$$ LANGUAGE plpgsql STABLE;

@@ -1,4 +1,5 @@
 ' CreateDatabase.vbs - Create PostgreSQL database and schema
+' Also creates SmartProAudit master database for project registry
 
 ' Helper function to write to MSI log
 Sub LogMessage(message)
@@ -464,6 +465,72 @@ Function CreateDatabase()
                 LogMessage "CreateDatabase: WARNING - Database may not be fully initialized."
             End If
         End If
+    End If
+
+    ' ========================================================================
+    ' Create SmartProAudit master database for project registry
+    ' ========================================================================
+    LogMessage "CreateDatabase: Creating SmartProAudit master database..."
+
+    Dim smartProAuditDb
+    smartProAuditDb = "SmartProAudit"
+
+    ' Check if SmartProAudit database exists
+    Dim checkAuditCmd, auditResult
+    checkAuditCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & smartProAuditDb & " -c ""SELECT 1;"" -tAc """""
+    LogMessage "CreateDatabase: Checking if SmartProAudit database exists..."
+
+    auditResult = shell.Run(checkAuditCmd, 0, True)
+
+    If auditResult <> 0 Then
+        LogMessage "CreateDatabase: SmartProAudit database does not exist. Creating..."
+        Dim createAuditCmd, createAuditResult
+        createAuditCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d postgres -c ""CREATE DATABASE """ & smartProAuditDb & """;"""
+        createAuditResult = shell.Run(createAuditCmd, 0, True)
+
+        If createAuditResult = 0 Then
+            LogMessage "CreateDatabase: SUCCESS - SmartProAudit database created"
+        Else
+            LogMessage "CreateDatabase: WARNING - Failed to create SmartProAudit database. Exit code: " & createAuditResult
+        End If
+    Else
+        LogMessage "CreateDatabase: SmartProAudit database already exists"
+    End If
+
+    ' Apply SmartProAudit schema using the baseline SQL file
+    Dim smartProAuditSchema
+    smartProAuditSchema = installFolder & "migrations\smartproaudit\000_baseline.sql"
+
+    If fso.FileExists(smartProAuditSchema) Then
+        LogMessage "CreateDatabase: Applying SmartProAudit schema from: " & smartProAuditSchema
+
+        Dim applyAuditCmd, applyAuditResult
+        applyAuditCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & smartProAuditDb & " -f """ & smartProAuditSchema & """"
+        applyAuditResult = shell.Run(applyAuditCmd, 0, True)
+
+        If applyAuditResult = 0 Then
+            LogMessage "CreateDatabase: SUCCESS - SmartProAudit schema applied"
+        Else
+            LogMessage "CreateDatabase: WARNING - SmartProAudit schema may have partially applied. Exit code: " & applyAuditResult
+        End If
+    Else
+        LogMessage "CreateDatabase: WARNING - SmartProAudit schema file not found at: " & smartProAuditSchema
+    End If
+
+    ' Register the project database in SmartProAudit
+    LogMessage "CreateDatabase: Registering project database in SmartProAudit..."
+    Dim registerCmd, registerResult
+    registerCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & smartProAuditDb & _
+                  " -c ""INSERT INTO projects.project (project_name, database_name, connection_information, application_version, database_version, is_active, last_used_at) " & _
+                  "VALUES ('" & dbName & "', '" & dbName & "', '" & dbHost & ":" & dbPort & "', '" & installerVersion & "', '" & installerVersion & "', true, NOW()) " & _
+                  "ON CONFLICT (database_name) DO UPDATE SET application_version = '" & installerVersion & "', database_version = '" & installerVersion & "', updated_at = NOW();"""
+
+    registerResult = shell.Run(registerCmd, 0, True)
+
+    If registerResult = 0 Then
+        LogMessage "CreateDatabase: SUCCESS - Project database registered in SmartProAudit"
+    Else
+        LogMessage "CreateDatabase: WARNING - Failed to register project in SmartProAudit. Exit code: " & registerResult
     End If
 
     Set fso = Nothing

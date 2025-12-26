@@ -189,7 +189,15 @@
       "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1\")",
       "Bash(powershell -ExecutionPolicy Bypass -Command:*)",
       "Bash(powershell -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro''; cargo build --release\")",
-      "Bash(powershell -ExecutionPolicy Bypass -File:*)"
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(cd:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File .build-msi.ps1 -Version \"2.12.24.0\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.24.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.25.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.26.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.27.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.28.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.29.0''\")"
     ],
     "deny": [],
     "ask": []

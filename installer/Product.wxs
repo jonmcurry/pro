@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="2.12.23.0"
+           Version="2.12.29.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -200,6 +200,18 @@
 
           <!-- Migrations are now embedded in pro-upgrade.exe binary -->
           <!-- No longer need to deploy migration files to disk -->
+          <!-- Exception: SmartProAudit schema is applied via psql during install -->
+
+          <!-- SmartProAudit Migrations -->
+          <Directory Id="MigrationsFolder" Name="migrations">
+            <Directory Id="SmartProAuditMigrationsFolder" Name="smartproaudit">
+              <Component Id="SmartProAuditMigrations" Guid="7A7A7A7A-7B7B-7C7C-7D7D-7E7E7E7E7E7E" Win64="yes">
+                <File Id="SmartProAuditBaseline"
+                      Source="$(var.SolutionDir)migrations\smartproaudit\000_baseline.sql"
+                      KeyPath="yes" />
+              </Component>
+            </Directory>
+          </Directory>
 
           <!-- Component to remove the INSTALLFOLDER on uninstall -->
           <Component Id="InstallFolderComponent" Guid="FAFAFAFA-FAFB-FAFC-FAFD-FAFAFAFAFABC" Win64="yes">
@@ -328,6 +340,8 @@
         <ComponentRef Id="LogsDir" />
         <ComponentRef Id="InstallFolderComponent" />
         <!-- Migrations are now embedded in pro-upgrade.exe -->
+        <!-- Exception: SmartProAudit schema file deployed for psql -->
+        <ComponentRef Id="SmartProAuditMigrations" />
         <ComponentRef Id="ProgramDataRoot" />
         <ComponentRef Id="ProgramDataConfig" />
         <ComponentRef Id="ProgramDataLogs" />
@@ -556,7 +570,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="2.12.23.0"
+                     Value="2.12.29.0"
                      KeyPath="yes" />
     </Component>
 
