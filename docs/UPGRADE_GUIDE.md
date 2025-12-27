@@ -1,7 +1,7 @@
 # Upgrade Guide
 
-**Version:** 2.8.4.0
-**Last Updated:** 2025-11-26
+**Version:** 2.12.32.0
+**Last Updated:** 2025-12-27
 
 ---
 
@@ -56,6 +56,38 @@ psql -U postgres -d professional_smart -c "SELECT * FROM staging.schema_migratio
 ---
 
 ## Version-Specific Upgrade Notes
+
+### Upgrading to 2.12.x from 2.11.x or earlier
+
+**New Features (2.12.23.0 - 2.12.32.0):**
+- SmartProAudit master database for centralized project management
+- Foreign Data Wrapper (FDW) for cross-database security queries
+- Encounter view for denormalized reporting
+- Encounter procedure modifiers table
+- Security schema with user/role management
+
+**Database Changes:**
+- New database: `smartproaudit` (master database)
+- New schema in project DB: `smartproaudit` (FDW foreign tables)
+- New view: `claims.encounter_view`
+- New table: `claims.encounter_procedure_modifier`
+
+**Important Fixes:**
+- Database name case preservation (v2.12.32.0)
+- SmartProAudit database name case fix (v2.12.30.0)
+- Encounter view column bug fix (v2.12.31.0)
+
+**Post-Upgrade Tasks:**
+```sql
+-- Verify SmartProAudit database exists
+\l smartproaudit
+
+-- Verify FDW tables in project database
+\dt smartproaudit.*
+
+-- Verify encounter view
+SELECT COUNT(*) FROM claims.encounter_view;
+```
 
 ### Upgrading to 2.8.x from 2.7.x
 

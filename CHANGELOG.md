@@ -1,5 +1,82 @@
 # Changelog
 
+## [2.12.35.0] - 2025-12-27
+
+### Fixed
+- **Windows Server GUI Compatibility**: Fixed GUI applications not loading on Windows Server 2019+.
+  - Switched from wgpu to glow (OpenGL) renderer backend for software rendering fallback
+  - Explicitly set `renderer: eframe::Renderer::Glow` for both pro-project and pro-data-loader-gui
+  - GUI tools now work on servers without GPU acceleration
+
+## [2.12.34.0] - 2025-12-27
+
+### Fixed
+- **Project Database Manager Version Update**: Fixed GUI upgrade not updating `database_version` in SmartProAudit registry after applying migrations.
+  - GUI now correctly updates `projects.project.database_version` after successful schema upgrade
+  - Version is computed from highest applied migration number (e.g., migration 069 -> 2.12.69.0)
+  - Both CLI and GUI upgrade paths now consistently update the registry
+- **Multi-statement Migration Execution**: Fixed migration application failing for SQL files with multiple statements.
+  - Added `split_sql_statements()` function to properly parse SQL files
+  - Handles dollar-quoted strings (`$$`) in PostgreSQL functions correctly
+  - Uses `sqlx::raw_sql()` instead of `sqlx::query()` for statement execution
+- **Migration Column Name Fix**: Fixed MigrationService querying wrong column name.
+  - Changed from `version` to `migration_name` column in `staging.schema_migrations`
+  - Version is now extracted from migration filename (e.g., "069" from "069_setup_smartproaudit_fdw.sql")
+
+## [2.12.33.0] - 2025-12-27
+
+### Added
+- **Project Database Manager Tool (`pro-project.exe`)**: New CLI and GUI tool for managing multiple Professional SMART project databases.
+  - **CLI Commands:**
+    - `pro-project create --name <NAME> [--switch]` - Create new project database with full schema
+    - `pro-project switch --name <NAME> [--no-restart]` - Switch active database and restart service
+    - `pro-project list [--format table|json|csv]` - List all registered project databases
+    - `pro-project info [--name <NAME>]` - Show detailed project information
+    - `pro-project delete --name <NAME> [--force] [--backup]` - Delete project database
+    - `pro-project backup [--name <NAME>] [--output <PATH>]` - Create pg_dump backup
+    - `pro-project status` - Show schema upgrade status for all projects
+    - `pro-project upgrade [--name <NAME>|--all] [--backup] [--dry-run]` - Apply pending migrations
+  - **GUI Mode:**
+    - `pro-project gui` - Launch graphical interface
+    - Data grid showing all SmartProAudit registered projects
+    - Checkbox selection for batch operations
+    - Status indicators (up to date, pending upgrades, errors)
+    - "Upgrade Selected" and "Backup & Upgrade" actions
+    - Real-time progress and log display
+  - **Services:**
+    - `RegistryService` - Query/update SmartProAudit project registry
+    - `DatabaseService` - PostgreSQL operations (create, drop, schema check)
+    - `ConfigService` - Atomic .env file updates with backup
+    - `WindowsServiceManager` - Stop/start ProfessionalSMART service
+    - `MigrationService` - Detect and apply pending migrations
+    - `BackupService` - pg_dump backup operations
+  - **Installer Integration:**
+    - Added `pro-project.exe` to installer package
+    - Start Menu shortcut: "Project Database Manager"
+
+## [2.12.32.0] - 2025-12-27
+
+### Fixed
+- **Database Name Case Preservation**: Fixed PostgreSQL case sensitivity issue where database names with mixed case were being lowercased during creation.
+  - Added proper SQL identifier quoting in `CREATE DATABASE` commands in `CreateDatabase.vbs`
+  - Database names like `professional_smart_clientA` now preserve case correctly
+  - Service was failing to start because it looked for `professional_smart_clientA` but database was created as `professional_smart_clienta`
+
+## [2.12.31.0] - 2025-12-27
+
+### Fixed
+- **Encounter View Column Bug**: Removed non-existent `encounter_group_id` column from `claims.encounter_view`.
+  - Column was referenced in migration 068 but doesn't exist in `claims.encounter` table
+  - Fixed in both `068_create_encounter_view.sql` and `000_baseline_v2.12.sql`
+
+## [2.12.30.0] - 2025-12-27
+
+### Fixed
+- **SmartProAudit Database Name Case**: Fixed PostgreSQL case sensitivity issue with database name.
+  - Changed `SmartProAudit` to lowercase `smartproaudit` throughout installer and migrations
+  - PostgreSQL lowercases unquoted identifiers, causing connection failures with mixed-case names
+  - Affected files: `CreateDatabase.vbs`, `069_setup_smartproaudit_fdw.sql`, `000_baseline_v2.12.sql`
+
 ## [2.12.29.0] - 2025-12-26
 
 ### Changed

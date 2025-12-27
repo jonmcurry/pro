@@ -2,15 +2,32 @@
 
 This directory contains all PostgreSQL migration files for the Professional SMART application. Migrations are designed to be run in order and create a comprehensive database schema for healthcare claims processing, auditing, and analytics.
 
+**Current Version:** 2.12.32.0
+**Total Migrations:** 69 (001-069)
+**Baseline File:** `000_baseline_v2.12.sql`
+
 ## Migration Overview
 
-### Schema Structure
+### Database Structure
 
-The database uses three schemas:
+Professional SMART uses two databases:
 
-- **staging**: Import processing, file tracking, configuration, and job scheduling
-- **claims**: Main claims data, encounters, service lines, flags, audits, and denials
-- **ml**: Machine learning models, predictions, features, and training datasets
+#### 1. Project Database (e.g., `professional_smart_clientA`)
+Contains the main claims processing schema with these schemas:
+- **claims**: Main claims data, encounters, service lines, flags, audits, denials
+- **staging**: Import processing, file tracking, configuration, migrations
+- **analytics**: Reporting dashboards and materialized views
+- **archive**: Archived historical data
+- **ml**: Machine learning models, predictions, features
+- **smartproaudit**: Foreign tables linked to master database (via FDW)
+
+#### 2. SmartProAudit Master Database (`smartproaudit`)
+Centralized management database with these schemas:
+- **projects**: Project registry (tracks all project databases)
+- **fields**: Field definitions for UI display and export
+- **security**: Users, roles, and permissions
+
+See `smartproaudit/000_baseline.sql` for the master database schema.
 
 ### Migration Files
 
@@ -121,6 +138,30 @@ Run migrations in numeric order:
     - Additional performance indexes (trigram, composite)
     - Materialized views (mv_flag_statistics, mv_denial_statistics)
     - Helper functions for common queries
+
+### Recent Migrations (015-069)
+
+Key migrations in the recent series:
+
+- **046-051**: Rule configuration system (templates, definitions, assignments)
+- **052-055**: NPI registry, 837p v2 fields, specialty codes
+- **056-057**: Archive system, dashboard materialized views
+- **058-066**: Performance optimizations and constraint fixes
+- **067**: `claims.encounter_procedure_modifier` - Aggregated procedure modifiers
+- **068**: `claims.encounter_view` - Denormalized encounter view with providers/payers
+- **069**: SmartProAudit FDW - Foreign Data Wrapper for cross-database security
+
+### SmartProAudit Migrations
+
+The `smartproaudit/` subdirectory contains migrations for the master database:
+
+- **000_baseline.sql**: Complete SmartProAudit schema including:
+  - `projects.project` - Project registry
+  - `projects.schema_migrations` - Migration tracking
+  - `fields.lookup_field_definitions` - Field metadata
+  - `security.security_role` - Role definitions
+  - `security.security_user` - User accounts
+  - `security.security_user_role` - User-role assignments
 
 ## Running Migrations
 

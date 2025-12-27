@@ -23,7 +23,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'smartproaudit_server') THEN
         CREATE SERVER smartproaudit_server
             FOREIGN DATA WRAPPER postgres_fdw
-            OPTIONS (host 'localhost', port '5432', dbname 'SmartProAudit');
+            OPTIONS (host 'localhost', port '5432', dbname 'smartproaudit');
     END IF;
 END $$;
 

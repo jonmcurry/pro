@@ -12,7 +12,9 @@ members = [
     "crates/pro-data-loader",
     "crates/pro-data-loader-gui",
     "crates/pro-upgrade-manager",
-    "crates/pro-upgrade", "crates/pro-npi-enrichment",
+    "crates/pro-upgrade",
+    "crates/pro-npi-enrichment",
+    "crates/pro-project",
 ]
 resolver = "2"
 

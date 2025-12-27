@@ -10213,7 +10213,6 @@ COMMENT ON COLUMN claims.encounter_procedure_modifier.modifiers IS 'Comma-separa
 CREATE OR REPLACE VIEW claims.encounter_view AS
 SELECT
     e.encounter_id,
-    e.encounter_group_id,
     e.billing_date,
     e.submitter_id,
     e.patient_control_number,
@@ -10314,7 +10313,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_foreign_server WHERE srvname = 'smartproaudit_server') THEN
         CREATE SERVER smartproaudit_server
             FOREIGN DATA WRAPPER postgres_fdw
-            OPTIONS (host 'localhost', port '5432', dbname 'SmartProAudit');
+            OPTIONS (host 'localhost', port '5432', dbname 'smartproaudit');
     END IF;
 END $$;
 

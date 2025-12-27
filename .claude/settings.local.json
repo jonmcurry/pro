@@ -197,7 +197,13 @@
       "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.26.0''\")",
       "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.27.0''\")",
       "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.28.0''\")",
-      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.29.0''\")"
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.29.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.30.0''\")",
+      "Bash(powershell -ExecutionPolicy Bypass -Command \"cd ''c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -Version ''2.12.31.0''\")",
+      "Bash(Select-Object -Last 100)",
+      "Bash(target\\\\release\\\\pro-project.exe:*)",
+      "Bash(target\\\\release\\\\pro-project.exe status:*)",
+      "Bash(cmd /c \"target\\\\release\\\\pro-project.exe status --db-password ClearToFly1\")"
     ],
     "deny": [],
     "ask": []

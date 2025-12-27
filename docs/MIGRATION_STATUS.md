@@ -1,38 +1,72 @@
 # Migration Status Report
 
-**Date**: 2025-11-26
-**MSI Version**: 2.8.2.0
-**Status**: ✅ All migrations embedded in MSI
+**Date**: 2025-12-27
+**MSI Version**: 2.12.32.0
+**Status**: All 69 migrations embedded in MSI
 
 ---
 
-## Issue Identified
+## Current Version Summary
 
-**Problem**: Rule configuration tables (migrations 046-051) were not applied to database
-
-**Root Cause**: Migrations 050-051 were **not embedded** in the pro-upgrade binary
+| Component | Version | Status |
+|-----------|---------|--------|
+| MSI Installer | 2.12.32.0 | Current |
+| Embedded Migrations | 001-069 | All included |
+| Baseline | 000_baseline_v2.12.sql | Contains all migrations |
 
 ---
 
-## Investigation Summary
+## Recent Changes (2.12.x Series)
 
-### Database State (Before Fix)
+### v2.12.32.0 - Database Name Case Preservation
+- Fixed PostgreSQL case sensitivity issue in `CREATE DATABASE` commands
+- Database names like `professional_smart_clientA` now preserve case correctly
 
-```sql
--- Checked applied migrations
-SELECT migration_name FROM staging.schema_migrations ORDER BY migration_name DESC LIMIT 10;
+### v2.12.31.0 - Encounter View Column Fix
+- Removed non-existent `encounter_group_id` column from `claims.encounter_view`
 
--- Result: Only migrations 001-039 were applied
--- Missing: 040-051
-```
+### v2.12.30.0 - SmartProAudit Database Name Case
+- Changed `SmartProAudit` to lowercase `smartproaudit` throughout
+- Fixed FDW connection issues caused by case mismatch
 
-**Tables Missing**:
-- `claims.rule_template` - Rule templates (migration 046)
-- `claims.rule_definition` - Rule instances (migration 046)
-- `claims.facility_rule_assignment` - Per-facility assignments (migration 046)
-- `claims.organization_rule_assignment` - Per-org assignments (migration 046)
-- Performance indexes (migration 050)
-- `claims.rule_execution_stats` - Statistics tracking (migration 051)
+### v2.12.28.0-29.0 - SmartProAudit FDW & Security
+- Added Foreign Data Wrapper for cross-database querying (migration 069)
+- Added security schema indexes for unique constraints
+
+### v2.12.25.0-27.0 - SmartProAudit Master Database
+- New centralized database for project management
+- Schemas: `projects`, `fields`, `security`
+- Replaces file-based `projects.json` registry
+
+### v2.12.24.0 - Encounter View
+- Added `claims.encounter_view` (migration 068)
+- Denormalized view with providers, payers, and diagnoses
+
+### v2.12.23.0 - Encounter Procedure Modifiers
+- Added `claims.encounter_procedure_modifier` table (migration 067)
+
+---
+
+## Database Architecture
+
+### Project Databases
+Each project database (e.g., `professional_smart_clientA`) contains:
+- **claims**: Main claims data, encounters, service lines, flags
+- **staging**: Import processing, file tracking, migrations
+- **analytics**: Reporting and dashboards
+- **archive**: Archived data
+- **ml**: Machine learning models
+- **smartproaudit**: Foreign tables linked to master database
+
+### SmartProAudit Master Database
+Centralized database (`smartproaudit`) containing:
+- **projects**: Project registry (replaces projects.json)
+- **fields**: Field definitions for UI display
+- **security**: Users, roles, and permissions
+
+---
+
+## Migration List (001-069)
 
 ### How Migrations Work
 

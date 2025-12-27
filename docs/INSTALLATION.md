@@ -2,8 +2,8 @@
 
 This guide provides step-by-step instructions for installing the Professional SMART claims processing system on Windows.
 
-**Current Version**: 2.8.2.0
-**Release Date**: November 26, 2025
+**Current Version**: 2.12.32.0
+**Release Date**: December 27, 2025
 
 ## Quick Start (MSI Installer)
 
@@ -20,9 +20,25 @@ For production deployments, use the MSI installer for automated installation:
 The MSI installer automatically:
 - Installs the service executable and dependencies
 - Creates necessary directories (`data\input`, `data\processed`, `data\error`, `logs`)
-- Runs all database migrations (001-039)
+- Creates the project database with all 69 migrations (001-069)
+- Creates the SmartProAudit master database for centralized management
 - Configures the Windows service
 - Generates `.env` configuration file
+- Registers the project in SmartProAudit
+
+### Databases Created
+
+The installer creates two databases:
+
+1. **Project Database** (e.g., `professional_smart_clientA`)
+   - Main claims processing database
+   - Schemas: `claims`, `staging`, `analytics`, `archive`, `ml`, `smartproaudit`
+   - All 69 migrations applied via baseline
+
+2. **SmartProAudit** (master database)
+   - Centralized project registry
+   - Schemas: `projects`, `fields`, `security`
+   - Shared across all project databases
 
 Skip to [Post-Installation Verification](#installation-verification) after MSI installation.
 

@@ -2,6 +2,9 @@
 
 This directory contains the WiX Toolset configuration for building the Professional SMART Windows installer (.msi package).
 
+**Current Version:** 2.12.33.0
+**Last Updated:** 2025-12-27
+
 ## Prerequisites
 
 1. **WiX Toolset 3.11 or later**
@@ -16,6 +19,17 @@ This directory contains the WiX Toolset configuration for building the Professio
    - Creates binaries in `target/release/`
 
 ## Building the Installer
+
+### Using PowerShell (Recommended)
+
+```powershell
+cd installer
+.\build-msi.ps1 -Version "2.12.33.0"
+```
+
+Options:
+- `-Version "X.Y.Z.W"` - Specify version number
+- `-NoBuild` - Skip Rust compilation (use existing binaries)
 
 ### Windows Command Prompt
 
@@ -73,6 +87,26 @@ light.exe -ext WixUIExtension -out ProfessionalSMART.msi Product.wixobj
 - Configuration Wizard shortcut
 - Documentation folder shortcut
 - Uninstall shortcut
+
+### Database Creation
+
+The installer creates two PostgreSQL databases:
+
+1. **Project Database** (user-specified name, e.g., `professional_smart_clientA`)
+   - Main claims processing database
+   - All 69 migrations applied via `000_baseline_v2.12.sql`
+   - Schemas: `claims`, `staging`, `analytics`, `archive`, `ml`, `smartproaudit`
+
+2. **SmartProAudit** (master database, lowercase)
+   - Centralized project registry
+   - Created from `migrations/smartproaudit/000_baseline.sql`
+   - Schemas: `projects`, `fields`, `security`
+
+**Database Creation Script:** `CreateDatabase.vbs`
+- Validates PostgreSQL credentials before proceeding
+- Creates databases with proper SQL identifier quoting (preserves case)
+- Applies baseline migrations using `pro-upgrade.exe`
+- Registers the project in SmartProAudit
 
 ### Windows Service
 

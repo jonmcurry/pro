@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 -- Encounter procedure modifiers table
 -- Stores comma-separated list of unique modifiers from all service lines on an encounter
-CREATE TABLE claims.encounter_procedure_modifier (
+CREATE TABLE IF NOT EXISTS claims.encounter_procedure_modifier (
     encounter_id BIGINT PRIMARY KEY REFERENCES claims.encounter(encounter_id) ON DELETE CASCADE,
     modifiers VARCHAR(20) NOT NULL, -- Comma-separated list e.g., "24,25,59"
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -15,13 +15,14 @@ CREATE TABLE claims.encounter_procedure_modifier (
 );
 
 -- Index for searching by modifiers (useful for finding encounters with specific modifiers)
-CREATE INDEX idx_encounter_proc_mod_modifiers ON claims.encounter_procedure_modifier(modifiers);
+CREATE INDEX IF NOT EXISTS idx_encounter_proc_mod_modifiers ON claims.encounter_procedure_modifier(modifiers);
 
 -- GIN index for pattern matching on modifiers (e.g., WHERE modifiers LIKE '%25%')
-CREATE INDEX idx_encounter_proc_mod_modifiers_gin ON claims.encounter_procedure_modifier
+CREATE INDEX IF NOT EXISTS idx_encounter_proc_mod_modifiers_gin ON claims.encounter_procedure_modifier
     USING gin(modifiers gin_trgm_ops);
 
--- Trigger for updated_at
+-- Trigger for updated_at (drop first if exists to make idempotent)
+DROP TRIGGER IF EXISTS update_encounter_proc_mod_updated_at ON claims.encounter_procedure_modifier;
 CREATE TRIGGER update_encounter_proc_mod_updated_at
     BEFORE UPDATE ON claims.encounter_procedure_modifier
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

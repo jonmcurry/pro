@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="2.12.29.0"
+           Version="2.12.35.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -117,6 +117,13 @@
             <Component Id="UpgradeExecutable" Guid="5A5A5A5A-5B5B-5C5C-5D5D-5E5E5E5E5E5E" Win64="yes">
               <File Id="ProUpgradeExe"
                     Source="$(var.SolutionDir)target\release\pro-upgrade.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
+
+            <Component Id="ProjectExecutable" Guid="6B6B6B6B-6C6C-6D6D-6E6E-6F6F6A6A6A6A" Win64="yes">
+              <File Id="ProProjectExe"
+                    Source="$(var.SolutionDir)target\release\pro-project.exe"
                     KeyPath="yes"
                     Checksum="yes" />
             </Component>
@@ -284,6 +291,13 @@
                       Target="[BinFolder]pro-data-loader-gui.exe"
                       WorkingDirectory="INSTALLFOLDER" />
 
+            <Shortcut Id="ProjectManagerGuiShortcut"
+                      Name="Project Database Manager"
+                      Description="Manage multiple project databases, switch between projects, and upgrade schemas"
+                      Target="[BinFolder]pro-project.exe"
+                      Arguments="gui"
+                      WorkingDirectory="INSTALLFOLDER" />
+
             <Shortcut Id="DataLoaderCliShortcut"
                       Name="Load Master Data (CLI)"
                       Description="Load organizations, facilities, and providers from CSV - Command Line"
@@ -332,6 +346,7 @@
         <ComponentRef Id="DataLoaderExecutable" />
         <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="UpgradeExecutable" />
+        <ComponentRef Id="ProjectExecutable" />
         <ComponentRef Id="BinDir" />
         <ComponentRef Id="InputDir" />
         <ComponentRef Id="ProcessedDir" />
@@ -570,7 +585,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="2.12.29.0"
+                     Value="2.12.35.0"
                      KeyPath="yes" />
     </Component>
 

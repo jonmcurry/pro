@@ -6,7 +6,6 @@
 CREATE OR REPLACE VIEW claims.encounter_view AS
 SELECT
     e.encounter_id,
-    e.encounter_group_id,
     e.billing_date,
     e.submitter_id,
     e.patient_control_number,

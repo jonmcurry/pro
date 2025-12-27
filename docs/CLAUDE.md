@@ -15,6 +15,7 @@ Rule 11: Version the build after every change and determine if it's a minor or m
 Rule 12: Absolutely no manual fixes.
 Rule 13: Keep track of changes in an .md file (all changes go into this one file to keep track)
 Rule 14: Read CHANGELOG.md of previous changes.
+Rule 15: Any new sql migrations need to be part of the 000 baseline
 
 ## Installer Build Process
 

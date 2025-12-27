@@ -331,7 +331,7 @@ Function CreateDatabase()
     If result <> 0 Then
         LogMessage "CreateDatabase: Database does not exist. Attempting to create..."
         Dim createCmd
-        createCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d postgres -c ""CREATE DATABASE " & dbName & ";"""
+        createCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d postgres -c ""CREATE DATABASE """"" & dbName & """"";"""
         LogMessage "CreateDatabase: Create command using: " & psqlExe
 
         Dim createResult
@@ -473,7 +473,7 @@ Function CreateDatabase()
     LogMessage "CreateDatabase: Creating SmartProAudit master database..."
 
     Dim smartProAuditDb
-    smartProAuditDb = "SmartProAudit"
+    smartProAuditDb = "smartproaudit"
 
     ' Check if SmartProAudit database exists
     Dim checkAuditCmd, auditResult
@@ -485,7 +485,7 @@ Function CreateDatabase()
     If auditResult <> 0 Then
         LogMessage "CreateDatabase: SmartProAudit database does not exist. Creating..."
         Dim createAuditCmd, createAuditResult
-        createAuditCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d postgres -c ""CREATE DATABASE """ & smartProAuditDb & """;"""
+        createAuditCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d postgres -c ""CREATE DATABASE """"" & smartProAuditDb & """"";"""
         createAuditResult = shell.Run(createAuditCmd, 0, True)
 
         If createAuditResult = 0 Then

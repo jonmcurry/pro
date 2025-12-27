@@ -1,7 +1,7 @@
 # Software Requirements Document: Project Database Management System
 
-**Document Version:** 1.2
-**Date:** 2025-12-26
+**Document Version:** 1.3
+**Date:** 2025-12-27
 **Author:** Senior Software Engineer
 **Status:** Draft
 
@@ -11,6 +11,7 @@
 | 1.0 | 2025-12-24 | Initial draft with create, switch, list, info, delete, backup commands |
 | 1.1 | 2025-12-26 | Added upgrade and status commands for multi-database schema management |
 | 1.2 | 2025-12-26 | Changed registry from file-based (projects.json) to PostgreSQL-based (SmartProAudit database) |
+| 1.3 | 2025-12-27 | Added GUI requirements for pro-project tool with selectable database upgrades |
 
 ---
 
@@ -36,7 +37,7 @@ This workflow is:
 
 ### 1.3 Proposed Solution
 
-Implement a new CLI tool (`pro-project.exe`) that provides:
+Implement a new tool (`pro-project.exe`) with both CLI and GUI interfaces that provides:
 
 1. **Database Creation** - Create new project databases with full schema
 2. **Database Switching** - Update configuration and restart service to use different database
@@ -45,6 +46,7 @@ Implement a new CLI tool (`pro-project.exe`) that provides:
 5. **Project Deletion** - Remove project databases (with safeguards)
 6. **Schema Upgrades** - Apply pending migrations to one or all project databases
 7. **Status Monitoring** - Quick view of which projects need schema upgrades
+8. **GUI Mode** - Visual interface for managing and upgrading databases (NEW)
 
 ---
 
@@ -632,7 +634,156 @@ Run 'pro-project upgrade --all --backup' to apply upgrades.
 
 ---
 
-### 2.9 Project Registry (SmartProAudit Database)
+### 2.9 Command: `gui`
+
+**Purpose:** Launch a graphical user interface for managing project databases with visual selection and upgrade capabilities.
+
+**Usage:**
+```
+pro-project gui
+pro-project --gui
+```
+
+**Behavior:**
+
+1. Connect to SmartProAudit database and retrieve all registered projects
+2. Display a window with a data grid showing all project columns from `projects.project`
+3. Allow user to select which databases to upgrade via checkboxes
+4. Provide upgrade action with progress feedback
+5. Display real-time status updates during operations
+
+**GUI Layout:**
+
+```
++------------------------------------------------------------------+
+|  Professional SMART - Project Database Manager                    |
++------------------------------------------------------------------+
+|  SmartProAudit Registry: localhost:5432/smartproaudit   [Refresh] |
++------------------------------------------------------------------+
+|  [ ] Select All                                                   |
++------------------------------------------------------------------+
+|  [x] | Database Name          | Organization | Schema Ver | Status      |
+|  [ ] | professional_smart     | Acme Corp    | 2.12.32.0  | Up to date  |
+|  [x] | professional_smart_A   | Client A     | 2.12.30.0  | 2 pending   |
+|  [x] | professional_smart_B   | Client B     | 2.12.28.0  | 4 pending   |
+|  [ ] | professional_smart_C   | Client C     | 2.12.32.0  | Up to date  |
++------------------------------------------------------------------+
+|  Selected: 2 databases                                            |
+|                                                                   |
+|  [Upgrade Selected]  [Backup & Upgrade]  [View Details]  [Cancel] |
++------------------------------------------------------------------+
+|  Status: Ready                                                    |
++------------------------------------------------------------------+
+```
+
+**Grid Columns (from `projects.project` table):**
+
+| Column | Header | Width | Description |
+|--------|--------|-------|-------------|
+| (checkbox) | Select | 30px | Selectable for batch operations |
+| `project_name` | Project Name | 150px | User-friendly project name |
+| `database_name` | Database | 200px | PostgreSQL database name |
+| `organization` | Organization | 150px | Client/organization name |
+| `database_version` | Schema Version | 100px | Current schema version |
+| `application_version` | App Version | 100px | Application version at creation |
+| `is_active` | Active | 60px | Currently active database (indicator) |
+| `last_used_at` | Last Used | 120px | Last access timestamp |
+| `created_at` | Created | 120px | Creation timestamp |
+| `notes` | Notes | 200px | User notes/comments |
+
+**Column Visibility:**
+- All columns are visible by default
+- User can right-click header to show/hide columns
+- Column preferences saved to user settings
+
+**Status Indicators:**
+- Green checkmark: Up to date
+- Yellow warning: Pending migrations (shows count)
+- Red X: Error/unreachable
+- Star icon: Currently active database
+
+**GUI Actions:**
+
+1. **Select/Deselect Databases**
+   - Click checkbox to select individual databases
+   - "Select All" checkbox for bulk selection
+   - Shift+click for range selection
+   - Cannot deselect currently active database from destructive operations
+
+2. **Upgrade Selected**
+   - Enabled when 1+ databases with pending migrations are selected
+   - Shows confirmation dialog with list of databases and pending migrations
+   - Progress bar during upgrade
+   - Real-time log output in status area
+
+3. **Backup & Upgrade**
+   - Same as Upgrade Selected but creates backup first
+   - Shows backup location in confirmation dialog
+   - Backup created before each database upgrade (not once at start)
+
+4. **View Details**
+   - Opens detail panel/dialog for selected database
+   - Shows full project information
+   - Lists all applied migrations
+   - Shows pending migrations with SQL preview
+
+5. **Refresh**
+   - Re-queries SmartProAudit for current project list
+   - Updates status indicators
+
+**Upgrade Progress Dialog:**
+
+```
++--------------------------------------------------+
+|  Upgrading Databases                              |
++--------------------------------------------------+
+|  Overall Progress: [=========>          ] 2/3    |
+|                                                   |
+|  Current: professional_smart_B                    |
+|  Migration: 069_setup_smartproaudit_fdw.sql       |
+|  [====================>      ] 75%                |
+|                                                   |
+|  Log:                                             |
+|  [10:30:01] Starting upgrade of professional_A    |
+|  [10:30:05] Applied 068_create_encounter_view.sql |
+|  [10:30:08] Applied 069_setup_smartproaudit_fdw   |
+|  [10:30:08] SUCCESS: professional_smart_A         |
+|  [10:30:09] Starting upgrade of professional_B    |
+|  [10:30:12] Applied 068_create_encounter_view.sql |
+|                                                   |
+|  [Cancel]                               [Close]   |
++--------------------------------------------------+
+```
+
+**Error Handling:**
+
+- Connection errors display reconnect dialog
+- Failed upgrades highlight in red with error message
+- Option to continue or abort on error
+- Rollback status shown for failed databases
+
+**Keyboard Shortcuts:**
+
+| Key | Action |
+|-----|--------|
+| F5 | Refresh list |
+| Ctrl+A | Select all |
+| Ctrl+U | Upgrade selected |
+| Ctrl+B | Backup & upgrade selected |
+| Enter | View details of selected |
+| Escape | Cancel/close dialog |
+| Space | Toggle selection of focused row |
+
+**Technology:**
+
+- Built with `egui` or `iced` (Rust native GUI frameworks)
+- Single executable (no additional runtime dependencies)
+- Windows native look and feel
+- High DPI aware
+
+---
+
+### 2.10 Project Registry (SmartProAudit Database)
 
 **Purpose:** Track all project databases created/used by this installation.
 
@@ -744,6 +895,10 @@ Pre-populated with field definitions for:
 ```
 pro-project.exe
     |
+    +-- Entry Point
+    |       |-- CLI Mode (default, via clap)
+    |       +-- GUI Mode (--gui flag or `gui` subcommand)
+    |
     +-- Commands (clap)
     |       |-- CreateCommand
     |       |-- SwitchCommand
@@ -752,12 +907,22 @@ pro-project.exe
     |       |-- DeleteCommand
     |       |-- BackupCommand
     |       |-- UpgradeCommand
-    |       +-- StatusCommand
+    |       |-- StatusCommand
+    |       +-- GuiCommand (launches GUI mode)
+    |
+    +-- GUI (egui/eframe)
+    |       |-- MainWindow
+    |       |       |-- ProjectGrid (data table with checkboxes)
+    |       |       |-- ActionBar (Upgrade, Backup, View Details)
+    |       |       +-- StatusBar (connection info, messages)
+    |       |-- UpgradeDialog (progress tracking)
+    |       |-- DetailsDialog (project info, migration list)
+    |       +-- SettingsDialog (column visibility, preferences)
     |
     +-- Services
     |       |-- DatabaseService (create, drop, connect, query)
     |       |-- ConfigService (read/write .env, backup config)
-    |       |-- RegistryService (read/write projects.json)
+    |       |-- RegistryService (query SmartProAudit projects.project)
     |       |-- WindowsServiceManager (start, stop, status)
     |       |-- MigrationService (apply baseline, check version, apply pending)
     |       +-- BackupService (pg_dump, pg_restore, verify)
@@ -775,22 +940,33 @@ crates/
   pro-project/
     Cargo.toml
     src/
-      main.rs           # CLI entry point with clap
-      commands/
-        mod.rs
-        create.rs       # CreateCommand implementation
-        switch.rs       # SwitchCommand implementation
-        list.rs         # ListCommand implementation
-        info.rs         # InfoCommand implementation
-        delete.rs       # DeleteCommand implementation
-        backup.rs       # BackupCommand implementation
-        upgrade.rs      # UpgradeCommand implementation
-        status.rs       # StatusCommand implementation
+      main.rs           # Entry point - CLI or GUI based on args
+      cli/
+        mod.rs          # CLI module
+        commands/
+          mod.rs
+          create.rs     # CreateCommand implementation
+          switch.rs     # SwitchCommand implementation
+          list.rs       # ListCommand implementation
+          info.rs       # InfoCommand implementation
+          delete.rs     # DeleteCommand implementation
+          backup.rs     # BackupCommand implementation
+          upgrade.rs    # UpgradeCommand implementation
+          status.rs     # StatusCommand implementation
+      gui/
+        mod.rs          # GUI module entry point
+        app.rs          # Main application state
+        main_window.rs  # Main window layout
+        project_grid.rs # Data grid with project list
+        upgrade_dialog.rs # Progress dialog for upgrades
+        details_dialog.rs # Project details view
+        settings.rs     # User preferences
+        styles.rs       # Visual styling
       services/
         mod.rs
         database.rs     # PostgreSQL operations
         config.rs       # .env file operations
-        registry.rs     # projects.json operations
+        registry.rs     # SmartProAudit registry operations
         windows.rs      # Windows service control
         migration.rs    # Migration detection and application
         backup.rs       # Backup/restore operations
@@ -800,21 +976,100 @@ crates/
 
 ```toml
 [dependencies]
+# CLI
 clap = { version = "4", features = ["derive"] }
+
+# Async runtime
 tokio = { version = "1", features = ["full"] }
+
+# Database
 sqlx = { version = "0.7", features = ["runtime-tokio", "postgres"] }
+
+# Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling & logging
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+
+# Windows
 windows-service = "0.6"         # For service control
+
+# Configuration
 dotenvy = "0.15"                # For .env parsing
+
+# GUI (NEW)
+eframe = "0.27"                 # egui framework for native apps
+egui = "0.27"                   # Immediate mode GUI
+egui_extras = "0.27"            # Table/grid widget
+rfd = "0.14"                    # Native file dialogs
 
 # Internal dependencies
 pro-db = { path = "../pro-db" }
 pro-upgrade-manager = { path = "../pro-upgrade-manager" }
+```
+
+### 4.4 GUI Data Model
+
+```rust
+/// Project data loaded from SmartProAudit
+#[derive(Clone, Debug)]
+pub struct ProjectRow {
+    pub id: i32,
+    pub project_name: String,
+    pub database_name: String,
+    pub organization: Option<String>,
+    pub application_version: Option<String>,
+    pub backend_version: Option<String>,
+    pub database_version: Option<String>,
+    pub connection_information: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub is_active: bool,
+    pub notes: Option<String>,
+
+    // Computed fields
+    pub selected: bool,           // Checkbox state
+    pub pending_migrations: u32,  // Count of pending migrations
+    pub status: ProjectStatus,    // Up to date, Pending, Error
+    pub reachable: bool,          // Can connect to database
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectStatus {
+    UpToDate,
+    PendingUpgrade(u32),  // Number of pending migrations
+    Error(String),
+    Checking,
+}
+
+/// Application state
+pub struct ProjectManagerApp {
+    pub projects: Vec<ProjectRow>,
+    pub selected_count: usize,
+    pub connection_string: String,
+    pub status_message: String,
+    pub show_upgrade_dialog: bool,
+    pub upgrade_progress: Option<UpgradeProgress>,
+    pub column_visibility: ColumnVisibility,
+}
+
+/// Column visibility settings
+pub struct ColumnVisibility {
+    pub project_name: bool,
+    pub database_name: bool,
+    pub organization: bool,
+    pub database_version: bool,
+    pub application_version: bool,
+    pub is_active: bool,
+    pub last_used_at: bool,
+    pub created_at: bool,
+    pub notes: bool,
+}
 ```
 
 ### 4.4 Configuration File Updates
@@ -926,12 +1181,29 @@ pub fn start_service() -> Result<()> {
 - [ ] Add --continue-on-error flag for resilient batch upgrades
 - [ ] Update registry schema_version after successful upgrades
 
-### Phase 7: Integration and Polish
+### Phase 7: GUI Implementation
+- [ ] Set up egui/eframe project structure
+- [ ] Implement main window layout with project grid
+- [ ] Add checkbox selection for databases
+- [ ] Display all SmartProAudit columns in grid
+- [ ] Implement column show/hide functionality
+- [ ] Add status indicators (up to date, pending, error)
+- [ ] Implement "Upgrade Selected" action
+- [ ] Implement "Backup & Upgrade" action
+- [ ] Add upgrade progress dialog with real-time log
+- [ ] Implement "View Details" dialog
+- [ ] Add keyboard shortcuts
+- [ ] Save/restore user preferences (column visibility, window size)
+- [ ] Error handling and reconnection dialogs
+
+### Phase 8: Integration and Polish
 - [ ] Add to installer build process
+- [ ] Add Start Menu shortcut for GUI mode
 - [ ] Update CLAUDE.md with new tool documentation
 - [ ] Create user documentation
 - [ ] Error message improvements
 - [ ] Logging and diagnostics
+- [ ] Windows high DPI support testing
 
 ---
 
@@ -1094,6 +1366,10 @@ pro-project upgrade --name <NAME> [--backup] [--dry-run]
 
 pro-project upgrade --all [--backup] [--dry-run] [--continue-on-error]
     Upgrade all project databases to latest schema
+
+pro-project gui
+pro-project --gui
+    Launch graphical user interface for database management
 ```
 
 ## Appendix B: File and Database Locations

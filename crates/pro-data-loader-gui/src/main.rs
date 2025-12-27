@@ -5,11 +5,14 @@ mod app;
 use eframe::egui;
 
 fn main() -> Result<(), eframe::Error> {
+    // Use glow (OpenGL) renderer for Windows Server compatibility
+    // This provides software rendering fallback when GPU is unavailable
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([900.0, 700.0])
             .with_min_inner_size([800.0, 600.0])
             .with_icon(load_icon()),
+        renderer: eframe::Renderer::Glow,
         ..Default::default()
     };
 
