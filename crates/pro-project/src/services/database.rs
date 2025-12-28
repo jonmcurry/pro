@@ -145,23 +145,35 @@ impl DatabaseService {
         Ok(row.get::<bool, _>("exists"))
     }
 
-    /// Get the schema version from a database
+    /// Get the schema version from a database based on applied migrations
+    /// Schema version is derived from the highest migration number: 2.12.{max_migration}.0
     pub async fn get_schema_version(&self, database_name: &str) -> Result<Option<String>> {
         let pool = PgPool::connect(&self.connection_string(database_name))
             .await
             .context("Failed to connect to database")?;
 
+        // Get the highest migration number from schema_migrations
         let row = sqlx::query(
             r#"
-            SELECT version FROM staging.application_version
-            ORDER BY installed_at DESC LIMIT 1
+            SELECT migration_name FROM staging.schema_migrations
+            ORDER BY migration_name DESC LIMIT 1
             "#,
         )
         .fetch_optional(&pool)
         .await
         .context("Failed to get schema version")?;
 
-        Ok(row.map(|r| r.get::<String, _>("version")))
+        // Extract migration number and format as 2.12.{migration}.0
+        Ok(row.map(|r| {
+            let migration_name: String = r.get("migration_name");
+            // Extract the numeric prefix (e.g., "069" from "069_setup_smartproaudit_fdw.sql")
+            let migration_num = migration_name
+                .split('_')
+                .next()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0);
+            format!("2.12.{}.0", migration_num)
+        }))
     }
 
     /// Get the count of applied migrations

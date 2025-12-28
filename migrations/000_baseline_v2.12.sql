@@ -10435,3 +10435,51 @@ BEGIN
     ORDER BY lfd.column_sort_order;
 END;
 $$ LANGUAGE plpgsql STABLE;
+
+-- ============================================================================
+-- Register all migrations in schema_migrations
+-- This ensures fresh installs correctly report schema version based on migrations
+-- ============================================================================
+
+INSERT INTO staging.schema_migrations (migration_name, applied_at, checksum, description)
+VALUES
+    ('031_create_delete_project_procedure.sql', NOW(), 'baseline', 'Create stored procedure for deleting projects'),
+    ('032_create_raw_claims_tables.sql', NOW(), 'baseline', 'Create raw claims staging tables'),
+    ('033_add_cpt_hcpcs_to_service_line.sql', NOW(), 'baseline', 'Add CPT/HCPCS codes to service_line table'),
+    ('034_add_last_used_at_to_projects.sql', NOW(), 'baseline', 'Add last_used_at column to projects'),
+    ('035_add_service_line_modifiers.sql', NOW(), 'baseline', 'Add modifiers to service_line table'),
+    ('036_create_encounter_diagnosis_table.sql', NOW(), 'baseline', 'Create encounter_diagnosis junction table'),
+    ('037_add_batch_id_to_encounter.sql', NOW(), 'baseline', 'Add batch_id column to encounter'),
+    ('038_add_encounter_indexes.sql', NOW(), 'baseline', 'Add performance indexes to encounter table'),
+    ('039_add_service_line_indexes.sql', NOW(), 'baseline', 'Add performance indexes to service_line table'),
+    ('040_create_payer_table.sql', NOW(), 'baseline', 'Create payer reference table'),
+    ('041_add_payer_to_encounter.sql', NOW(), 'baseline', 'Add payer reference to encounter'),
+    ('042_create_claim_status_table.sql', NOW(), 'baseline', 'Create claim status reference table'),
+    ('043_add_claim_status_to_encounter.sql', NOW(), 'baseline', 'Add claim status to encounter'),
+    ('044_create_remittance_tables.sql', NOW(), 'baseline', 'Create remittance advice tables'),
+    ('045_add_allowed_amount_to_service_line.sql', NOW(), 'baseline', 'Add allowed amount to service_line'),
+    ('046_create_denial_reason_table.sql', NOW(), 'baseline', 'Create denial reason reference table'),
+    ('047_add_denial_tracking_to_service_line.sql', NOW(), 'baseline', 'Add denial tracking to service_line'),
+    ('048_create_appeal_table.sql', NOW(), 'baseline', 'Create appeal tracking table'),
+    ('049_add_appeal_to_encounter.sql', NOW(), 'baseline', 'Add appeal reference to encounter'),
+    ('050_create_payment_table.sql', NOW(), 'baseline', 'Create payment tracking table'),
+    ('051_add_payment_to_encounter.sql', NOW(), 'baseline', 'Add payment reference to encounter'),
+    ('052_create_adjustment_table.sql', NOW(), 'baseline', 'Create adjustment tracking table'),
+    ('053_add_adjustment_to_service_line.sql', NOW(), 'baseline', 'Add adjustment reference to service_line'),
+    ('054_create_authorization_table.sql', NOW(), 'baseline', 'Create prior authorization table'),
+    ('055_add_authorization_to_encounter.sql', NOW(), 'baseline', 'Add authorization reference to encounter'),
+    ('056_create_referring_provider_table.sql', NOW(), 'baseline', 'Create referring provider table'),
+    ('057_add_referring_provider_to_encounter.sql', NOW(), 'baseline', 'Add referring provider to encounter'),
+    ('058_create_patient_table.sql', NOW(), 'baseline', 'Create patient demographics table'),
+    ('059_add_patient_to_encounter.sql', NOW(), 'baseline', 'Add patient reference to encounter'),
+    ('060_add_patient_fields.sql', NOW(), 'baseline', 'Add additional patient fields'),
+    ('061_fix_patient_relationship_code_length.sql', NOW(), 'baseline', 'Fix patient relationship code column length'),
+    ('062_create_encounter_payer_table.sql', NOW(), 'baseline', 'Create encounter_payer junction table'),
+    ('063_add_billing_date_to_encounter.sql', NOW(), 'baseline', 'Add billing date to encounter'),
+    ('064_make_dates_nullable.sql', NOW(), 'baseline', 'Make date columns nullable for flexibility'),
+    ('065_cte_batch_acquisition_indexes.sql', NOW(), 'baseline', 'Add batch acquisition performance indexes'),
+    ('066_enforce_postgresql_settings.sql', NOW(), 'baseline', 'Enforce PostgreSQL configuration settings'),
+    ('067_create_encounter_procedure_modifiers.sql', NOW(), 'baseline', 'Create encounter procedure modifiers table'),
+    ('068_create_encounter_view.sql', NOW(), 'baseline', 'Create encounter summary view'),
+    ('069_setup_smartproaudit_fdw.sql', NOW(), 'baseline', 'Setup SmartProAudit foreign data wrapper')
+ON CONFLICT (migration_name) DO NOTHING;

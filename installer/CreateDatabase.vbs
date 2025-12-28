@@ -517,13 +517,77 @@ Function CreateDatabase()
         LogMessage "CreateDatabase: WARNING - SmartProAudit schema file not found at: " & smartProAuditSchema
     End If
 
+    ' Query the actual schema version from the database based on highest migration
+    LogMessage "CreateDatabase: Querying schema version from applied migrations..."
+    Dim schemaVersion, schemaVersionFile, schemaVersionCmd, schemaVersionResult
+    schemaVersion = installerVersion  ' Default fallback
+    schemaVersionFile = installFolder & "bin\schema_version_temp.txt"
+
+    ' Build psql command - handle PATH case vs full path case
+    Dim psqlCmdPrefix
+    If psqlExe = "psql" Then
+        ' psql is in PATH, use it directly without extra quotes
+        psqlCmdPrefix = "psql"
+    Else
+        ' Use full path with quotes
+        psqlCmdPrefix = """" & psqlExe & """"
+    End If
+
+    ' Query highest migration number from schema_migrations table
+    schemaVersionCmd = "cmd.exe /c " & psqlCmdPrefix & " -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & dbName & _
+                       " -tAc ""SELECT migration_name FROM staging.schema_migrations ORDER BY migration_name DESC LIMIT 1"" > """ & schemaVersionFile & """ 2>&1"
+    LogMessage "CreateDatabase: Schema version query command: " & schemaVersionCmd
+    schemaVersionResult = shell.Run(schemaVersionCmd, 0, True)
+    LogMessage "CreateDatabase: Schema version query exit code: " & schemaVersionResult
+
+    If schemaVersionResult = 0 And fso.FileExists(schemaVersionFile) Then
+        Dim schemaVersionContent, migrationNum
+        Set schemaVersionContent = fso.OpenTextFile(schemaVersionFile, 1)
+        If Not schemaVersionContent.AtEndOfStream Then
+            Dim migrationName
+            migrationName = Trim(schemaVersionContent.ReadLine())
+            LogMessage "CreateDatabase: Read migration name from file: [" & migrationName & "]"
+            ' Extract number from migration name (e.g., "069" from "069_setup_smartproaudit_fdw.sql")
+            If Len(migrationName) >= 3 Then
+                migrationNum = Left(migrationName, 3)
+                LogMessage "CreateDatabase: Extracted migration number: [" & migrationNum & "]"
+                ' Convert to integer and format as schema version
+                On Error Resume Next
+                Dim numVal
+                numVal = CInt(migrationNum)
+                If Err.Number = 0 Then
+                    schemaVersion = "2.12." & numVal & ".0"
+                    LogMessage "CreateDatabase: Schema version calculated from migrations: " & schemaVersion
+                Else
+                    LogMessage "CreateDatabase: Failed to convert migration number to integer. Error: " & Err.Description
+                End If
+                Err.Clear
+                On Error GoTo 0
+            Else
+                LogMessage "CreateDatabase: Migration name too short: " & Len(migrationName) & " chars"
+            End If
+        Else
+            LogMessage "CreateDatabase: Schema version file is empty"
+        End If
+        schemaVersionContent.Close
+    Else
+        LogMessage "CreateDatabase: Schema version query failed or file not found. Exit code: " & schemaVersionResult & ", File exists: " & fso.FileExists(schemaVersionFile)
+    End If
+
+    ' Clean up temp file
+    If fso.FileExists(schemaVersionFile) Then
+        fso.DeleteFile(schemaVersionFile)
+    End If
+
+    LogMessage "CreateDatabase: Using schema version: " & schemaVersion
+
     ' Register the project database in SmartProAudit
     LogMessage "CreateDatabase: Registering project database in SmartProAudit..."
     Dim registerCmd, registerResult
     registerCmd = """" & psqlExe & """ -h " & dbHost & " -p " & dbPort & " -U " & dbUser & " -d " & smartProAuditDb & _
                   " -c ""INSERT INTO projects.project (project_name, database_name, connection_information, application_version, database_version, is_active, last_used_at) " & _
-                  "VALUES ('" & dbName & "', '" & dbName & "', '" & dbHost & ":" & dbPort & "', '" & installerVersion & "', '" & installerVersion & "', true, NOW()) " & _
-                  "ON CONFLICT (database_name) DO UPDATE SET application_version = '" & installerVersion & "', database_version = '" & installerVersion & "', updated_at = NOW();"""
+                  "VALUES ('" & dbName & "', '" & dbName & "', '" & dbHost & ":" & dbPort & "', '" & installerVersion & "', '" & schemaVersion & "', true, NOW()) " & _
+                  "ON CONFLICT (database_name) DO UPDATE SET application_version = '" & installerVersion & "', database_version = '" & schemaVersion & "', updated_at = NOW();"""
 
     registerResult = shell.Run(registerCmd, 0, True)
 

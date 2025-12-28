@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.12.39.0] - 2025-12-28
+
+### Fixed
+- **Installer Schema Version Query**: Fixed psql command construction for schema version query when psql is in system PATH.
+  - Added proper handling for PATH vs full-path psql executable scenarios
+  - Added detailed logging for schema version query debugging
+  - Schema version is now correctly calculated from highest migration number
+
+## [2.12.38.0] - 2025-12-28
+
+### Fixed
+- **Installer Schema Version Registration**: Fixed MSI installer using build version instead of actual schema version when registering projects.
+  - `CreateDatabase.vbs` now queries `staging.schema_migrations` after applying migrations to get the actual schema version
+  - Fresh installs now correctly register with schema version 2.12.69.0 instead of the build version
+  - Schema version is calculated from highest migration number (e.g., migration 069 = 2.12.69.0)
+
+## [2.12.37.0] - 2025-12-28
+
+### Fixed
+- **Baseline Missing Migration Registrations**: Fixed baseline not registering migrations 031-069 in `schema_migrations` table.
+  - Added INSERT statements for all 39 missing migrations (031-069) at the end of `000_baseline_v2.12.sql`
+  - Fresh installs now correctly show schema version as 2.12.69.0
+
+## [2.12.36.0] - 2025-12-28
+
+### Fixed
+- **Fresh Install Schema Version**: Fixed fresh database installs incorrectly setting schema version to build version instead of migration-based version.
+  - `get_schema_version()` now calculates version from `staging.schema_migrations` table (highest migration number)
+  - Fresh installs now correctly report schema version as 2.12.69.0 (based on 69 migrations in baseline)
+  - Removed hardcoded version fallbacks in favor of dynamic calculation from embedded migrations
+
 ## [2.12.35.0] - 2025-12-27
 
 ### Fixed

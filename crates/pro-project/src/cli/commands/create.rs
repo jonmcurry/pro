@@ -2,6 +2,7 @@ use crate::cli::Cli;
 use crate::services::{DatabaseService, RegistryService};
 use anyhow::Result;
 use chrono::Local;
+use pro_upgrade_manager::embedded_migrations;
 
 pub async fn execute(cli: &Cli, name: &str, switch: bool) -> Result<()> {
     let password = cli.db_password.as_deref().unwrap_or("");
@@ -22,8 +23,17 @@ pub async fn execute(cli: &Cli, name: &str, switch: bool) -> Result<()> {
     db_service.apply_baseline(name).await?;
     println!("    Done");
 
-    // Get schema version
-    let version = db_service.get_schema_version(name).await?.unwrap_or_else(|| "2.12.32.0".to_string());
+    // Get schema version from applied migrations
+    // Fallback calculates from embedded migrations if database query fails
+    let fallback_version = {
+        let migrations = embedded_migrations::get_all_migrations();
+        let max_migration = migrations.iter()
+            .filter_map(|m| m.version.parse::<u32>().ok())
+            .max()
+            .unwrap_or(69);
+        format!("2.12.{}.0", max_migration)
+    };
+    let version = db_service.get_schema_version(name).await?.unwrap_or(fallback_version);
     let migration_count = db_service.get_migration_count(name).await.unwrap_or(69);
 
     // Register in SmartProAudit registry
