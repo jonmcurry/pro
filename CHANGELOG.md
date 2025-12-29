@@ -1,5 +1,67 @@
 # Changelog
 
+## [2.12.51.0] - 2025-12-29
+
+### Fixed
+- **Windows Server 2019 GUI: DirectX 12 WARP Configuration**: Proper configuration for WARP software rendering
+  - **Change**: Explicitly configure `WgpuConfiguration` with DX12 backend and `LowPower` preference
+  - **Technical Details**:
+    - Set `supported_backends: wgpu::Backends::DX12` in code (not just env var)
+    - Set `power_preference: wgpu::PowerPreference::LowPower` to help select WARP
+    - WARP (Windows Advanced Rasterization Platform) is built into Windows Server 2019
+  - **Files**: `pro-project/src/gui/mod.rs`, `pro-data-loader-gui/src/main.rs`
+  - **Reference**: [Microsoft WARP Guide](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp)
+  - **Note**: If this still fails, the CLI is fully functional (see v2.12.50.0)
+
+## [2.12.50.0] - 2025-12-29
+
+### Changed
+- **Windows Server 2019: CLI-First Architecture**: Resolved GUI issues on headless Windows Server by making CLI the primary interface
+  - **Root Cause**: Windows Server 2019 headless environments lack GPU/graphics support required by modern GUI frameworks (wgpu, OpenGL 3.3+, Vulkan, DirectX 12)
+  - **Solution**: CLI-first design - all functionality available via command line
+  - **pro-project.exe**: Now runs as CLI by default (console window visible), use `--gui` flag for GUI mode
+  - **pro-data-loader.exe**: Pure CLI tool with full functionality
+  - **pro-data-loader-gui.exe**: Shows helpful error message directing to CLI if GUI fails
+  - **Error messages**: Now include specific CLI examples when GUI unavailable
+  - See: [WINDOWS_SERVER_GUI_SOLUTION.md](docs/WINDOWS_SERVER_GUI_SOLUTION.md) for full documentation
+
+### Usage on Windows Server
+```powershell
+# Project management
+pro-project.exe list
+pro-project.exe create --name MyProject
+pro-project.exe switch --name MyProject
+pro-project.exe status
+
+# Master data loading
+pro-data-loader.exe --csv-dir C:\data\master
+```
+
+## [2.12.49.0] - 2025-12-29
+
+### Fixed
+- **Windows Server 2019 GUI Compatibility (v3)**: Comprehensive fix for GUI applications on headless Windows Server
+  - **Changes**:
+    - Try multiple backends: Vulkan → DX12 → GL (in order of preference)
+    - Disabled multisampling (`multisampling: 0`) - required for software renderers
+    - Disabled depth buffer (`depth_buffer: 0`) - reduces GPU requirements
+    - Set `WGPU_POWER_PREF=low` - prefer integrated/software rendering
+    - Set `WGPU_ALLOW_UNDERLYING_NONCOMPLIANT_ADAPTER=1` - allow software renderers
+    - Added user-friendly error message with solution instructions if GUI fails to start
+  - **If GUI still fails**: Install Mesa3D for Windows from https://github.com/pal1000/mesa-dist-win
+    - Download mesa3d release, extract `opengl32.dll` and `libgallium_wgl.dll`
+    - Copy both DLLs to `C:\Program Files\Professional SMART\bin\`
+  - Reference: [egui software rendering issue](https://github.com/emilk/egui/issues/957)
+
+## [2.12.48.0] - 2025-12-29
+
+### Fixed
+- **Windows Server 2019 GUI Compatibility (v2)**: Additional fix for GUI applications not loading on Windows Server 2019
+  - **Root Cause**: Windows Server RDS sessions don't expose GPU by default, and wgpu needs explicit DirectX 12 backend selection
+  - **Solution**: Added `WGPU_BACKEND=dx12` environment variable at startup to force DirectX 12 with WARP software rendering fallback
+  - Files: `pro-project/src/gui/mod.rs`, `pro-data-loader-gui/src/main.rs`
+  - Reference: [wgpu DX12 WARP issue](https://github.com/gfx-rs/wgpu/issues/2503)
+
 ## [2.12.47.0] - 2025-12-29
 
 ### Fixed

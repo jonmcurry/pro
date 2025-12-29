@@ -1,4 +1,7 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Note: We do NOT use windows_subsystem = "windows" here because this is primarily
+// a CLI tool. The GUI is optional and accessed via --gui flag. This ensures CLI
+// output is always visible, which is critical for Windows Server deployments
+// where GUI may not be available.
 
 mod cli;
 mod gui;
