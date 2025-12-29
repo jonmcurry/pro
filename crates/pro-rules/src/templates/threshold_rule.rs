@@ -7,7 +7,7 @@
 // - Flag claims with units > 100
 // - Flag claims with total charge < $0
 
-use crate::flag_types::{FlagContext, FlagIssueType};
+use crate::flag_types::FlagIssueType;
 use crate::rule_engine::{Rule, RuleExecutionContext, RuleResult};
 use crate::template::{
     get_decimal_param, get_optional_decimal_param, get_string_param, ParameterSchema,

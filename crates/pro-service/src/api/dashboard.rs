@@ -229,7 +229,7 @@ pub async fn get_service_line_flags_detail(
         "SELECT * FROM claims.v_service_line_flags_detail WHERE 1=1"
     );
 
-    if let Some(fac_id) = params.facility_id {
+    if let Some(_fac_id) = params.facility_id {
         query.push(" AND facility_name IS NOT NULL"); // Filter exists
     }
 

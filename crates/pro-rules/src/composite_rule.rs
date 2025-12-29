@@ -2,7 +2,7 @@
 //!
 //! PHASE 6: Rules that combine multiple sub-rules with logical operators
 
-use crate::flag_types::{FlagContext, FlagIssueType, FlagSeverity};
+use crate::flag_types::{FlagIssueType, FlagSeverity};
 use crate::rule_engine::{Rule, RuleExecutionContext, RuleResult};
 use async_trait::async_trait;
 use pro_common::Result;

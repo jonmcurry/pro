@@ -6,7 +6,6 @@
 use anyhow::{Context, Result};
 use console::{style, Term};
 use dialoguer::{Confirm, Input, Password, Select};
-use indicatif::{ProgressBar, ProgressStyle};
 use std::fs;
 use std::path::PathBuf;
 use std::env;

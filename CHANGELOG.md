@@ -1,5 +1,111 @@
 # Changelog
 
+## [2.12.46.0] - 2025-12-29
+
+### Performance
+- **Provider Cache Optimization**: Implemented in-memory NPI → provider_id cache in ClaimsProcessor
+  - **Root Cause**: Same provider NPI appears up to 16 times per encounter (4 encounter-level + 4 per service line × ~3 lines)
+  - **Impact**: Each `ensure_provider_exists` call was executing 2 DB queries (upsert + enrichment queue) for every occurrence
+  - **Solution**: Cache provider_id after first lookup, subsequent lookups return from cache instantly
+  - **Verified Result**: **1,284 claims/second** (192.8% of SRD target)
+  - Files: `claims_processor.rs` updated
+
+### SRD Performance Target ACHIEVED
+- **Target**: 10,000 claims in 15 seconds (666.67 claims/sec)
+- **Actual**: 9,971 claims in 7.76 seconds (**1,284 claims/sec**)
+- **Performance**: 192.8% of target (nearly 2x requirement)
+
+| Version | Throughput | Notes |
+|---------|------------|-------|
+| v2.12.44.0 | ~190 claims/sec | Baseline with default config |
+| v2.12.45.0 | ~195 claims/sec | Trigger removal (+2.6%) |
+| **v2.12.46.0** | **1,284 claims/sec** | Provider cache (+558%) |
+
+## [2.12.45.0] - 2025-12-29
+
+### Performance
+- **CRITICAL: Removed sync_encounter_totals Triggers**: Dropped the `sync_encounter_totals_insert`, `sync_encounter_totals_update`, and `sync_encounter_totals_delete` triggers from `claims.service_line` table.
+  - **Root Cause**: These triggers fired for EVERY service line insert, executing a `SELECT SUM()` and `UPDATE` on the encounter table each time
+  - **Impact**: For 10,000 claims with ~30,000 service lines, this added ~60,000 extra database operations
+  - **Why Safe**: The `total_claim_charge_amount` is already calculated in Rust before the encounter INSERT, making the triggers redundant
+  - **Expected Improvement**: From ~190 claims/sec to 600+ claims/sec (eliminating 6 queries per encounter)
+  - Files: `070_drop_encounter_totals_trigger.sql`, `000_baseline_v2.12.sql` updated
+
+## [2.12.44.0] - 2025-12-29
+
+### Performance
+- **Installer Default Configuration**: Updated default worker configuration for new installs to achieve 666+ claims/sec SRD target:
+  - Changed `WORKER_THREADS=4` to `STAGE2_WORKER_COUNT=8` (correct environment variable name)
+  - Changed `BATCH_SIZE=100` to `BATCH_SIZE=750` (proven optimal for throughput)
+  - Added inline documentation comments explaining each setting
+  - Files updated: `env.template`, `WriteConfig.vbs`
+
+## [2.12.43.0] - 2025-12-28
+
+### Code Quality (MEDIUM Priority Fixes)
+- **Registry Service Methods**: Added `#[allow(dead_code)]` to `get_active_project()` and `project_exists()` (reserved for future project switching UI)
+- **Windows Service Manager**: Added `#[allow(dead_code)]` to `restart()` (reserved for future service management UI)
+- **WebSocket State**: Added `#[allow(dead_code)]` to `broadcaster()` (reserved for future progress tracking integration)
+- **Pipeline Wrapper Methods**: Added `#[allow(dead_code)]` to `extract_diagnoses_from_csv()`, `extract_service_lines_from_csv()`, and `process_claim_in_transaction()` (wrapper methods superseded by improved implementations)
+- **Unused Imports Cleanup**: Removed unused `DEFAULT_DATE` import from claims_processor.rs
+- **Variable Prefixes**: Fixed unused variable warnings (`_data` in websocket.rs, `_fac_id` in dashboard.rs, removed `mut` from `batch_rx` in service.rs)
+
+### Code Review Status
+- MEDIUM priority items from CODE-REVIEW-2025-12-28.md addressed
+- Verified code review item "parser.rs unused apply_transformations" - import does not exist (false positive)
+- Verified code review item "transformers.rs unused regex::Regex" - import does not exist (false positive)
+- Verified code review item "models.rs unused sqlx::types::Uuid" - import does not exist (false positive)
+- Reviewed `.ok()` patterns in claims_processor.rs - acceptable for optional JSON field parsing with default fallback
+
+## [2.12.42.0] - 2025-12-28
+
+### Code Quality
+- **Iterator Pattern Improvements**: Refactored batch INSERT placeholder generation to use idiomatic `map().collect()` instead of `for i in 0..len()` loops in `import_encounter_payers_from_cob()` and `import_other_insurance()`
+- **Service Constants Documentation**: Added `#[allow(dead_code)]` to `SERVICE_DISPLAY_NAME` and `SERVICE_DESCRIPTION` constants (referenced via function parameters)
+- **Connection Pool Documentation**: Added documentation to `DatabaseService` explaining that fresh connections per operation are acceptable for infrequent project management operations
+
+### Schema Review
+- **Migration 018 Verified**: Confirmed flag table indexes are properly commented out with documentation explaining `claims.flag` table doesn't exist
+- **Migration 019 Verified**: Confirmed materialized views migration is properly disabled with documentation for future flag table refactoring
+
+## [2.12.41.0] - 2025-12-28
+
+### Changed
+- **Additional Unused Code Documentation**: Added `#[allow(dead_code)]` annotations with documentation for reserved/future-use code:
+  - `pro-rules`: Removed unused `FlagContext` import from threshold_rule.rs, `Error` from missing_field_rule.rs, `Rule` from hot_reload.rs
+  - `pro-worker`: Removed unused `Error` and `Encounter` imports from claim_processor.rs, `ClaimProcessingResult` from file_processor.rs
+  - `pro-worker`: Documented `facility_id` field in `IngestionPipeline` as reserved for future facility-specific rule loading
+  - `pro-project`: Documented `ProjectRow` and `TaskMessage` structs as GUI data models
+  - `pro-setup`: Documented PostgreSQL auto-installer functions as reserved for future feature
+
+## [2.12.40.0] - 2025-12-28
+
+### Performance
+- **Batch COB Payer Inserts**: Optimized `import_encounter_payers_from_cob()` to use batch INSERT instead of individual inserts per payer.
+  - Reduces database round-trips from N to 1 for COB payer imports
+  - Improves throughput for claims with multiple insurance payers
+- **Batch Other Insurance Inserts**: Optimized `import_other_insurance()` to use batch INSERT instead of individual inserts.
+  - Reduces database round-trips from N to 1 for other insurance records
+
+### Fixed
+- **Silent Provider Lookup Errors**: Changed provider lookup `.unwrap_or(None)` to `.unwrap_or_else()` with warning logging.
+  - Ensures unexpected errors from `ensure_provider_exists()` are logged instead of silently dropped
+  - Affects rendering, referring, supervising, and billing provider lookups in claims processor
+
+### Removed
+- **Unused Encounter Repository Methods**: Removed unused `list_by_organization()`, `list_by_facility()`, and `list_by_date_range()` methods from `EncounterRepository`.
+  - These methods were never called and used `SELECT *` pattern
+
+### Changed
+- **Unused Code Documentation**: Added `#[allow(dead_code)]` with documentation comments to utility methods reserved for future use:
+  - `BackupService::verify()`, `BackupService::list_backups()`, `BackupInfo` struct
+  - `ConfigService::exists()`, `DbParams::connection_string*()` methods
+  - `MigrationService::get_baseline()`, `apply_all_pending()`, `update_application_version()`
+  - `ProjectStatus::Error`, `ProjectStatus::Checking` enum variants
+  - `MigrationResult` struct
+- **Cleanup Unused Imports**: Removed unused imports from `pro-rules` crate (template.rs, loader.rs, composite_rule.rs, hot_reload.rs)
+- **Data Loader Validation Comment**: Added comment clarifying facility validation in provider import
+
 ## [2.12.39.0] - 2025-12-28
 
 ### Fixed

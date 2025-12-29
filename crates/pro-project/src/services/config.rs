@@ -24,6 +24,8 @@ impl ConfigService {
     }
 
     /// Check if configuration file exists
+    /// Reserved for future configuration validation
+    #[allow(dead_code)]
     pub fn exists(&self) -> bool {
         self.config_path.exists()
     }
@@ -152,6 +154,9 @@ pub struct DbParams {
 }
 
 impl DbParams {
+    /// Build connection string for the configured database
+    /// Reserved for future direct connection scenarios
+    #[allow(dead_code)]
     pub fn connection_string(&self) -> String {
         format!(
             "postgres://{}:{}@{}:{}/{}",
@@ -159,6 +164,9 @@ impl DbParams {
         )
     }
 
+    /// Build connection string for a specific database
+    /// Reserved for future multi-database operations
+    #[allow(dead_code)]
     pub fn connection_string_for_db(&self, db_name: &str) -> String {
         format!(
             "postgres://{}:{}@{}:{}/{}",
@@ -166,6 +174,9 @@ impl DbParams {
         )
     }
 
+    /// Build admin connection string (connects to postgres database)
+    /// Reserved for future admin operations
+    #[allow(dead_code)]
     pub fn admin_connection_string(&self) -> String {
         // Connect to postgres database for admin operations
         format!(

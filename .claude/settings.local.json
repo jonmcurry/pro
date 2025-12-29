@@ -203,7 +203,12 @@
       "Bash(Select-Object -Last 100)",
       "Bash(target\\\\release\\\\pro-project.exe:*)",
       "Bash(target\\\\release\\\\pro-project.exe status:*)",
-      "Bash(cmd /c \"target\\\\release\\\\pro-project.exe status --db-password ClearToFly1\")"
+      "Bash(cmd /c \"target\\\\release\\\\pro-project.exe status --db-password ClearToFly1\")",
+      "Bash(cargo fix:*)",
+      "Bash(Get-Content \"C:\\\\Program Files\\\\Professional SMART\\\\logs\\\\service.log\" -Tail 200)",
+      "Bash(Select-String -Pattern \"STAGE 2|workers|batch|claims/sec|throughput\" -Context 0,1)",
+      "Bash(target\\\\release\\\\pro-upgrade.exe:*)",
+      "Bash(cmd /c \"target\\\\release\\\\pro-upgrade.exe list-pending-migrations\")"
     ],
     "deny": [],
     "ask": []

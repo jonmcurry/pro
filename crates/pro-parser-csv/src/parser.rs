@@ -2,7 +2,7 @@
 
 use crate::detector::{FormatDetector, DetectionResult};
 use crate::mapping::{HeaderMapping, FieldMapping, DataType, ValidationRule};
-use crate::transformers::{apply_transformation, apply_transformations};
+use crate::transformers::apply_transformation;
 use chrono::NaiveDate;
 use csv::{Reader, StringRecord};
 use pro_common::{Error, Result};

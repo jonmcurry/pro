@@ -116,6 +116,8 @@ impl RegistryService {
     }
 
     /// Get the currently active project
+    /// Reserved for future project switching UI
+    #[allow(dead_code)]
     pub async fn get_active_project(&self) -> Result<Option<ProjectInfo>> {
         let row = sqlx::query(
             r#"
@@ -237,6 +239,8 @@ impl RegistryService {
     }
 
     /// Check if a project exists in the registry
+    /// Reserved for future project validation feature
+    #[allow(dead_code)]
     pub async fn project_exists(&self, database_name: &str) -> Result<bool> {
         let row = sqlx::query(
             "SELECT EXISTS(SELECT 1 FROM projects.project WHERE database_name = $1) as exists",

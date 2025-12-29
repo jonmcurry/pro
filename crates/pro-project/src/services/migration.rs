@@ -34,6 +34,8 @@ impl MigrationService {
     }
 
     /// Get the baseline migration
+    /// Reserved for direct baseline access (DatabaseService uses embedded_migrations directly)
+    #[allow(dead_code)]
     pub fn get_baseline() -> &'static EmbeddedMigration {
         embedded_migrations::get_baseline()
     }
@@ -147,6 +149,8 @@ impl MigrationService {
     }
 
     /// Apply all pending migrations to a database
+    /// Reserved for batch migration apply (GUI/CLI apply migrations individually)
+    #[allow(dead_code)]
     pub async fn apply_all_pending(
         &self,
         database_name: &str,
@@ -192,6 +196,8 @@ impl MigrationService {
     }
 
     /// Update the application_version table after upgrade
+    /// Reserved for explicit version tracking (schema_migrations is now canonical)
+    #[allow(dead_code)]
     pub async fn update_application_version(
         &self,
         database_name: &str,
@@ -277,6 +283,9 @@ pub struct PendingMigration {
 }
 
 #[derive(Debug)]
+/// Result of batch migration apply
+/// Reserved for future batch operations
+#[allow(dead_code)]
 pub struct MigrationResult {
     pub applied_count: usize,
     pub errors: Vec<(String, String)>,

@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use std::path::PathBuf;
 
-use pro_data_loader::{config, csv_parser, importer, templates, validator, Config};
+use pro_data_loader::{csv_parser, importer, templates, validator, Config};
 
 #[derive(Parser)]
 #[command(name = "pro-data-loader")]

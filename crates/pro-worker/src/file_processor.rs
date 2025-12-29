@@ -5,7 +5,7 @@
 
 use crate::converters;
 use crate::progress::ProgressTracker;
-use crate::types::{ClaimProcessingResult, IngestionJob, ProcessingStats};
+use crate::types::{IngestionJob, ProcessingStats};
 use futures::StreamExt;
 use pro_common::{Error, Result};
 use pro_db::{

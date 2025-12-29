@@ -4,10 +4,9 @@
 // Includes signal handling (SIGHUP), atomic rule engine swapping, and cache invalidation.
 
 use crate::loader::{load_rules_from_database, query_global_rules, instantiate_rule};
-use crate::rule_engine::{Rule, RuleEngine};
+use crate::rule_engine::RuleEngine;
 use pro_common::{Error, Result};
 use sqlx::{PgPool, Row};
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, warn, error};
@@ -43,8 +42,8 @@ impl ReloadCoordinator {
         // Set encryption key temporarily for loading
         std::env::set_var("RULE_ENCRYPTION_KEY", &self.encryption_key);
 
-        // Load new rules from database
-        let (new_engine, loaded_rules) = match load_rules_from_database(&self.pool, None).await {
+        // Load new rules from database (engine is rebuilt below with fresh instantiation)
+        let (_new_engine, loaded_rules) = match load_rules_from_database(&self.pool, None).await {
             Ok(result) => result,
             Err(e) => {
                 error!("Failed to load rules from database: {}", e);

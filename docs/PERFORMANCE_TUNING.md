@@ -2,26 +2,40 @@
 
 This guide provides detailed instructions for optimizing the Professional SMART claims processing system to meet or exceed the target performance of **666 claims per second**.
 
-## Current Performance (v2.12.21.0)
+## Current Performance (v2.12.46.0)
 
 | Metric | Achieved | Target | Status |
 |--------|----------|--------|--------|
-| **Throughput** | 822.5 claims/sec | 666 claims/sec | ✅ 123.5% |
-| **Processing Time** | 36.02 seconds | 15 seconds | 10,000 claims |
-| **Success Rate** | 98.7% | 95%+ | ✅ |
-| **Sustained Rate** | 870-1,020 claims/sec | 666 claims/sec | ✅ |
+| **Throughput** | **1,284 claims/sec** | 666 claims/sec | ✅ **192.8%** |
+| **Processing Time** | **7.76 seconds** | 15 seconds | 9,971 claims |
+| **Success Rate** | 99.7%+ | 95%+ | ✅ |
+| **SRD Target** | **ACHIEVED** | 10k claims in 15s | ✅ |
+
+### Performance History
+
+| Version | Throughput | Key Change |
+|---------|------------|------------|
+| v2.12.44.0 | ~190 claims/sec | Baseline with default config |
+| v2.12.45.0 | ~195 claims/sec | Trigger removal (+2.6%) |
+| **v2.12.46.0** | **1,284 claims/sec** | Provider cache (+558%) |
 
 ### Key Optimizations Applied
 
-1. **Removed Provider Advisory Locks** - Advisory locks caused 96% failure rate when multiple workers processed claims with the same provider NPI. The `ensure_provider_exists` function uses `INSERT ON CONFLICT DO NOTHING` which is safe for concurrent access.
+1. **Provider Cache (v2.12.46.0)** - In-memory NPI → provider_id cache eliminates redundant DB upserts. Same provider NPI appearing up to 16 times per encounter (4 encounter-level + 4 per service line × ~3 lines) now only hits DB once. **This single optimization delivered 558% improvement.**
 
-2. **Simplified FIFO Batch Acquisition** - Replaced complex CTE-based encounter grouping with simple FIFO-ordered claim acquisition using `FOR UPDATE SKIP LOCKED`.
+2. **Removed sync_encounter_totals Triggers (v2.12.45.0)** - Dropped triggers that fired for every service line INSERT, eliminating ~60,000 extra DB operations for 10k claims.
 
-3. **Per-Encounter Transactions** - Each encounter has its own transaction; failures don't cascade to other encounters in the batch.
+3. **Removed Provider Advisory Locks** - Advisory locks caused 96% failure rate when multiple workers processed claims with the same provider NPI. The `ensure_provider_exists` function uses `INSERT ON CONFLICT DO UPDATE` which is safe for concurrent access.
 
-4. **Parser Logging Optimization** - Downgraded loop debug logging from INFO to DEBUG level, eliminating 80,000+ log entries per 10k claims.
+4. **Simplified FIFO Batch Acquisition** - Replaced complex CTE-based encounter grouping with simple FIFO-ordered claim acquisition using `FOR UPDATE SKIP LOCKED`.
 
-5. **PostgreSQL Configuration** - Enabled autovacuum, reduced work_mem from 512MB to 64MB, configured synchronous_commit=off for throughput.
+5. **Per-Encounter Transactions** - Each encounter has its own transaction; failures don't cascade to other encounters in the batch.
+
+6. **Parser Logging Optimization** - Downgraded loop debug logging from INFO to DEBUG level, eliminating 80,000+ log entries per 10k claims.
+
+7. **PostgreSQL Configuration** - Enabled autovacuum, reduced work_mem from 512MB to 64MB, configured synchronous_commit=off for throughput.
+
+8. **Optimal Default Configuration (v2.12.44.0)** - Set `STAGE2_WORKER_COUNT=8` and `BATCH_SIZE=750` as installer defaults.
 
 ## Performance Targets
 
@@ -547,7 +561,7 @@ typeperf "\PhysicalDisk(_Total)\Disk Reads/sec" "\PhysicalDisk(_Total)\Disk Writ
 
 ## Performance Benchmarking Results
 
-### v2.12.21.0 Benchmark (December 2025)
+### v2.12.46.0 Benchmark (December 29, 2025) - CURRENT
 
 ```
 System Configuration:
@@ -556,41 +570,57 @@ System Configuration:
 - Workers: 8 concurrent
 
 Configuration:
-- BATCH_SIZE: 100
-- MAX_CONCURRENT_BATCHES: 4
+- STAGE2_WORKER_COUNT: 8
+- BATCH_SIZE: 750
 - DB_MAX_CONNECTIONS: 100
 
 Test Data:
-- 10,000 claims (29,626 service lines)
+- 9,971 claims processed
 - ~3 service lines per claim average
-- Single billing provider NPI (stress test)
+- EDI 837P professional claims
+
+Performance Results:
+- Throughput: 1,284 claims/sec (192.8% of target)
+- Processing Time: 7.76 seconds
+- Success Rate: 99.7%+
+- SRD Target: ✅ ACHIEVED (10k claims in <15s)
+
+Key Optimizations:
+- Provider NPI → provider_id cache (558% improvement)
+- sync_encounter_totals triggers removed
+- Batch INSERT for diagnoses and diagnosis pointers
+
+Status: ✅ Significantly exceeds target (666 claims/sec)
+```
+
+### v2.12.21.0 Benchmark (Historical Reference)
+
+```
+Configuration:
+- BATCH_SIZE: 100
+- MAX_CONCURRENT_BATCHES: 4
 
 Performance Results:
 - Throughput: 822.5 claims/sec (123.5% of target)
 - Processing Time: 36.02 seconds
 - Success Rate: 98.7% (9,871 completed)
-- Failed: 129 (future DOS dates in test data)
-- Sustained Rate: 290-340 encounters/sec (870-1,020 claims/sec)
 
-PostgreSQL Settings:
-- shared_buffers: 1GB
-- effective_cache_size: 4GB
-- work_mem: 64MB
-- synchronous_commit: off
-- autovacuum: on
-
-Status: ✅ Exceeds target (666 claims/sec)
+Status: ✅ Exceeded target (superseded by v2.12.46.0)
 ```
 
 ### Key Learnings
 
-1. **Avoid Advisory Locks on Shared Resources** - Provider NPIs are shared across many claims. Advisory locks caused 96% failure rate when 8 workers competed for the same provider.
+1. **Cache Shared Resources** - Provider NPIs repeat across many claims. Caching provider_id after first DB lookup eliminated ~150,000 redundant queries for 10k claims. This was the single biggest optimization (558% improvement).
 
-2. **Use INSERT ON CONFLICT for Concurrent Inserts** - `INSERT ON CONFLICT DO NOTHING` is safe for concurrent access without locks.
+2. **Remove Redundant Triggers** - Database triggers that recalculate values already computed in application code add unnecessary overhead. The sync_encounter_totals triggers were firing 3x per encounter for values already calculated in Rust.
 
-3. **Keep Autovacuum Enabled** - Disabling autovacuum caused 717k dead tuples and 71x table bloat.
+3. **Avoid Advisory Locks on Shared Resources** - Provider NPIs are shared across many claims. Advisory locks caused 96% failure rate when 8 workers competed for the same provider.
 
-4. **Reduce work_mem for High Concurrency** - 512MB work_mem with 300 connections could exhaust 150GB+ RAM.
+4. **Use INSERT ON CONFLICT for Concurrent Inserts** - `INSERT ON CONFLICT DO UPDATE` is safe for concurrent access without locks.
+
+5. **Keep Autovacuum Enabled** - Disabling autovacuum caused 717k dead tuples and 71x table bloat.
+
+6. **Reduce work_mem for High Concurrency** - 512MB work_mem with 300 connections could exhaust 150GB+ RAM.
 
 ## Next Steps
 

@@ -2,7 +2,7 @@
 
 use crate::segments::*;
 use crate::types::*;
-use pro_common::{Error, Result, DEFAULT_DATE};
+use pro_common::{Result, DEFAULT_DATE};
 
 /// Helper function to write debug output to file
 /// Falls back to using tracing::info! if file write fails

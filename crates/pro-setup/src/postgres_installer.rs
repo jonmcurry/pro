@@ -2,10 +2,13 @@
 //!
 //! This module provides utilities for downloading and installing PostgreSQL on Windows.
 //! Note: Actual implementation would require elevated privileges and careful handling.
+//! Reserved for future auto-installation feature.
 
 use anyhow::Result;
 
 /// Check if PostgreSQL is installed
+/// Reserved for future auto-installation feature
+#[allow(dead_code)]
 pub fn is_postgres_installed() -> bool {
     // Check common installation directories
     let common_paths = vec![
@@ -33,6 +36,9 @@ pub fn is_postgres_installed() -> bool {
 /// - Verify checksum
 /// - Save to temp directory
 /// - Return path to installer
+///
+/// Reserved for future auto-installation feature
+#[allow(dead_code)]
 pub async fn download_postgresql_installer() -> Result<std::path::PathBuf> {
     // This would be a full implementation in production
     // For now, return an error directing users to manual installation
@@ -48,6 +54,9 @@ pub async fn download_postgresql_installer() -> Result<std::path::PathBuf> {
 /// - Configure PostgreSQL with defaults
 /// - Start the PostgreSQL service
 /// - Create initial database and user
+///
+/// Reserved for future auto-installation feature
+#[allow(dead_code)]
 pub fn install_postgresql_silent(_installer_path: &std::path::Path) -> Result<()> {
     // This would be a full implementation in production
     // For now, return an error

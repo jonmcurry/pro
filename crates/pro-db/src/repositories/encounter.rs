@@ -1,6 +1,5 @@
 use crate::models::{Encounter, EncounterDiagnosis};
 use crate::DbPool;
-use chrono::NaiveDate;
 use pro_common::{Error, Result};
 use sqlx::{query, query_as, Row};
 
@@ -48,76 +47,6 @@ impl<'a> EncounterRepository<'a> {
         })
     }
 
-    /// List encounters by organization
-    pub async fn list_by_organization(&self, organization_id: i64, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
-        query_as::<_, Encounter>(
-            r#"
-            SELECT * FROM claims.encounter
-            WHERE organization_id = $1
-            AND is_active = true
-            AND soft_deleted = false
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(organization_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool)
-        .await
-        .map_err(Error::Database)
-    }
-
-    /// List encounters by facility
-    pub async fn list_by_facility(&self, facility_id: i64, limit: i64, offset: i64) -> Result<Vec<Encounter>> {
-        query_as::<_, Encounter>(
-            r#"
-            SELECT * FROM claims.encounter
-            WHERE facility_id = $1
-            AND is_active = true
-            AND soft_deleted = false
-            ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(facility_id)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool)
-        .await
-        .map_err(Error::Database)
-    }
-
-    /// List encounters by date range
-    pub async fn list_by_date_range(
-        &self,
-        organization_id: i64,
-        from_date: NaiveDate,
-        to_date: NaiveDate,
-        limit: i64,
-        offset: i64,
-    ) -> Result<Vec<Encounter>> {
-        query_as::<_, Encounter>(
-            r#"
-            SELECT * FROM claims.encounter
-            WHERE organization_id = $1
-            AND date_of_service_from >= $2
-            AND date_of_service_from <= $3
-            AND is_active = true
-            AND soft_deleted = false
-            ORDER BY date_of_service_from DESC, created_at DESC
-            LIMIT $4 OFFSET $5
-            "#,
-        )
-        .bind(organization_id)
-        .bind(from_date)
-        .bind(to_date)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(self.pool)
-        .await
-        .map_err(Error::Database)
-    }
 
     /// Create a new encounter
     pub async fn create(&self, encounter: &Encounter) -> Result<i64> {

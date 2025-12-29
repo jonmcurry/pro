@@ -1,7 +1,6 @@
 //! Data models for master data entities
 
 use serde::{Deserialize, Serialize};
-use sqlx::types::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Organization {

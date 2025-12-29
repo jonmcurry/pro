@@ -375,5 +375,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "setup_smartproaudit_fdw",
             sql: include_str!("../../../migrations/069_setup_smartproaudit_fdw.sql"),
         },
+        EmbeddedMigration {
+            version: "070",
+            name: "drop_encounter_totals_trigger",
+            sql: include_str!("../../../migrations/070_drop_encounter_totals_trigger.sql"),
+        },
     ]
 }

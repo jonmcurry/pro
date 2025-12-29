@@ -6,9 +6,9 @@
 use crate::converters;
 use crate::types::ClaimProcessingResult;
 use chrono::Utc;
-use pro_common::{Error, Result};
+use pro_common::Result;
 use pro_db::{
-    models::{Encounter, EncounterDiagnosis, ServiceLine},
+    models::{EncounterDiagnosis, ServiceLine},
     repositories::{EncounterRepository, ServiceLineRepository},
     BusinessRuleValidator, PatientControlNumberValidator, ServiceLineValidator,
 };

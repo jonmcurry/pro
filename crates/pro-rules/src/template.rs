@@ -4,15 +4,13 @@
 // Each template defines a pattern (e.g., threshold check, duplicate detection)
 // and accepts JSON parameters to customize behavior.
 
-use crate::flag_types::{FlagContext, FlagIssueType};
-use crate::rule_engine::{Rule, RuleExecutionContext, RuleResult};
-use async_trait::async_trait;
+use crate::flag_types::FlagIssueType;
+use crate::rule_engine::Rule;
 use pro_common::{Error, Result};
 use regex::Regex;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
 

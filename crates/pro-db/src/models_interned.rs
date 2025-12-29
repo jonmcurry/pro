@@ -8,7 +8,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use pro_common::{InternedString, StringInterner};
 use rust_decimal::Decimal;
-use serde::{Deserialize, Serialize};
 
 
 use crate::models::ServiceLine;

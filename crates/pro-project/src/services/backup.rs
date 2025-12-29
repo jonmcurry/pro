@@ -78,6 +78,8 @@ impl BackupService {
     }
 
     /// Verify a backup file integrity
+    /// Reserved for future restore validation feature
+    #[allow(dead_code)]
     pub fn verify(&self, backup_path: &str) -> Result<bool> {
         // Use pg_restore --list to verify backup integrity
         let output = Command::new("pg_restore")
@@ -90,6 +92,8 @@ impl BackupService {
     }
 
     /// List all backups in the backup directory
+    /// Reserved for future backup management UI
+    #[allow(dead_code)]
     pub fn list_backups(&self) -> Result<Vec<BackupInfo>> {
         let mut backups = Vec::new();
 
@@ -138,7 +142,10 @@ pub struct BackupResult {
     pub duration_secs: u64,
 }
 
+/// Backup metadata for listing
+/// Reserved for future backup management UI
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct BackupInfo {
     pub path: PathBuf,
     pub database_name: String,

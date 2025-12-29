@@ -3,7 +3,7 @@
 use crate::flag_types::FlagIssueType;
 use crate::rule_engine::{Rule, RuleEngine};
 use crate::rules::*;
-use crate::template::{RuleTemplate, TemplateRegistry};
+use crate::template::RuleTemplate;
 use crate::templates::*;
 use pro_common::{Error, Result};
 use rust_decimal::Decimal;

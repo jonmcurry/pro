@@ -40,6 +40,8 @@ impl WebSocketState {
     }
 
     /// Get the broadcaster (for ProgressTracker)
+    /// Reserved for future progress tracking integration
+    #[allow(dead_code)]
     pub fn broadcaster(&self) -> broadcast::Sender<ProgressEvent> {
         self.progress_broadcaster.clone()
     }
@@ -148,7 +150,7 @@ async fn handle_socket(socket: WebSocket, queue_id: i64, state: Arc<WebSocketSta
                     info!("Client closed WebSocket for queue_id: {}", queue_id);
                     break;
                 }
-                Message::Ping(data) => {
+                Message::Ping(_data) => {
                     // Axum automatically handles pong responses
                     info!("Received ping with data for queue_id: {}", queue_id);
                 }

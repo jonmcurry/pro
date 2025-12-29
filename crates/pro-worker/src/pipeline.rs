@@ -26,7 +26,9 @@ pub struct IngestionPipeline {
     pool: PgPool,
     rule_engine: RuleEngine,
     payment_calculator: PaymentCalculator,
-    facility_id: Option<i64>, // For facility-specific rule loading
+    /// Reserved for future facility-specific rule loading feature
+    #[allow(dead_code)]
+    facility_id: Option<i64>,
 }
 
 impl IngestionPipeline {
@@ -637,6 +639,8 @@ impl IngestionPipeline {
     }
 
     /// Extract diagnosis codes from CSV row - delegates to converters module
+    /// Reserved for future direct CSV diagnosis extraction
+    #[allow(dead_code)]
     fn extract_diagnoses_from_csv(
         &self,
         csv_row: &pro_parser_csv::parser::ParsedRow,
@@ -645,6 +649,8 @@ impl IngestionPipeline {
     }
 
     /// Extract service lines from CSV row - delegates to converters module
+    /// Reserved for future direct CSV service line extraction
+    #[allow(dead_code)]
     fn extract_service_lines_from_csv(
         &self,
         csv_row: &pro_parser_csv::parser::ParsedRow,
@@ -920,6 +926,8 @@ impl IngestionPipeline {
     }
 
     /// Process a single claim within an existing transaction (PHASE 2 OPTIMIZATION)
+    /// Superseded by process_claim_in_transaction_with_caches for better performance
+    #[allow(dead_code)]
     async fn process_claim_in_transaction(
         &self,
         claim: &pro_parser_edi::types::ParsedClaim,

@@ -145,8 +145,10 @@ Function WriteConfig()
     configFile.WriteLine "WEBSOCKET_HOST=127.0.0.1:8080"
     configFile.WriteLine ""
     configFile.WriteLine "# Worker Configuration"
-    configFile.WriteLine "WORKER_THREADS=4"
-    configFile.WriteLine "BATCH_SIZE=100"
+    configFile.WriteLine "# STAGE2_WORKER_COUNT: Number of parallel workers for Stage 2 processing (default: 8)"
+    configFile.WriteLine "# BATCH_SIZE: Claims per batch for processing (default: 750, proven optimal for 666+ claims/sec)"
+    configFile.WriteLine "STAGE2_WORKER_COUNT=8"
+    configFile.WriteLine "BATCH_SIZE=750"
 
     configFile.Close
     On Error GoTo 0

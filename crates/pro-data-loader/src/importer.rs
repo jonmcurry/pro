@@ -331,7 +331,8 @@ async fn import_providers(
     let mut count = 0;
 
     for provider in providers {
-        let facility = facility_map
+        // Validate facility exists (required for provider import)
+        let _facility = facility_map
             .get(&provider.facility_code)
             .context(format!("Facility '{}' not found in map", provider.facility_code))?;
 

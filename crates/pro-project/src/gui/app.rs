@@ -2,11 +2,16 @@ use eframe::egui;
 use tokio::sync::mpsc;
 use chrono::{DateTime, Utc};
 
+/// Project status for display in the GUI
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectStatus {
     UpToDate,
     PendingUpgrade(u32),
+    /// Reserved for future error state display
+    #[allow(dead_code)]
     Error(String),
+    /// Reserved for future async checking state
+    #[allow(dead_code)]
     Checking,
 }
 
@@ -21,7 +26,10 @@ impl std::fmt::Display for ProjectStatus {
     }
 }
 
+/// Data model for project rows displayed in the GUI data grid.
+/// Fields are populated from database queries and used by the UI table renderer.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ProjectRow {
     pub id: i32,
     pub project_name: String,
@@ -60,7 +68,9 @@ impl LogEntry {
     }
 }
 
+/// Messages sent from background tasks to the GUI thread
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum TaskMessage {
     Log(LogLevel, String),
     ProjectsLoaded(Result<Vec<ProjectRow>, String>),

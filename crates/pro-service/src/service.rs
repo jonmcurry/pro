@@ -22,10 +22,12 @@ use windows_service::{
 /// Service name (short name used by SCM)
 pub const SERVICE_NAME: &str = "ProfessionalSMART";
 
-/// Service display name
+/// Default service display name (for reference - install_service takes this as a parameter)
+#[allow(dead_code)]
 const SERVICE_DISPLAY_NAME: &str = "Professional SMART Claims Processing Service";
 
-/// Service description
+/// Default service description (for reference - install_service takes this as a parameter)
+#[allow(dead_code)]
 const SERVICE_DESCRIPTION: &str = "Automated claims processing, validation, and flagging system for healthcare providers. Processes EDI 837p and CSV claim files with comprehensive rules engine and RVU-based payment calculations.";
 
 /// Main service run loop
@@ -456,7 +458,7 @@ pub fn run_service() -> Result<()> {
         // Create channels for communication
         // NOTE: Using mpsc (multi-producer single-consumer) for batch distribution
         // Each batch should go to ONLY ONE worker to avoid duplicate processing
-        let (batch_tx, mut batch_rx) = mpsc::channel::<crate::batch_sequencer::SequencedBatch>(100);
+        let (batch_tx, batch_rx) = mpsc::channel::<crate::batch_sequencer::SequencedBatch>(100);
         let (result_tx, result_rx) = mpsc::channel::<crate::batch_sequencer::BatchResult>(100);
         let (shutdown_tx_acquirer, shutdown_rx_acquirer) = mpsc::channel::<()>(1);
         let (shutdown_tx_completion, shutdown_rx_completion) = mpsc::channel::<()>(1);

@@ -4,6 +4,10 @@ use sqlx::Row;
 use pro_upgrade_manager::embedded_migrations;
 
 /// Service for PostgreSQL database operations
+///
+/// Note: Each method creates a fresh connection for simplicity and safety.
+/// This is acceptable for project management operations which are infrequent.
+/// For high-throughput claims processing, use pro_db::connection::create_pool().
 pub struct DatabaseService {
     host: String,
     port: u16,

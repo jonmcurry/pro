@@ -3,7 +3,6 @@
 use crate::mapping::TransformationType;
 use chrono::NaiveDate;
 use pro_common::{Error, Result};
-use regex::Regex;
 
 /// Apply transformation to a field value
 pub fn apply_transformation(value: &str, transformation: &TransformationType) -> Result<String> {

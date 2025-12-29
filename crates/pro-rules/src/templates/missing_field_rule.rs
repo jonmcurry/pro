@@ -11,7 +11,7 @@ use crate::flag_types::FlagIssueType;
 use crate::rule_engine::{Rule, RuleExecutionContext, RuleResult};
 use crate::template::{get_string_array_param, ParameterSchema, RuleTemplate};
 use async_trait::async_trait;
-use pro_common::{Error, Result};
+use pro_common::Result;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::sync::Arc;

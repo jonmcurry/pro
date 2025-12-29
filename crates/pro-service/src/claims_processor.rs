@@ -9,7 +9,6 @@
 //! - Stage 2: staging.raw_claims -> encounters/errors (validated processing) - THIS MODULE
 
 use anyhow::{Context, Result};
-use pro_common::DEFAULT_DATE;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -74,6 +73,9 @@ pub struct ClaimsProcessor {
     taxonomy_cache: Arc<RwLock<HashMap<String, String>>>,
     /// Flag to track if cache has been loaded
     taxonomy_cache_loaded: Arc<RwLock<bool>>,
+    /// Cache of NPI -> provider_id for avoiding redundant DB upserts
+    /// PERFORMANCE: Reduces ~16 provider DB calls per encounter to only unique NPIs
+    provider_cache: Arc<RwLock<HashMap<String, i64>>>,
 }
 
 impl ClaimsProcessor {
@@ -83,6 +85,7 @@ impl ClaimsProcessor {
             pool,
             taxonomy_cache: Arc::new(RwLock::new(HashMap::new())),
             taxonomy_cache_loaded: Arc::new(RwLock::new(false)),
+            provider_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -842,7 +845,10 @@ impl ClaimsProcessor {
                 None,
                 rendering_provider_taxonomy.as_deref(),
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring rendering provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -857,7 +863,10 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring referring provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -872,7 +881,10 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring supervising provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -900,7 +912,10 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring billing provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -1232,6 +1247,7 @@ impl ClaimsProcessor {
     }
 
     /// Import COB payers from other_insurance JSON into encounter_payer table
+    /// Optimized: Uses batch INSERT instead of individual inserts per payer (N+1 fix)
     async fn import_encounter_payers_from_cob(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1268,57 +1284,123 @@ impl ClaimsProcessor {
             return Ok(());
         }
 
-        debug!("[COB] Inserting {} COB payers into encounter_payer for encounter_id={}",
-            other_insurance_array.len(), encounter_id);
+        // Collect valid payer records for batch insert
+        struct PayerRecord {
+            payer_resp: String,
+            payer_id: Option<String>,
+            payer_name: Option<String>,
+            claim_filing_indicator: Option<String>,
+            paid_amount: Option<rust_decimal::Decimal>,
+            claim_control_number: Option<String>,
+        }
+
+        let mut payers: Vec<PayerRecord> = Vec::with_capacity(other_insurance_array.len());
 
         for oi in &other_insurance_array {
             let payer_resp_seq = oi.get("payer_responsibility_sequence")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty());
-            let payer_id = oi.get("payer_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_name = oi.get("payer_name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let claim_filing_indicator = oi.get("claim_filing_indicator")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let paid_amount: Option<rust_decimal::Decimal> = oi.get("paid_amount")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .and_then(|s| s.parse().ok());
-            let claim_control_number = oi.get("claim_control_number")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
 
             // Skip if no payer_responsibility_sequence (required field)
             let payer_resp = match payer_resp_seq {
-                Some(p) => p,
+                Some(p) => p.to_string(),
                 None => {
                     warn!("[COB] Skipping COB payer with missing payer_responsibility_sequence");
                     continue;
                 }
             };
 
-            self.insert_encounter_payer(
-                tx,
-                encounter_id,
+            payers.push(PayerRecord {
                 payer_resp,
+                payer_id: oi.get("payer_id")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                payer_name: oi.get("payer_name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                claim_filing_indicator: oi.get("claim_filing_indicator")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+                paid_amount: oi.get("paid_amount")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .and_then(|s| s.parse().ok()),
+                claim_control_number: oi.get("claim_control_number")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| s.to_string()),
+            });
+        }
+
+        if payers.is_empty() {
+            return Ok(());
+        }
+
+        debug!("[COB] Batch inserting {} COB payers into encounter_payer for encounter_id={}",
+            payers.len(), encounter_id);
+
+        // Build batch INSERT with multiple VALUES tuples
+        // Each payer needs 9 params: encounter_id, payer_resp, payer_id, payer_name,
+        // claim_filing_indicator, is_billing_payer, paid_amount, claim_control_number, billing_provider_id
+        let values_per_row = 9;
+        let value_placeholders: Vec<String> = (0..payers.len())
+            .map(|i| {
+                let base = i * values_per_row;
+                format!(
+                    "(${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                    base + 1, base + 2, base + 3, base + 4, base + 5,
+                    base + 6, base + 7, base + 8, base + 9
+                )
+            })
+            .collect();
+
+        let query = format!(
+            r#"
+            INSERT INTO claims.encounter_payer (
+                encounter_id,
+                payer_responsibility_code,
                 payer_id,
                 payer_name,
                 claim_filing_indicator,
-                false, // is_billing_payer = false for COB payers
+                is_billing_payer,
                 paid_amount,
                 claim_control_number,
-                billing_provider_id,
-            ).await?;
+                billing_provider_id
+            )
+            VALUES {}
+            "#,
+            value_placeholders.join(", ")
+        );
+
+        let mut query_builder = sqlx::query(&query);
+
+        for payer in &payers {
+            query_builder = query_builder
+                .bind(encounter_id)
+                .bind(&payer.payer_resp)
+                .bind(&payer.payer_id)
+                .bind(&payer.payer_name)
+                .bind(&payer.claim_filing_indicator)
+                .bind(false) // is_billing_payer = false for COB payers
+                .bind(payer.paid_amount)
+                .bind(&payer.claim_control_number)
+                .bind(billing_provider_id);
         }
+
+        query_builder.execute(&mut **tx)
+            .await
+            .context("Failed to batch insert encounter_payer records")?;
+
+        debug!("[COB] Batch inserted {} COB payers for encounter_id={}", payers.len(), encounter_id);
 
         Ok(())
     }
 
     /// Import other insurance records from encounter_fields JSON
+    /// Optimized: Uses batch INSERT instead of individual inserts per record (N+1 fix)
     async fn import_other_insurance(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -1344,127 +1426,163 @@ impl ClaimsProcessor {
             return Ok(());
         }
 
-        debug!("[COB] Inserting {} other_insurance records for encounter_id={}",
-            other_insurance_array.len(), encounter_id);
+        // Collect valid records for batch insert
+        struct OtherInsuranceRecord {
+            payer_resp: String,
+            individual_rel_code: Option<String>,
+            group_policy_number: Option<String>,
+            group_name: Option<String>,
+            insurance_type_code: Option<String>,
+            coordination_benefits_code: Option<String>,
+            claim_filing_indicator: Option<String>,
+            payer_id: Option<String>,
+            payer_name: Option<String>,
+            payer_address_line1: Option<String>,
+            payer_address_line2: Option<String>,
+            payer_city: Option<String>,
+            payer_state: Option<String>,
+            payer_postal_code: Option<String>,
+            paid_amount: Option<rust_decimal::Decimal>,
+            claim_control_number: Option<String>,
+            benefits_assignment: Option<String>,
+            release_of_info: Option<String>,
+        }
+
+        let mut records: Vec<OtherInsuranceRecord> = Vec::with_capacity(other_insurance_array.len());
 
         for oi in &other_insurance_array {
             let payer_resp_seq = oi.get("payer_responsibility_sequence")
                 .and_then(|v| v.as_str())
                 .filter(|s| !s.is_empty());
-            let individual_rel_code = oi.get("individual_relationship_code")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let group_policy_number = oi.get("group_policy_number")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let group_name = oi.get("group_name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let insurance_type_code = oi.get("insurance_type_code")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let coordination_benefits_code = oi.get("coordination_benefits_code")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let claim_filing_indicator = oi.get("claim_filing_indicator")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_id = oi.get("payer_id")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_name = oi.get("payer_name")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_address_line1 = oi.get("payer_address_line1")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_address_line2 = oi.get("payer_address_line2")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_city = oi.get("payer_city")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_state = oi.get("payer_state")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let payer_postal_code = oi.get("payer_postal_code")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let paid_amount: Option<rust_decimal::Decimal> = oi.get("paid_amount")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty())
-                .and_then(|s| s.parse().ok());
-            let claim_control_number = oi.get("claim_control_number")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let benefits_assignment = oi.get("benefits_assignment_certification")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
-            let release_of_info = oi.get("release_of_information_code")
-                .and_then(|v| v.as_str())
-                .filter(|s| !s.is_empty());
 
             // Skip if no payer_responsibility_sequence (required field)
             let payer_resp = match payer_resp_seq {
-                Some(p) => p,
+                Some(p) => p.to_string(),
                 None => {
                     warn!("[COB] Skipping other_insurance record with missing payer_responsibility_sequence");
                     continue;
                 }
             };
 
-            sqlx::query(
-                r#"
-                INSERT INTO claims.other_insurance (
-                    encounter_id,
-                    payer_responsibility_sequence,
-                    individual_relationship_code,
-                    group_policy_number,
-                    group_name,
-                    insurance_type_code,
-                    coordination_benefits_code,
-                    claim_filing_indicator,
-                    payer_id,
-                    payer_name,
-                    payer_address_line1,
-                    payer_address_line2,
-                    payer_city,
-                    payer_state,
-                    payer_postal_code,
-                    paid_amount,
-                    claim_control_number,
-                    benefits_assignment_certification,
-                    release_of_information_code
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-                "#
-            )
-            .bind(encounter_id)
-            .bind(payer_resp)
-            .bind(individual_rel_code)
-            .bind(group_policy_number)
-            .bind(group_name)
-            .bind(insurance_type_code)
-            .bind(coordination_benefits_code)
-            .bind(claim_filing_indicator)
-            .bind(payer_id)
-            .bind(payer_name)
-            .bind(payer_address_line1)
-            .bind(payer_address_line2)
-            .bind(payer_city)
-            .bind(payer_state)
-            .bind(payer_postal_code)
-            .bind(paid_amount)
-            .bind(claim_control_number)
-            .bind(benefits_assignment)
-            .bind(release_of_info)
-            .execute(&mut **tx)
-            .await
-            .context("Failed to insert other_insurance record")?;
-
-            debug!("[COB] Inserted other_insurance: payer_resp={}, payer_id={:?}, payer_name={:?}, paid_amount={:?}",
-                payer_resp, payer_id, payer_name, paid_amount);
+            records.push(OtherInsuranceRecord {
+                payer_resp,
+                individual_rel_code: oi.get("individual_relationship_code")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                group_policy_number: oi.get("group_policy_number")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                group_name: oi.get("group_name")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                insurance_type_code: oi.get("insurance_type_code")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                coordination_benefits_code: oi.get("coordination_benefits_code")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                claim_filing_indicator: oi.get("claim_filing_indicator")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_id: oi.get("payer_id")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_name: oi.get("payer_name")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_address_line1: oi.get("payer_address_line1")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_address_line2: oi.get("payer_address_line2")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_city: oi.get("payer_city")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_state: oi.get("payer_state")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                payer_postal_code: oi.get("payer_postal_code")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                paid_amount: oi.get("paid_amount")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).and_then(|s| s.parse().ok()),
+                claim_control_number: oi.get("claim_control_number")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                benefits_assignment: oi.get("benefits_assignment_certification")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                release_of_info: oi.get("release_of_information_code")
+                    .and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+            });
         }
+
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        debug!("[COB] Batch inserting {} other_insurance records for encounter_id={}",
+            records.len(), encounter_id);
+
+        // Build batch INSERT with multiple VALUES tuples (19 columns per row)
+        let values_per_row = 19;
+        let value_placeholders: Vec<String> = (0..records.len())
+            .map(|i| {
+                let base = i * values_per_row;
+                format!(
+                    "(${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                    base + 1, base + 2, base + 3, base + 4, base + 5, base + 6, base + 7,
+                    base + 8, base + 9, base + 10, base + 11, base + 12, base + 13, base + 14,
+                    base + 15, base + 16, base + 17, base + 18, base + 19
+                )
+            })
+            .collect();
+
+        let query = format!(
+            r#"
+            INSERT INTO claims.other_insurance (
+                encounter_id,
+                payer_responsibility_sequence,
+                individual_relationship_code,
+                group_policy_number,
+                group_name,
+                insurance_type_code,
+                coordination_benefits_code,
+                claim_filing_indicator,
+                payer_id,
+                payer_name,
+                payer_address_line1,
+                payer_address_line2,
+                payer_city,
+                payer_state,
+                payer_postal_code,
+                paid_amount,
+                claim_control_number,
+                benefits_assignment_certification,
+                release_of_information_code
+            )
+            VALUES {}
+            "#,
+            value_placeholders.join(", ")
+        );
+
+        let mut query_builder = sqlx::query(&query);
+
+        for rec in &records {
+            query_builder = query_builder
+                .bind(encounter_id)
+                .bind(&rec.payer_resp)
+                .bind(&rec.individual_rel_code)
+                .bind(&rec.group_policy_number)
+                .bind(&rec.group_name)
+                .bind(&rec.insurance_type_code)
+                .bind(&rec.coordination_benefits_code)
+                .bind(&rec.claim_filing_indicator)
+                .bind(&rec.payer_id)
+                .bind(&rec.payer_name)
+                .bind(&rec.payer_address_line1)
+                .bind(&rec.payer_address_line2)
+                .bind(&rec.payer_city)
+                .bind(&rec.payer_state)
+                .bind(&rec.payer_postal_code)
+                .bind(rec.paid_amount)
+                .bind(&rec.claim_control_number)
+                .bind(&rec.benefits_assignment)
+                .bind(&rec.release_of_info);
+        }
+
+        query_builder.execute(&mut **tx)
+            .await
+            .context("Failed to batch insert other_insurance records")?;
+
+        debug!("[COB] Batch inserted {} other_insurance records for encounter_id={}",
+            records.len(), encounter_id);
 
         Ok(())
     }
@@ -1746,7 +1864,10 @@ impl ClaimsProcessor {
                 None,
                 rendering_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring rendering provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -1761,7 +1882,10 @@ impl ClaimsProcessor {
                 None,
                 referring_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring referring provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -1776,7 +1900,10 @@ impl ClaimsProcessor {
                 None,
                 supervising_provider_taxonomy,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring supervising provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -1804,7 +1931,10 @@ impl ClaimsProcessor {
                 None,
                 None,
                 Some(organization_id),
-            ).await.unwrap_or(None)
+            ).await.unwrap_or_else(|e| {
+                warn!("Unexpected error ensuring billing provider NPI={}: {:?}", npi, e);
+                None
+            })
         } else {
             None
         };
@@ -3103,6 +3233,10 @@ impl ClaimsProcessor {
     /// - Uses atomic INSERT ... ON CONFLICT DO UPDATE to avoid race conditions
     /// - Savepoints removed for performance (upsert rarely fails with ON CONFLICT)
     /// - Returns Ok(None) on any error - claim proceeds with NULL provider_id
+    ///
+    /// PERFORMANCE: Uses in-memory provider cache to avoid redundant DB upserts.
+    /// Same provider NPI appearing multiple times (billing provider across claims,
+    /// rendering provider on service lines) will only hit DB once.
     async fn ensure_provider_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -3123,6 +3257,16 @@ impl ClaimsProcessor {
         if npi.len() != 10 || !npi.chars().all(|c| c.is_ascii_digit()) {
             warn!("Invalid NPI format: {} (expected 10 digits)", npi);
             return Ok(None);
+        }
+
+        // PERFORMANCE: Check provider cache first to avoid redundant DB upserts
+        // This dramatically reduces DB calls when same provider appears across many claims
+        {
+            let cache = self.provider_cache.read().await;
+            if let Some(&provider_id) = cache.get(npi) {
+                debug!("Provider cache hit: NPI={}, provider_id={}", npi, provider_id);
+                return Ok(Some(provider_id));
+            }
         }
 
         // Prepare values
@@ -3183,6 +3327,12 @@ impl ClaimsProcessor {
         match upsert_result {
             Ok(provider_id) => {
                 debug!("Provider upserted: NPI={}, provider_id={}", npi, provider_id);
+
+                // PERFORMANCE: Cache the provider_id to avoid redundant DB upserts
+                {
+                    let mut cache = self.provider_cache.write().await;
+                    cache.insert(npi.to_string(), provider_id);
+                }
 
                 // Enqueue provider for background NPI enrichment (fire-and-forget)
                 let _ = sqlx::query(

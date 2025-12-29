@@ -125,6 +125,8 @@ impl WindowsServiceManager {
     }
 
     /// Restart the service (stop then start)
+    /// Reserved for future service management UI
+    #[allow(dead_code)]
     pub fn restart() -> Result<()> {
         Self::stop()?;
         thread::sleep(Duration::from_secs(2));

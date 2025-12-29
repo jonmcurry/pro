@@ -3144,7 +3144,10 @@ CREATE TRIGGER validate_encounter_dos
     FOR EACH ROW
     EXECUTE FUNCTION validate_dos();
 
--- Function to automatically calculate encounter totals from service lines
+-- NOTE: sync_encounter_totals triggers REMOVED for performance optimization (v2.12.45.0)
+-- The total_claim_charge_amount is calculated in the Rust application before encounter INSERT.
+-- The triggers caused ~60,000 extra DB operations for 10,000 claims (SELECT SUM + UPDATE per service line).
+-- Function kept for potential manual recalculation if needed.
 CREATE OR REPLACE FUNCTION update_encounter_totals()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -3166,24 +3169,17 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-COMMENT ON FUNCTION update_encounter_totals IS 'Automatically recalculate encounter totals when service lines change';
+COMMENT ON FUNCTION update_encounter_totals IS
+'DEPRECATED: This trigger function is no longer used.
+The total_claim_charge_amount is calculated in the Rust application before encounter INSERT.
+Triggers were removed for performance optimization.
+If you need to recalculate totals for existing data, run:
+UPDATE claims.encounter e SET total_claim_charge_amount = (
+    SELECT COALESCE(SUM(line_item_charge_amount), 0) FROM claims.service_line sl WHERE sl.encounter_id = e.encounter_id
+);';
 
--- Apply trigger to keep encounter totals in sync
-CREATE TRIGGER sync_encounter_totals_insert
-    AFTER INSERT ON claims.service_line
-    FOR EACH ROW
-    EXECUTE FUNCTION update_encounter_totals();
-
-CREATE TRIGGER sync_encounter_totals_update
-    AFTER UPDATE ON claims.service_line
-    FOR EACH ROW
-    WHEN (OLD.line_item_charge_amount IS DISTINCT FROM NEW.line_item_charge_amount)
-    EXECUTE FUNCTION update_encounter_totals();
-
-CREATE TRIGGER sync_encounter_totals_delete
-    AFTER DELETE ON claims.service_line
-    FOR EACH ROW
-    EXECUTE FUNCTION update_encounter_totals();
+-- TRIGGERS REMOVED: sync_encounter_totals_insert, sync_encounter_totals_update, sync_encounter_totals_delete
+-- See migration 070_drop_encounter_totals_trigger.sql for details
 
 -- ====================================================================================
 -- ADDITIONAL PERFORMANCE INDEXES
