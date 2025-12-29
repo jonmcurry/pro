@@ -1,6 +1,6 @@
 # Professional SMART
 
-**Version**: 2.12.46.0 | **Rust Edition**: 2021 | **Min Rust Version**: 1.75
+**Version**: 2.12.47.0 | **Rust Edition**: 2021 | **Min Rust Version**: 1.75
 
 A high-performance healthcare claims processing system for 837P professional claims with automated auditing, rules-based flagging, RVU reimbursement estimation, and COB (Coordination of Benefits) tracking.
 

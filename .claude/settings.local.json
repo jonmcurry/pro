@@ -208,7 +208,9 @@
       "Bash(Get-Content \"C:\\\\Program Files\\\\Professional SMART\\\\logs\\\\service.log\" -Tail 200)",
       "Bash(Select-String -Pattern \"STAGE 2|workers|batch|claims/sec|throughput\" -Context 0,1)",
       "Bash(target\\\\release\\\\pro-upgrade.exe:*)",
-      "Bash(cmd /c \"target\\\\release\\\\pro-upgrade.exe list-pending-migrations\")"
+      "Bash(cmd /c \"target\\\\release\\\\pro-upgrade.exe list-pending-migrations\")",
+      "Bash(dir \"C:\\\\Program Files\\\\Professional SMART\\\\*.exe\")",
+      "Bash(dir \"C:\\\\Program Files\\\\Professional SMART\"\" 2>&1 || powershell -Command \"Get-ChildItem 'C:\\\\Program Files\\\\Professional SMART\\\\' -ErrorAction SilentlyContinue \")"
     ],
     "deny": [],
     "ask": []

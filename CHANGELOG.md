@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.47.0] - 2025-12-29
+
+### Fixed
+- **Windows Server 2019 GUI Compatibility**: Fixed Project Database Manager and Master Data Loader GUI applications not loading on Windows Server 2019
+  - **Root Cause**: The `glow` (OpenGL) backend requires OpenGL 2.0+ which is not available on headless Windows Server environments
+  - **Solution**: Switched to `wgpu` backend which can use DirectX 12 WARP (software renderer) when GPU is unavailable
+  - Files: `pro-project/Cargo.toml`, `pro-data-loader-gui/Cargo.toml`, GUI initialization code updated
+  - Reference: [egui_glow NoAvailablePixelFormat issue](https://github.com/emilk/egui/issues/957)
+
 ## [2.12.46.0] - 2025-12-29
 
 ### Performance

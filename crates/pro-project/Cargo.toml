@@ -35,8 +35,9 @@ tracing-subscriber = { workspace = true }
 # Configuration
 dotenvy = { workspace = true }
 
-# GUI - using glow backend for Windows Server compatibility (software rendering fallback)
-eframe = { version = "0.28", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+# GUI - using wgpu backend for Windows Server 2019 compatibility
+# wgpu can use DirectX 12 WARP (software renderer) when GPU is unavailable
+eframe = { version = "0.28", default-features = false, features = ["default_fonts", "wgpu", "persistence"] }
 egui = "0.28"
 egui_extras = { version = "0.28", features = ["all_loaders"] }
 rfd = "0.14"
