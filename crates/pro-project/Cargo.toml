@@ -35,12 +35,11 @@ tracing-subscriber = { workspace = true }
 # Configuration
 dotenvy = { workspace = true }
 
-# GUI - using wgpu backend for Windows Server 2019 compatibility
-# wgpu can use DirectX 12 WARP (software renderer) when GPU is unavailable
-eframe = { version = "0.28", default-features = false, features = ["default_fonts", "wgpu", "persistence"] }
-egui = "0.28"
-egui_extras = { version = "0.28", features = ["all_loaders"] }
-rfd = "0.14"
+# GUI - Native Windows GUI (NWG) for Windows Server compatibility
+# Uses Win32 GDI controls - no GPU required, works on all Windows versions
+# high-dpi feature enables scale_factor() to return actual DPI scaling ratio
+native-windows-gui = { version = "1.0.13", features = ["list-view", "high-dpi", "rich-textbox"] }
+native-windows-derive = "1.0.5"
 
 # Internal dependencies
 pro-upgrade-manager = { path = "../pro-upgrade-manager" }
@@ -48,3 +47,9 @@ pro-upgrade-manager = { path = "../pro-upgrade-manager" }
 # Windows service control
 [target.'cfg(windows)'.dependencies]
 windows-service = "0.7"
+
+# Build dependency for embedding Windows manifest
+# Required for Common Controls v6 to resolve GetWindowSubclass error
+# See: https://github.com/gabdube/native-windows-gui/issues/251
+[build-dependencies]
+embed-resource = "2.5"

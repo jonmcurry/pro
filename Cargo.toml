@@ -46,7 +46,10 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 
 # Date/Time
-chrono = { version = "0.4", features = ["serde"] }
+# Pin chrono to 0.4.38 - versions 0.4.27+ with windows-iana feature cause
+# GetWindowSubclass conflict with native-windows-gui
+# See: https://github.com/gabdube/native-windows-gui/issues/282
+chrono = { version = "0.4.38", default-features = false, features = ["serde", "std", "clock"] }
 
 # UUIDs
 uuid = { version = "1.11", features = ["serde", "v4"] }
@@ -125,3 +128,4 @@ debug = false
 inherits = "release"
 debug = true
 strip = false
+

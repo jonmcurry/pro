@@ -210,7 +210,17 @@
       "Bash(target\\\\release\\\\pro-upgrade.exe:*)",
       "Bash(cmd /c \"target\\\\release\\\\pro-upgrade.exe list-pending-migrations\")",
       "Bash(dir \"C:\\\\Program Files\\\\Professional SMART\\\\*.exe\")",
-      "Bash(dir \"C:\\\\Program Files\\\\Professional SMART\"\" 2>&1 || powershell -Command \"Get-ChildItem 'C:\\\\Program Files\\\\Professional SMART\\\\' -ErrorAction SilentlyContinue \")"
+      "Bash(dir \"C:\\\\Program Files\\\\Professional SMART\"\" 2>&1 || powershell -Command \"Get-ChildItem 'C:\\\\Program Files\\\\Professional SMART\\\\' -ErrorAction SilentlyContinue \")",
+      "Bash(cargo tree:*)",
+      "Bash(cargo search:*)",
+      "Bash(cargo update:*)",
+      "Bash(candle.exe:*)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -arch x64 -ext WixUtilExtension Product.wxs DatabaseConfigDialog.wxs UpgradeDialog.wxs)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -arch x64 -ext WixUtilExtension Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -arch x64 -ext WixUtilExtension -dSolutionDir=\"C:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" -ext WixUtilExtension -ext WixUIExtension -out ProfessionalSMART.msi Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj)",
+      "Bash(\"/c/Program Files/Professional SMART/bin/pro-data-loader-gui.exe\")",
+      "Bash(powershell -Command \"Stop-Process -Name pro-project -Force -ErrorAction SilentlyContinue; Write-Host ''Done''\")"
     ],
     "deny": [],
     "ask": []

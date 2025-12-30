@@ -1,5 +1,153 @@
 # Changelog
 
+## [2.12.67.0] - 2025-12-30
+
+### Enhanced
+- **GUI Modernization - Full Visual Refresh**: Complete visual overhaul of both GUI applications
+  - **Custom Font System**: Added distinct fonts for different UI elements
+    - Header font: Segoe UI Semibold 15pt for section headers
+    - Body font: Segoe UI 13pt for labels and text
+    - Log font: Consolas 12pt for monospace log display
+  - **Colored Status Indicators**: Traffic light style status colors
+    - Green (Forest Green): Success/Connected/Up to date
+    - Yellow (Dark Goldenrod): Warnings/Pending
+    - Red (Firebrick): Errors/Failed
+    - Blue (Steel Blue): Info/Processing
+  - **RichLabel Status Displays**: Replaced plain Labels with RichLabel for colored, styled status text
+  - **RichTextBox Activity Logs**: Replaced ListBox with RichTextBox for colored, formatted log entries
+    - Log level indicators (INFO, SUCCESS, WARNING, ERROR) now colored and bold
+  - **Improved Layout & Spacing**: Increased margins (16px), larger controls, better visual rhythm
+  - **Files Changed**:
+    - `pro-data-loader-gui/Cargo.toml`: Added `rich-textbox` feature
+    - `pro-data-loader-gui/src/main.rs`: Full modernization
+    - `pro-project/Cargo.toml`: Added `rich-textbox` feature
+    - `pro-project/src/gui/app.rs`: Full modernization
+
+## [2.12.66.0] - 2025-12-30
+
+### Fixed
+- **Project Database Manager Console Window - Complete Fix**: Use FreeConsole to completely detach from console
+  - **Issue**: Previous ShowWindow(SW_HIDE) fix only minimized the console window; it remained visible in taskbar
+  - **Solution**: Changed from `ShowWindow(SW_HIDE)` to `FreeConsole()` which completely detaches the process from its console
+  - **Technical Details**: `FreeConsole()` is the proper Windows API for console detachment - it releases the console rather than just hiding it
+  - **File Changed**: `pro-project/src/gui/mod.rs`
+
+## [2.12.65.0] - 2025-12-30
+
+### Fixed
+- **Project Database Manager Console Window**: Hide console window when running in GUI mode
+  - **Issue**: Black command prompt window appeared behind the GUI window
+  - **Root Cause**: `pro-project` is compiled as a console application (no `windows_subsystem = "windows"`) to support CLI mode
+  - **Solution**: Added `hide_console_window()` function that calls Windows API `ShowWindow(SW_HIDE)` when GUI mode starts
+  - **File Changed**: `pro-project/src/gui/mod.rs`
+
+## [2.12.64.0] - 2025-12-30
+
+### Fixed
+- **NWG GUI DPI Scaling - Feature Flag**: Enabled `high-dpi` feature in native-windows-gui
+  - **Root Cause**: `scale_factor()` returns 1.0 (no scaling) unless `high-dpi` feature is enabled
+  - **Solution**: Added `high-dpi` feature to both GUI crates' Cargo.toml
+  - **Files Changed**:
+    - `pro-data-loader-gui/Cargo.toml`: Added `features = ["high-dpi"]`
+    - `pro-project/Cargo.toml`: Added `features = ["list-view", "high-dpi"]`
+  - **Reference**: https://github.com/gabdube/native-windows-gui/blob/master/native-windows-gui/src/win32/high_dpi.rs
+
+## [2.12.63.0] - 2025-12-30
+
+### Fixed
+- **NWG GUI DPI Scaling**: Implemented runtime DPI-aware layout for both GUI applications
+  - **Root Cause**: Per-Monitor V2 DPI awareness in Windows manifest meant controls received physical pixels, but fixed pixel values designed for 96 DPI were too small at higher DPI settings (125%, 150%, etc.)
+  - **Solution**: Query `nwg::scale_factor()` at runtime and scale all control dimensions proportionally
+  - **Data Loader GUI** (`pro-data-loader-gui`):
+    - Added `apply_dpi_scaling()` function that runs on init
+    - All labels, buttons, text inputs, and layout positions scaled by DPI factor
+    - Base window 880x620 at 96 DPI, scales appropriately at higher DPI
+  - **Project Manager GUI** (`pro-project`):
+    - Added `apply_dpi_scaling()` function that runs on init
+    - Connection controls, toolbar, ListView, and log section all scale properly
+    - ListView column widths also scaled for proper text display
+    - Base window 920x600 at 96 DPI, scales appropriately at higher DPI
+  - **Technical Details**:
+    - Scale factor: 1.0 at 96 DPI (100%), 1.25 at 120 DPI (125%), 1.5 at 144 DPI (150%)
+    - All pixel values multiplied by scale factor at runtime
+    - Windows manifests retained Per-Monitor V2 for crisp text rendering
+
+## [2.12.57.0] - 2025-12-29
+
+### Fixed
+- **NWG GUI Layout Rewrite**: Simplified GUI layout for better rendering
+  - **Project Manager GUI**:
+    - Removed Frame containers that caused black backgrounds
+    - Added ListView `ex_flags` (FULL_ROW_SELECT, GRID) for proper rendering
+    - Simplified layout with all controls directly on window
+    - Reduced window size to 900x600 for better default display
+  - Both GUIs now use flat layout without nested Frame containers
+
+## [2.12.56.0] - 2025-12-29
+
+### Fixed
+- **NWG GUI Layout Issues**: Fixed control sizing and ListView rendering
+  - **Data Loader GUI**: Widened labels and buttons to prevent text truncation
+    - Increased window width from 900 to 950
+    - Widened labels ("Organizations:", "Regions (Optional):", etc.)
+    - Widened action buttons ("Load from Directory...", "Generate Templates...")
+  - **Project Manager GUI**:
+    - Widened toolbar buttons to show full text
+    - Enabled `list-view` feature for `native-windows-gui` to fix black screen where ListView should appear
+
+## [2.12.55.0] - 2025-12-29
+
+### Fixed
+- **NWG FileDialog Filter Format**: Fixed incorrect filter format causing GUI to crash on startup
+  - **Error**: `Failed to build UI: FileDialogError("Bad extension filter format")`
+  - **Root Cause**: NWG FileDialog filter format uses pipe to separate different filters, not pattern repetition
+  - **Solution**: Changed from `"CSV Files (*.csv)|*.csv"` to `"CSV Files(*.csv)|All Files(*.*)"`
+
+## [2.12.54.0] - 2025-12-29
+
+### Fixed
+- **NWG GetWindowSubclass Error - Complete Fix**: Added Windows manifest to resolve "Entry Point Not Found" error
+  - **Error**: `The procedure entry point GetWindowSubclass could not be located in comctl32.dll`
+  - **Root Cause**: `windows-sys` crate (pulled by sqlx via etcetera) requires a manifest declaring Common Controls v6
+  - **Solution**: Embed Windows manifest in both GUI executables using `embed-resource` crate
+  - **Files Added**:
+    - `pro-data-loader-gui/pro-data-loader-gui.exe.manifest`: Common Controls v6 declaration
+    - `pro-data-loader-gui/pro-data-loader-gui-manifest.rc`: Resource file
+    - `pro-data-loader-gui/build.rs`: Build script to embed manifest
+    - `pro-project/pro-project.exe.manifest`: Common Controls v6 declaration
+    - `pro-project/pro-project-manifest.rc`: Resource file
+    - `pro-project/build.rs`: Build script to embed manifest
+  - **Reference**: [NWG Issue #251](https://github.com/gabdube/native-windows-gui/issues/251)
+
+## [2.12.53.0] - 2025-12-29
+
+### Fixed
+- **NWG GetWindowSubclass Error**: Attempted fix by pinning chrono (incomplete - see 2.12.54.0)
+  - **Error**: `The procedure entry point GetWindowSubclass could not be located in comctl32.dll`
+  - **Root Cause**: Conflict between `native-windows-gui` and `chrono` 0.4.27+ which pulls in `windows-targets`
+  - **Solution**: Pin chrono to use `default-features = false` to exclude `windows-iana` feature
+  - **Reference**: [NWG Issue #282](https://github.com/gabdube/native-windows-gui/issues/282)
+
+## [2.12.52.0] - 2025-12-29
+
+### Changed
+- **Windows Server 2019 GUI: Migrated to Native Windows GUI (NWG)**
+  - **Solution**: Replaced egui/eframe (wgpu-based) with Native Windows GUI which uses Win32 GDI controls
+  - **Why**: wgpu/WARP/DX12 still failed on Windows Server 2019 RDS sessions - no GPU adapter available
+  - **NWG Benefits**:
+    - Uses Win32 GDI controls - pure software rendering built into Windows
+    - No GPU/OpenGL/DirectX/Vulkan requirements
+    - Works on all Windows versions (Vista+) including headless Windows Server
+    - Lighter dependencies - no wgpu, winit, or graphics drivers needed
+  - **Files Changed**:
+    - `pro-project/Cargo.toml`: Replaced eframe/egui with native-windows-gui/native-windows-derive
+    - `pro-project/src/gui/mod.rs`: NWG initialization
+    - `pro-project/src/gui/app.rs`: Complete rewrite using NWG controls
+    - `pro-data-loader-gui/Cargo.toml`: Replaced eframe/egui with native-windows-gui
+    - `pro-data-loader-gui/src/main.rs`: Complete rewrite using NWG controls
+  - **Reference**: [Native Windows GUI](https://github.com/gabdube/native-windows-gui)
+  - **Plan Document**: [NWG_GUI_MIGRATION_PLAN.md](docs/NWG_GUI_MIGRATION_PLAN.md)
+
 ## [2.12.51.0] - 2025-12-29
 
 ### Fixed
@@ -11,7 +159,7 @@
     - WARP (Windows Advanced Rasterization Platform) is built into Windows Server 2019
   - **Files**: `pro-project/src/gui/mod.rs`, `pro-data-loader-gui/src/main.rs`
   - **Reference**: [Microsoft WARP Guide](https://learn.microsoft.com/en-us/windows/win32/direct3darticles/directx-warp)
-  - **Note**: If this still fails, the CLI is fully functional (see v2.12.50.0)
+  - **Note**: This did not work - see v2.12.52.0 for the successful NWG solution
 
 ## [2.12.50.0] - 2025-12-29
 
