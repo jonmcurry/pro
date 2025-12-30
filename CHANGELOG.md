@@ -1,5 +1,46 @@
 # Changelog
 
+## [2.12.69.0] - 2025-12-30
+
+### Changed
+- **GUI Framework Migration - egui/eframe**: Migrated both GUI applications from NWG (Native Windows GUI) to egui/eframe with wgpu backend
+  - **Modern Rendering**: Uses wgpu backend with DirectX 11/12 support on Windows
+  - **Cross-Platform Ready**: egui is a cross-platform immediate mode GUI framework
+  - **Consistent Look**: Both Data Loader and Project Database Manager now share the same modern visual style
+  - **Better Compatibility**: Works on Windows Server 2019+ without OpenGL requirements
+  - **Features**:
+    - Smooth scrolling with ScrollArea components
+    - Colored status indicators (green/yellow/red/blue) for success/warning/error/info
+    - Monospace activity log with timestamps
+    - Grid-based data tables with striped rows
+    - Responsive layouts that adapt to window size
+  - **Files Changed**:
+    - `pro-data-loader-gui/Cargo.toml`: Switched from NWG to eframe/egui/wgpu
+    - `pro-data-loader-gui/src/main.rs`: Complete rewrite with egui
+    - `pro-project/Cargo.toml`: Switched from NWG to eframe/egui/wgpu
+    - `pro-project/src/gui/app.rs`: Complete rewrite with egui
+    - `pro-project/src/gui/mod.rs`: Updated for eframe entry point
+    - Removed `build.rs` files (no longer needed without NWG manifest embedding)
+
+## [2.12.68.0] - 2025-12-30
+
+### Enhanced
+- **GUI 2025 UX Polish**: Applied modern design principles for a polished, professional appearance
+  - **Increased Dimensions**: Larger windows with more generous spacing
+    - Data Loader: 920×720 (was 900×680)
+    - Project Manager: 1000×720 (was 960×680)
+  - **Improved Typography**: Larger, more readable fonts with clear hierarchy
+    - Header font: Segoe UI Semibold 17pt (was 15pt)
+    - Body font: Segoe UI 14pt (was 13pt)
+    - Log font: Consolas 13pt (was 12pt)
+  - **Better Spacing**: Increased margins (20px from 16px), row heights (38px), and control heights (28px)
+  - **Fixed Button Truncation**: Widened action buttons (180px from 150px) to fit "Load from Directory..." text
+  - **Comfortable Touch Targets**: Larger button heights (34px) for easier clicking
+  - **Consistent Font Application**: Body font applied to all form labels for uniformity
+  - **Files Changed**:
+    - `pro-data-loader-gui/src/main.rs`: Dimension and font updates
+    - `pro-project/src/gui/app.rs`: Dimension and font updates
+
 ## [2.12.67.0] - 2025-12-30
 
 ### Enhanced
