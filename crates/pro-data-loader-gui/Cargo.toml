@@ -14,11 +14,18 @@ path = "src/main.rs"
 [dependencies]
 pro-data-loader = { path = "../pro-data-loader" }
 anyhow = "1.0"
+# GUI - Native Windows GUI for Windows Server compatibility
+# Uses Win32 GDI controls - no GPU required, works on all Windows versions
+# high-dpi feature enables scale_factor() to return actual DPI scaling ratio
+native-windows-gui = { version = "1.0.13", features = ["high-dpi", "rich-textbox"] }
+native-windows-derive = "1.0.5"
 tokio = { version = "1.40", features = ["rt-multi-thread", "sync"] }
+# Pin chrono without windows-iana to avoid GetWindowSubclass conflict with native-windows-gui
+# See: https://github.com/gabdube/native-windows-gui/issues/282
 chrono = { version = "0.4.38", default-features = false, features = ["serde", "std", "clock"] }
 
-# Modern GUI with egui/eframe using wgpu backend
-# wgpu supports software rendering via llvmpipe/lavapipe on systems without GPU
-eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
-egui = "0.31"
-rfd = "0.15"  # Native file dialogs
+# Build dependency for embedding Windows manifest
+# Required for Common Controls v6 to resolve GetWindowSubclass error
+# See: https://github.com/gabdube/native-windows-gui/issues/251
+[build-dependencies]
+embed-resource = "2.5"
