@@ -1,7 +1,7 @@
 # Foreign Data Wrapper (FDW) How-To Guide
 
-**Version:** 2.12.47.0
-**Last Updated:** 2025-12-29
+**Version:** 2.12.70.1
+**Last Updated:** 2025-12-30
 
 ---
 
@@ -75,11 +75,13 @@ CREATE SERVER smartproaudit_server
 ### Step 3: Create User Mapping
 
 ```sql
--- Map current user to postgres on the foreign server
+-- Map current user to postgres on the foreign server with password authentication
 CREATE USER MAPPING FOR postgres
     SERVER smartproaudit_server
-    OPTIONS (user 'postgres');
+    OPTIONS (user 'postgres', password 'postgres');
 ```
+
+**Note:** The default password is `postgres`. Change this in production environments.
 
 ### Step 4: Create Schema and Foreign Tables
 
@@ -235,9 +237,9 @@ SELECT * FROM pg_foreign_server WHERE srvname = 'smartproaudit_server';
 -- Check user mappings
 SELECT * FROM pg_user_mappings;
 
--- Recreate user mapping if needed
+-- Recreate user mapping if needed (include password for authentication)
 DROP USER MAPPING IF EXISTS FOR postgres SERVER smartproaudit_server;
-CREATE USER MAPPING FOR postgres SERVER smartproaudit_server OPTIONS (user 'postgres');
+CREATE USER MAPPING FOR postgres SERVER smartproaudit_server OPTIONS (user 'postgres', password 'postgres');
 ```
 
 ### Slow Queries on Foreign Tables

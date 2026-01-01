@@ -10313,7 +10313,7 @@ BEGIN
     END IF;
 END $$;
 
--- Create user mapping for postgres user
+-- Create user mapping for postgres user with password authentication
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -10321,7 +10321,7 @@ BEGIN
         WHERE srvname = 'smartproaudit_server' AND usename = current_user
     ) THEN
         EXECUTE format(
-            'CREATE USER MAPPING FOR %I SERVER smartproaudit_server OPTIONS (user ''postgres'')',
+            'CREATE USER MAPPING FOR %I SERVER smartproaudit_server OPTIONS (user ''postgres'', password ''postgres'')',
             current_user
         );
     END IF;

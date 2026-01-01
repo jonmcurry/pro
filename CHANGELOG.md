@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.12.70.1] - 2025-12-30
+
+### Changed
+- **FDW Password Authentication**: Updated Foreign Data Wrapper to use password authentication instead of peer authentication
+  - Added password option to USER MAPPING in migration 069
+  - Updated baseline 000 with the same change
+  - Default credentials: user `postgres`, password `postgres`
+  - Updated FDW_HOWTO.md documentation
+
 ## [2.12.70.0] - 2025-12-30
 
 ### Fixed
