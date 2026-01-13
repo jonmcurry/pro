@@ -504,10 +504,12 @@ impl RuleConverterApp {
 
         let mut success_count = 0;
         let mut error_count = 0;
+        let mut failed_rules: Vec<(String, String)> = Vec::new(); // (rule_code, error_msg)
 
         for rule in rules {
             if rule.definition.is_empty() {
                 sql.push_str(&format!("-- SKIPPED {}: Empty definition\n\n", rule.filter_number));
+                failed_rules.push((rule.filter_number.clone(), "Empty definition".to_string()));
                 error_count += 1;
                 continue;
             }
@@ -519,8 +521,10 @@ impl RuleConverterApp {
                     success_count += 1;
                 }
                 Err(e) => {
-                    sql.push_str(&format!("-- ERROR converting {}: {}\n", rule.filter_number, e));
+                    let error_msg = e.to_string();
+                    sql.push_str(&format!("-- ERROR converting {}: {}\n", rule.filter_number, error_msg));
                     sql.push_str(&format!("-- Definition: {}\n\n", truncate_str(&rule.definition.replace('\n', " "), 200)));
+                    failed_rules.push((rule.filter_number.clone(), error_msg));
                     error_count += 1;
                 }
             }
@@ -529,6 +533,17 @@ impl RuleConverterApp {
         fs::write(path, &sql).map_err(|e| anyhow!("Failed to write file: {}", e))?;
 
         self.log(&format!("Wrote {} bytes to {}", sql.len(), path));
+
+        // Log failed rules to GUI
+        if !failed_rules.is_empty() {
+            self.log("");
+            self.log(&format!("=== {} RULES FAILED ===", failed_rules.len()));
+            for (rule_code, error_msg) in &failed_rules {
+                self.log(&format!("  {} : {}", rule_code, error_msg));
+            }
+            self.log("======================");
+        }
+
         Ok((success_count, error_count))
     }
 

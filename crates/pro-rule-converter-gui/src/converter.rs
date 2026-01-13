@@ -50,6 +50,7 @@ pub struct ParsedRule {
 pub fn parse_filter_def(filter_def: &str) -> Result<(Vec<Condition>, String)> {
     let mut conditions = Vec::new();
     let mut operator = "AND".to_string();
+    let mut unsupported_functions: Vec<String> = Vec::new();
 
     // Remove trailing % if present
     let filter_def = filter_def.trim_end_matches('%').trim();
@@ -66,6 +67,12 @@ pub fn parse_filter_def(filter_def: &str) -> Result<(Vec<Condition>, String)> {
         // Check for FDEF (defines the logical combination)
         if part.starts_with("FDEF=") {
             let fdef = &part[5..];
+
+            // Check for unsupported Parser functions in FDEF
+            if let Some(func_name) = extract_unsupported_function(fdef) {
+                unsupported_functions.push(func_name);
+            }
+
             if fdef.contains("||") {
                 operator = "OR".to_string();
             } else {
@@ -82,10 +89,37 @@ pub fn parse_filter_def(filter_def: &str) -> Result<(Vec<Condition>, String)> {
         // Parse Parser.In expressions
         if let Some(condition) = parse_parser_in(part)? {
             conditions.push(condition);
+        } else if part.contains("Parser.") {
+            // Check for other unsupported Parser functions
+            if let Some(func_name) = extract_unsupported_function(part) {
+                unsupported_functions.push(func_name);
+            }
         }
     }
 
+    // If we found unsupported functions, return a descriptive error
+    if conditions.is_empty() {
+        if !unsupported_functions.is_empty() {
+            return Err(anyhow!("Unsupported Parser function(s): {}", unsupported_functions.join(", ")));
+        }
+        return Err(anyhow!("No Parser.In() conditions found"));
+    }
+
     Ok((conditions, operator))
+}
+
+/// Extract unsupported Parser function name from a string
+fn extract_unsupported_function(s: &str) -> Option<String> {
+    // Match Parser.FunctionName( or Parser.FunctionName()
+    let re = Regex::new(r"Parser\.(\w+)\s*\(").ok()?;
+    if let Some(caps) = re.captures(s) {
+        let func_name = caps.get(1)?.as_str();
+        // Parser.In is supported, others are not
+        if func_name != "In" {
+            return Some(format!("Parser.{}()", func_name));
+        }
+    }
+    None
 }
 
 fn parse_parser_in(part: &str) -> Result<Option<Condition>> {

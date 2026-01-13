@@ -134,6 +134,9 @@ logs/
 *.temp
 *.cache
 
+# Claude Code temporary files
+tmpclaude-*
+
 # Lock files
 *.lock
 !Cargo.lock
