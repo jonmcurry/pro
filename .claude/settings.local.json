@@ -224,7 +224,9 @@
       "Bash(cargo info:*)",
       "Bash(timeout 10:*)",
       "Bash(start ./target/release/pro-data-loader-gui.exe)",
-      "Bash(start:*)"
+      "Bash(start:*)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.71.0\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.71.1\" -NoBuild)"
     ],
     "deny": [],
     "ask": []

@@ -297,7 +297,11 @@ INSERT INTO claims.rule_template (template_code, template_name, template_descrip
 
 ('CROSS_FIELD', 'Cross-Field Comparison', 'Compare two fields against each other', 'CrossFieldRule',
  '{"type": "object", "properties": {"field1": {"type": "string"}, "operator": {"enum": [">", "<", ">=", "<=", "=", "!="]}, "field2": {"type": "string"}}, "required": ["field1", "operator", "field2"]}',
- 'BOTH', 1)
+ 'BOTH', 1),
+
+('COMPOSITE', 'Composite Rule (AND/OR Conditions)', 'Combine multiple conditions with AND/OR logic for complex rules like AHRQ quality indicators', 'CompositeRule',
+ '{"type": "object", "properties": {"operator": {"enum": ["AND", "OR"], "default": "AND"}, "conditions": {"type": "array", "items": {"type": "object"}}}, "required": ["conditions"]}',
+ 'BOTH', 2)
 ON CONFLICT (template_code) DO NOTHING;
 
 -- ============================================================================

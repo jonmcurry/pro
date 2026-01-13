@@ -718,7 +718,8 @@ INSERT INTO claims.flag_category (category_code, category_name, category_descrip
 ('OTH', 'Other Issues', 'Provider, date, or signature issues'),
 ('QTY', 'Quantity Issues', 'Unit count discrepancies'),
 ('SUP', 'Supervision Requirements', 'Incident-to, split-shared, teaching physician issues'),
-('DX', 'Diagnosis Issues', 'Diagnosis code problems');
+('DX', 'Diagnosis Issues', 'Diagnosis code problems'),
+('QM', 'Quality Measures', 'AHRQ and other quality measure indicators');
 
 -- Flag issue definitions
 CREATE TABLE claims.flag_issue (
@@ -785,7 +786,10 @@ INSERT INTO claims.flag_issue (category_id, issue_code, issue_description, sever
 ((SELECT category_id FROM claims.flag_category WHERE category_code = 'DX'), 'DX_ADDITIONAL', 'Additional Diagnosis - Additional ICD-10-CM code(s) are documented but were not reported', 'MEDIUM'),
 ((SELECT category_id FROM claims.flag_category WHERE category_code = 'DX'), 'DX_UNSUPPORTED', 'Documentation Unsupported - Documentation does not support the reported diagnosis code(s)', 'HIGH'),
 ((SELECT category_id FROM claims.flag_category WHERE category_code = 'DX'), 'DX_INCORRECT', 'Incorrect Code - ICD-10-CM code(s) reported are not correct based upon documentation', 'HIGH'),
-((SELECT category_id FROM claims.flag_category WHERE category_code = 'DX'), 'DX_SPECIFICITY', 'Specificity Issue - Documentation supports a more specific diagnosis code(s) than that reported', 'MEDIUM');
+((SELECT category_id FROM claims.flag_category WHERE category_code = 'DX'), 'DX_SPECIFICITY', 'Specificity Issue - Documentation supports a more specific diagnosis code(s) than that reported', 'MEDIUM'),
+
+-- QM: Quality Measures
+((SELECT category_id FROM claims.flag_category WHERE category_code = 'QM'), 'QM_OPIOID_ED', 'Opioid-Related ED Visit - ED encounter with opioid-related diagnosis (AHRQ QI)', 'MEDIUM');
 
 -- Flag assignments to encounters
 CREATE TABLE claims.encounter_flag (
@@ -7129,7 +7133,11 @@ INSERT INTO claims.rule_template (template_code, template_name, template_descrip
 
 ('CROSS_FIELD', 'Cross-Field Comparison', 'Compare two fields against each other', 'CrossFieldRule',
  '{"type": "object", "properties": {"field1": {"type": "string"}, "operator": {"enum": [">", "<", ">=", "<=", "=", "!="]}, "field2": {"type": "string"}}, "required": ["field1", "operator", "field2"]}',
- 'BOTH', 1)
+ 'BOTH', 1),
+
+('COMPOSITE', 'Composite Rule (AND/OR Conditions)', 'Combine multiple conditions with AND/OR logic for complex rules like AHRQ quality indicators', 'CompositeRule',
+ '{"type": "object", "properties": {"operator": {"enum": ["AND", "OR"], "default": "AND"}, "conditions": {"type": "array", "items": {"type": "object"}}}, "required": ["conditions"]}',
+ 'BOTH', 2)
 ON CONFLICT (template_code) DO NOTHING;
 
 -- ============================================================================
@@ -7185,6 +7193,41 @@ BEGIN
      legacy_template_id, dx_spec_issue_id, 60, 'ENCOUNTER', 'MEDIUM', true);
 
 END $$;
+
+-- ============================================================================
+-- 8b. AHRQ Quality Indicator Rules (COMPOSITE template)
+-- ============================================================================
+
+-- AHRQOP001A: Opioid Related Hospital Visits in the ED
+INSERT INTO claims.rule_definition (
+    rule_code,
+    rule_name,
+    rule_description,
+    template_id,
+    rule_parameters_encrypted,
+    flag_issue_id,
+    execution_order,
+    execution_level,
+    default_severity,
+    timeout_ms,
+    is_active
+)
+SELECT
+    'AHRQOP001A',
+    'Opioid Related Hospital Visits in the ED',
+    'AHRQ QI: Flags ED visits with opioid-related diagnosis (F11.x except F11.21, T40.x series).',
+    (SELECT template_id FROM claims.rule_template WHERE template_code = 'COMPOSITE'),
+    pgp_sym_encrypt(
+        '{"operator": "AND", "conditions": [{"type": "date_gte", "min_date": "2012-07-01"}, {"type": "cpt_in", "codes": ["99281", "99282", "99283", "99284", "99285", "99291"]}, {"type": "dx_pattern_exclude", "include": "^(F11|T40)", "exclude": "^F1121"}]}',
+        current_setting('app.rule_encryption_key', true)
+    ),
+    (SELECT issue_id FROM claims.flag_issue WHERE issue_code = 'QM_OPIOID_ED'),
+    100,
+    'SERVICE_LINE',
+    'MEDIUM',
+    5000,
+    true
+WHERE NOT EXISTS (SELECT 1 FROM claims.rule_definition WHERE rule_code = 'AHRQOP001A');
 
 -- ============================================================================
 -- 9. Function: Get Active Rules for Facility

@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.12.71.1] - 2025-01-12
+
+### Added
+- **AHRQOP001A Rule in Baseline**: Added AHRQ Opioid ED Visit rule to mandatory baseline
+  - Added QM (Quality Measures) flag category
+  - Added QM_OPIOID_ED flag issue
+  - Added AHRQOP001A rule definition using COMPOSITE template
+  - Rule flags ED visits (CPT 99281-99285, 99291) with opioid-related diagnosis (F11.x except F11.21, T40.x)
+
+## [2.12.71.0] - 2025-01-12
+
+### Added
+- **COMPOSITE Rule Template**: New template for creating compound rules without recompilation
+  - Supports AND/OR logic for combining multiple conditions
+  - Condition types: cpt_in, cpt_pattern, dx_in, dx_pattern, dx_pattern_exclude, date_gte, date_lte, pos_in, pos_pattern, modifier_in, modifier_not_in
+  - Enables database-only configuration of complex AHRQ quality indicators
+  - Files added:
+    - `crates/pro-rules/src/templates/composite_rule.rs` - Template implementation
+    - `migrations/seed_data/ahrqop001a_opioid_ed_rule.sql` - Example AHRQ rule
+  - Files modified:
+    - `crates/pro-rules/src/templates/mod.rs` - Export new template
+    - `crates/pro-rules/src/loader.rs` - Register COMPOSITE template
+    - `migrations/046_create_rule_configuration_system.sql` - Add template to database
+    - `migrations/000_baseline_v2.12.sql` - Add template to baseline
+
 ## [2.12.70.2] - 2025-01-01
 
 ### Changed

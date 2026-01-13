@@ -318,6 +318,10 @@ pub(crate) fn instantiate_rule(
             let template = CrossFieldRuleTemplate;
             template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
         }
+        Some("COMPOSITE") => {
+            let template = CompositeRuleTemplate;
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+        }
 
         // Unknown template
         Some(template) => Err(Error::Config(format!(
