@@ -1,0 +1,17 @@
+[package]
+name = "pro-rule-converter"
+version = "0.3.2"
+edition = "2021"
+description = "Converts legacy filter rules to COMPOSITE template SQL format"
+authors = ["Professional SMART"]
+
+[[bin]]
+name = "pro-rule-converter"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive"] }

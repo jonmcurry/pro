@@ -15,6 +15,8 @@ members = [
     "crates/pro-upgrade",
     "crates/pro-npi-enrichment",
     "crates/pro-project",
+    "crates/pro-rule-converter",
+    "crates/pro-rule-converter-gui",
 ]
 resolver = "2"
 

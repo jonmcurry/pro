@@ -1,0 +1,36 @@
+# Rule Converter Configuration
+# This file configures the MS SQL Server connection and query for fetching legacy filter rules.
+
+[database]
+# SQL Server connection settings
+server = "localhost"
+port = 1433
+database = "FilterDB"
+
+# Authentication: "windows" for Windows Authentication, "sql" for SQL Server Authentication
+auth_type = "windows"
+
+# SQL Server credentials (only used if auth_type = "sql")
+username = ""
+password = ""
+
+[query]
+# SQL query to fetch filter rules
+# Expected columns: FilterNumber, FilterName, FilterDescription, definition
+sql = """
+select a.FilterNumber, a.FilterName, FilterDescription,
+       [dbo].[fn_DecryptFilterDefinition1](FilterDefinition) as 'definition'
+from tblopfilter_filter a
+join tblopfilter_filtergroup b on a.filtergroupid = b.filtergroupid
+join tblopfilter_filterdefs c on a.filternumber = c.filternumber
+where icdver = '10'
+  and (a.filternumber not like 'RP%' and a.filternumber not like 'HOSP%')
+  and c.enddate is null
+"""
+
+[output]
+# Default output directory for generated SQL files
+output_directory = "."
+
+# Flag category code for generated rules
+flag_category = "QM"

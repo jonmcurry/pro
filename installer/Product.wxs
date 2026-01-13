@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="2.12.71.1"
+           Version="2.12.73.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -126,6 +126,19 @@
                     Source="$(var.SolutionDir)target\release\pro-project.exe"
                     KeyPath="yes"
                     Checksum="yes" />
+            </Component>
+
+            <Component Id="RuleConverterGuiExecutable" Guid="7D7D7D7D-7E7E-7F7F-8080-818181818181" Win64="yes">
+              <File Id="ProRuleConverterGuiExe"
+                    Source="$(var.SolutionDir)target\release\pro-rule-converter-gui.exe"
+                    KeyPath="yes"
+                    Checksum="yes" />
+            </Component>
+
+            <Component Id="RuleConverterConfig" Guid="8E8E8E8E-8F8F-9090-9191-929292929292" Win64="yes">
+              <File Id="RuleConverterConfigToml"
+                    Source="$(var.SolutionDir)crates\pro-rule-converter-gui\rule-converter-config.toml"
+                    KeyPath="yes" />
             </Component>
             <Component Id="BinDir" Guid="BABABABA-BABB-BABC-BABD-BABABABABABC" Win64="yes">
               <CreateFolder />
@@ -298,6 +311,12 @@
                       Arguments="gui"
                       WorkingDirectory="INSTALLFOLDER" />
 
+            <Shortcut Id="RuleConverterGuiShortcut"
+                      Name="Rule Converter (MS SQL)"
+                      Description="Convert legacy filter rules from MS SQL Server to COMPOSITE template SQL"
+                      Target="[BinFolder]pro-rule-converter-gui.exe"
+                      WorkingDirectory="BinFolder" />
+
             <Shortcut Id="DataLoaderCliShortcut"
                       Name="Load Master Data (CLI)"
                       Description="Load organizations, facilities, and providers from CSV - Command Line"
@@ -347,6 +366,8 @@
         <ComponentRef Id="DataLoaderGuiExecutable" />
         <ComponentRef Id="UpgradeExecutable" />
         <ComponentRef Id="ProjectExecutable" />
+        <ComponentRef Id="RuleConverterGuiExecutable" />
+        <ComponentRef Id="RuleConverterConfig" />
         <ComponentRef Id="BinDir" />
         <ComponentRef Id="InputDir" />
         <ComponentRef Id="ProcessedDir" />
@@ -585,7 +606,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="2.12.71.1"
+                     Value="2.12.73.0"
                      KeyPath="yes" />
     </Component>
 

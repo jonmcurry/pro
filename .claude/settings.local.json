@@ -226,7 +226,11 @@
       "Bash(start ./target/release/pro-data-loader-gui.exe)",
       "Bash(start:*)",
       "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.71.0\")",
-      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.71.1\" -NoBuild)"
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.71.1\" -NoBuild)",
+      "Bash(./target/release/pro-rule-converter.exe:*)",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.72.0\")",
+      "Bash(\"C:/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs -dSolutionDir=../ -ext WixUtilExtension -ext WixUIExtension)",
+      "Bash(\"C:/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj -o ProfessionalSMART.msi -ext WixUtilExtension -ext WixUIExtension)"
     ],
     "deny": [],
     "ask": []

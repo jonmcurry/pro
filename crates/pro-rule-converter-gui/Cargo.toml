@@ -1,0 +1,32 @@
+[package]
+name = "pro-rule-converter-gui"
+version = "0.3.2"
+edition = "2021"
+description = "GUI tool to convert legacy filter rules from MS SQL Server to COMPOSITE template SQL"
+authors = ["Professional SMART"]
+
+[[bin]]
+name = "pro-rule-converter-gui"
+path = "src/main.rs"
+
+[dependencies]
+# GUI
+native-windows-gui = "1.0"
+native-windows-derive = "1.0"
+
+# MS SQL Server
+tiberius = { version = "0.12", default-features = false, features = ["rustls", "chrono"] }
+tokio = { version = "1.40", features = ["rt-multi-thread", "net", "macros"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+# Config
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Parsing
+regex = "1.10"
+anyhow = "1.0"
+
+[build-dependencies]
+embed-resource = "2.4"

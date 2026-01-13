@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.12.73.0] - 2025-01-13
+
+### Added
+- **Rule Converter GUI**: New GUI tool to convert legacy filter rules from MS SQL Server to COMPOSITE template SQL
+  - Connects to MS SQL Server using tiberius crate with SQL Server Authentication
+  - Configurable SQL query via `rule-converter-config.toml` file
+  - ListView with multi-select for choosing rules to export
+  - Exports selected rules as SQL INSERT statements with COMPOSITE template JSON parameters
+  - Added Start Menu shortcut "Rule Converter (MS SQL)"
+  - Files added:
+    - `crates/pro-rule-converter-gui/Cargo.toml` - Package configuration
+    - `crates/pro-rule-converter-gui/src/main.rs` - NWG-based GUI application
+    - `crates/pro-rule-converter-gui/src/converter.rs` - Rule parsing and SQL generation
+    - `crates/pro-rule-converter-gui/src/mssql.rs` - MS SQL Server client using tiberius
+    - `crates/pro-rule-converter-gui/rule-converter-config.toml` - Configuration file with SQL query
+    - `crates/pro-rule-converter-gui/build.rs` - Build script for Windows resources
+    - `crates/pro-rule-converter-gui/windows-manifest.rc` - Windows manifest resource
+    - `crates/pro-rule-converter-gui/windows-manifest.xml` - DPI awareness manifest
+
+## [2.12.72.0] - 2025-01-12
+
+### Added
+- **Rule Converter Tool**: New CLI tool to convert legacy filter rules to COMPOSITE template SQL
+  - Parses legacy `Parser.In()` syntax for DX, CPT, Date, POS fields
+  - Generates SQL INSERT statements with proper COMPOSITE JSON parameters
+  - Supports file input or inline rules via `--inline` flag
+  - Usage: `pro-rule-converter -i rules.txt -o output.sql`
+  - Files added:
+    - `crates/pro-rule-converter/Cargo.toml`
+    - `crates/pro-rule-converter/src/main.rs`
+
 ## [2.12.71.1] - 2025-01-12
 
 ### Added
