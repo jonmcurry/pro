@@ -1,7 +1,7 @@
 //! MS SQL Server client using tiberius with SQL Server Authentication
 
 use anyhow::Result;
-use tiberius::{Client, Config, AuthMethod};
+use tiberius::{Client, Config, AuthMethod, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
@@ -36,8 +36,9 @@ impl MsSqlClient {
             config.authentication(AuthMethod::sql_server("", ""));
         }
 
-        // Trust the server certificate for local connections
+        // Trust the server certificate and disable encryption
         config.trust_cert();
+        config.encryption(EncryptionLevel::NotSupported);
 
         let tcp = TcpStream::connect(config.get_addr()).await?;
         tcp.set_nodelay(true)?;
