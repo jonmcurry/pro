@@ -14,8 +14,8 @@ path = "src/main.rs"
 native-windows-gui = "1.0"
 native-windows-derive = "1.0"
 
-# MS SQL Server
-tiberius = { version = "0.12", default-features = false, features = ["rustls", "chrono"] }
+# MS SQL Server (no TLS features - encryption disabled for local connections)
+tiberius = { version = "0.12", default-features = false, features = ["chrono"] }
 tokio = { version = "1.40", features = ["rt-multi-thread", "net", "macros"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 

@@ -1,7 +1,7 @@
 //! MS SQL Server client using tiberius with SQL Server Authentication
 
 use anyhow::Result;
-use tiberius::{Client, Config, AuthMethod, EncryptionLevel};
+use tiberius::{Client, Config, AuthMethod};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
@@ -12,10 +12,6 @@ pub struct MsSqlClient {
 }
 
 impl MsSqlClient {
-    pub async fn connect(server: &str, database: &str) -> Result<Self> {
-        Self::connect_with_auth(server, database, None, None).await
-    }
-
     pub async fn connect_with_auth(
         server: &str,
         database: &str,
@@ -28,17 +24,13 @@ impl MsSqlClient {
         config.port(1433);
         config.database(database);
 
-        // Use SQL Server Authentication if credentials provided
+        // Use SQL Server Authentication
         if let (Some(user), Some(pass)) = (username, password) {
             config.authentication(AuthMethod::sql_server(user, pass));
-        } else {
-            // Use Windows Authentication via NTLM (basic form)
-            config.authentication(AuthMethod::sql_server("", ""));
         }
 
-        // Trust the server certificate and disable encryption
-        config.trust_cert();
-        config.encryption(EncryptionLevel::NotSupported);
+        // Note: TLS/encryption is disabled at compile time by not including
+        // the rustls or native-tls features in Cargo.toml
 
         let tcp = TcpStream::connect(config.get_addr()).await?;
         tcp.set_nodelay(true)?;
