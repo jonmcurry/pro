@@ -115,24 +115,36 @@ pub struct RuleConverterApp {
     #[nwg_control(parent: window, text: "Server:", position: (16, 40), size: (60, 20))]
     lbl_server: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (80, 38), size: (200, 24))]
+    #[nwg_control(parent: window, text: "", position: (80, 38), size: (150, 24))]
     txt_server: nwg::TextInput,
 
-    #[nwg_control(parent: window, text: "Database:", position: (300, 40), size: (70, 20))]
+    #[nwg_control(parent: window, text: "Database:", position: (240, 40), size: (70, 20))]
     lbl_database: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (375, 38), size: (200, 24))]
+    #[nwg_control(parent: window, text: "", position: (315, 38), size: (150, 24))]
     txt_database: nwg::TextInput,
 
-    #[nwg_control(parent: window, text: "Connect & Load Rules", position: (600, 36), size: (150, 28))]
+    #[nwg_control(parent: window, text: "Username:", position: (480, 40), size: (70, 20))]
+    lbl_username: nwg::Label,
+
+    #[nwg_control(parent: window, text: "", position: (555, 38), size: (120, 24))]
+    txt_username: nwg::TextInput,
+
+    #[nwg_control(parent: window, text: "Password:", position: (690, 40), size: (70, 20))]
+    lbl_password: nwg::Label,
+
+    #[nwg_control(parent: window, text: "", position: (765, 38), size: (110, 24), flags: "VISIBLE|TAB_STOP", password: Some('*'))]
+    txt_password: nwg::TextInput,
+
+    #[nwg_control(parent: window, text: "Connect & Load Rules", position: (16, 70), size: (150, 28))]
     #[nwg_events(OnButtonClick: [RuleConverterApp::connect_and_load])]
     btn_connect: nwg::Button,
 
     // Rules list
-    #[nwg_control(parent: window, text: "Rules (select rows to export)", position: (16, 76), size: (240, 22))]
+    #[nwg_control(parent: window, text: "Rules (select rows to export)", position: (16, 106), size: (240, 22))]
     lbl_rules_header: nwg::Label,
 
-    #[nwg_control(parent: window, position: (16, 100), size: (860, 300), flags: "VISIBLE|TAB_STOP", list_style: ListViewStyle::Detailed, ex_flags: ListViewExFlags::FULL_ROW_SELECT)]
+    #[nwg_control(parent: window, position: (16, 130), size: (860, 270), flags: "VISIBLE|TAB_STOP", list_style: ListViewStyle::Detailed, ex_flags: ListViewExFlags::FULL_ROW_SELECT)]
     #[nwg_events(OnListViewItemChanged: [RuleConverterApp::on_selection_changed])]
     list_rules: nwg::ListView,
 
@@ -197,6 +209,12 @@ impl RuleConverterApp {
             Ok(config) => {
                 self.txt_server.set_text(&config.database.server);
                 self.txt_database.set_text(&config.database.database);
+                if let Some(ref username) = config.database.username {
+                    self.txt_username.set_text(username);
+                }
+                if let Some(ref password) = config.database.password {
+                    self.txt_password.set_text(password);
+                }
                 *self.config.borrow_mut() = Some(config);
                 self.log("Config loaded successfully");
             }
@@ -235,13 +253,20 @@ impl RuleConverterApp {
     fn connect_and_load(&self) {
         let server = self.txt_server.text();
         let database = self.txt_database.text();
+        let username = self.txt_username.text();
+        let password = self.txt_password.text();
 
         if server.is_empty() || database.is_empty() {
             self.log("Error: Server and Database are required");
             return;
         }
 
-        self.log(&format!("Connecting to {}\\{}...", server, database));
+        if username.is_empty() || password.is_empty() {
+            self.log("Error: Username and Password are required for SQL Server Authentication");
+            return;
+        }
+
+        self.log(&format!("Connecting to {}/{}...", server, database));
 
         let config = self.config.borrow().clone();
         let sql_query = config
@@ -254,11 +279,18 @@ impl RuleConverterApp {
 
         let server_clone = server.clone();
         let database_clone = database.clone();
+        let username_clone = username.clone();
+        let password_clone = password.clone();
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
-                match MsSqlClient::connect(&server_clone, &database_clone).await {
+                match MsSqlClient::connect_with_auth(
+                    &server_clone,
+                    &database_clone,
+                    Some(&username_clone),
+                    Some(&password_clone),
+                ).await {
                     Ok(mut client) => {
                         let _ = tx.send(TaskMessage::Log(format!("Connected to {}", database_clone)));
 
