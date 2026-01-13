@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.73.4] - 2025-01-13
+
+### Fixed
+- **Rule Converter GUI Performance**: Optimized for large datasets (500+ rules)
+  - Fixed crash when clicking "Select All" with 553 rules
+  - Added `set_redraw(false/true)` wrapper for bulk ListView operations
+  - Removed redundant selection tracking (HashSet) - now queries ListView directly
+  - Removed `on_selection_changed` event handler that was triggering 553 times
+  - Added `bulk_operation` flag to prevent event handling during batch operations
+  - Pre-allocate SQL string buffer for faster export
+  - Safe string truncation at character boundaries (not byte boundaries)
+
 ## [2.12.73.3] - 2025-01-13
 
 ### Fixed

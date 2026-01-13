@@ -6,7 +6,6 @@ extern crate native_windows_derive as nwd;
 use nwd::NwgUi;
 use nwg::NativeUi;
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fs;
 use std::sync::mpsc;
 use anyhow::{anyhow, Result};
@@ -17,10 +16,6 @@ mod mssql;
 
 use converter::generate_sql_for_rule;
 use mssql::MsSqlClient;
-
-// Window dimensions
-const WINDOW_WIDTH: i32 = 900;
-const WINDOW_HEIGHT: i32 = 650;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
@@ -64,7 +59,6 @@ enum TaskMessage {
     Log(String),
     Error(String),
     RulesLoaded(Vec<RuleRow>),
-    ExportComplete(String),
 }
 
 fn load_config() -> Result<Config> {
@@ -73,7 +67,6 @@ fn load_config() -> Result<Config> {
     let config_path = exe_dir.join("rule-converter-config.toml");
 
     if !config_path.exists() {
-        // Try current directory
         let current_dir = std::env::current_dir()?;
         let config_path = current_dir.join("rule-converter-config.toml");
         if config_path.exists() {
@@ -87,12 +80,23 @@ fn load_config() -> Result<Config> {
     Ok(toml::from_str(&content)?)
 }
 
+/// Truncate string safely at char boundary
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars).collect();
+        format!("{}...", truncated)
+    }
+}
+
 #[derive(Default, NwgUi)]
 pub struct RuleConverterApp {
     config: RefCell<Option<Config>>,
     rules: RefCell<Vec<RuleRow>>,
-    selected_indices: RefCell<HashSet<usize>>,
     task_receiver: RefCell<Option<mpsc::Receiver<TaskMessage>>>,
+    /// Flag to prevent selection event handling during bulk operations
+    bulk_operation: RefCell<bool>,
 
     #[nwg_resource(family: "Segoe UI Semibold", size: 16)]
     header_font: nwg::Font,
@@ -103,12 +107,10 @@ pub struct RuleConverterApp {
     #[nwg_resource(family: "Consolas", size: 12)]
     log_font: nwg::Font,
 
-    // Main window
     #[nwg_control(size: (900, 650), position: (100, 100), title: "Rule Converter - MS SQL to COMPOSITE Template", flags: "WINDOW|VISIBLE|MINIMIZE_BOX")]
     #[nwg_events(OnWindowClose: [RuleConverterApp::exit], OnInit: [RuleConverterApp::on_init])]
     window: nwg::Window,
 
-    // Connection section - Row 1: Server, Port
     #[nwg_control(parent: window, text: "Database Connection", position: (16, 12), size: (200, 22))]
     lbl_connection_header: nwg::Label,
 
@@ -146,15 +148,12 @@ pub struct RuleConverterApp {
     #[nwg_events(OnButtonClick: [RuleConverterApp::connect_and_load])]
     btn_connect: nwg::Button,
 
-    // Rules list
     #[nwg_control(parent: window, text: "Rules (select rows to export)", position: (16, 106), size: (240, 22))]
     lbl_rules_header: nwg::Label,
 
     #[nwg_control(parent: window, position: (16, 130), size: (860, 270), flags: "VISIBLE|TAB_STOP", list_style: ListViewStyle::Detailed, ex_flags: ListViewExFlags::FULL_ROW_SELECT)]
-    #[nwg_events(OnListViewItemChanged: [RuleConverterApp::on_selection_changed])]
     list_rules: nwg::ListView,
 
-    // Action buttons
     #[nwg_control(parent: window, text: "Select All", position: (16, 410), size: (100, 28))]
     #[nwg_events(OnButtonClick: [RuleConverterApp::select_all])]
     btn_select_all: nwg::Button,
@@ -167,14 +166,12 @@ pub struct RuleConverterApp {
     #[nwg_events(OnButtonClick: [RuleConverterApp::export_selected])]
     btn_export: nwg::Button,
 
-    // Log area
     #[nwg_control(parent: window, text: "Log", position: (16, 450), size: (100, 22))]
     lbl_log_header: nwg::Label,
 
     #[nwg_control(parent: window, text: "", position: (16, 474), size: (860, 160), flags: "VISIBLE|VSCROLL|AUTOVSCROLL", readonly: true)]
     txt_log: nwg::TextBox,
 
-    // Timer for async updates
     #[nwg_control(interval: std::time::Duration::from_millis(100))]
     #[nwg_events(OnTimerTick: [RuleConverterApp::check_messages])]
     timer: nwg::AnimationTimer,
@@ -182,7 +179,6 @@ pub struct RuleConverterApp {
 
 impl RuleConverterApp {
     fn on_init(&self) {
-        // Apply fonts
         self.lbl_connection_header.set_font(Some(&self.header_font));
         self.lbl_rules_header.set_font(Some(&self.header_font));
         self.lbl_log_header.set_font(Some(&self.header_font));
@@ -190,7 +186,6 @@ impl RuleConverterApp {
         self.lbl_server.set_font(Some(&self.body_font));
         self.lbl_database.set_font(Some(&self.body_font));
 
-        // Setup list columns
         self.list_rules.insert_column(nwg::InsertListViewColumn {
             index: Some(0),
             fmt: None,
@@ -216,7 +211,6 @@ impl RuleConverterApp {
             text: Some("Definition".into()),
         });
 
-        // Load config
         match load_config() {
             Ok(config) => {
                 self.txt_server.set_text(&config.database.server);
@@ -248,19 +242,8 @@ impl RuleConverterApp {
             format!("{}\r\n{}", current, msg)
         };
         self.txt_log.set_text(&new_text);
-        // Scroll to bottom
         let len = new_text.len() as u32;
         self.txt_log.set_selection(len..len);
-    }
-
-    fn on_selection_changed(&self) {
-        // Update selected indices based on ListView selection
-        let mut selected = self.selected_indices.borrow_mut();
-        selected.clear();
-
-        for i in self.list_rules.selected_items() {
-            selected.insert(i);
-        }
     }
 
     fn connect_and_load(&self) {
@@ -270,12 +253,12 @@ impl RuleConverterApp {
         let password = self.txt_password.text();
 
         if server.is_empty() || database.is_empty() {
-            self.log("Error: Server and Database are required");
+            self.log("ERROR: Server and Database are required");
             return;
         }
 
         if username.is_empty() || password.is_empty() {
-            self.log("Error: Username and Password are required for SQL Server Authentication");
+            self.log("ERROR: Username and Password are required for SQL Server Authentication");
             return;
         }
 
@@ -332,97 +315,138 @@ impl RuleConverterApp {
                     TaskMessage::Log(text) => self.log(&text),
                     TaskMessage::Error(text) => self.log(&format!("ERROR: {}", text)),
                     TaskMessage::RulesLoaded(rules) => {
-                        self.list_rules.clear();
-                        for (i, rule) in rules.iter().enumerate() {
-                            self.list_rules.insert_item(nwg::InsertListViewItem {
-                                index: Some(i as i32),
-                                column_index: 0,
-                                text: Some(rule.filter_number.clone()),
-                                image: None,
-                            });
-                            self.list_rules.insert_item(nwg::InsertListViewItem {
-                                index: Some(i as i32),
-                                column_index: 1,
-                                text: Some(rule.filter_name.clone()),
-                                image: None,
-                            });
-                            let desc = if rule.description.len() > 60 {
-                                format!("{}...", &rule.description[..60])
-                            } else {
-                                rule.description.clone()
-                            };
-                            self.list_rules.insert_item(nwg::InsertListViewItem {
-                                index: Some(i as i32),
-                                column_index: 2,
-                                text: Some(desc),
-                                image: None,
-                            });
-                            // Add definition column (truncated for display)
-                            let def = if rule.definition.len() > 80 {
-                                format!("{}...", &rule.definition[..80])
-                            } else {
-                                rule.definition.clone()
-                            };
-                            self.list_rules.insert_item(nwg::InsertListViewItem {
-                                index: Some(i as i32),
-                                column_index: 3,
-                                text: Some(def),
-                                image: None,
-                            });
-                        }
+                        self.populate_list_view(&rules);
                         *self.rules.borrow_mut() = rules;
-                    }
-                    TaskMessage::ExportComplete(path) => {
-                        self.log(&format!("Exported to: {}", path));
-                        nwg::modal_info_message(&self.window, "Export Complete", &format!("Rules exported to:\n{}", path));
                     }
                 }
             }
         }
     }
 
+    /// Populate ListView with rules - optimized for large datasets
+    fn populate_list_view(&self, rules: &[RuleRow]) {
+        // Set bulk operation flag to prevent event handling
+        *self.bulk_operation.borrow_mut() = true;
+
+        // Disable redraw for faster bulk insertion
+        self.list_rules.set_redraw(false);
+        self.list_rules.clear();
+
+        for (i, rule) in rules.iter().enumerate() {
+            // Insert row with first column
+            self.list_rules.insert_item(nwg::InsertListViewItem {
+                index: Some(i as i32),
+                column_index: 0,
+                text: Some(rule.filter_number.clone()),
+                image: None,
+            });
+
+            // Set remaining columns using set_item
+            self.list_rules.update_item(i, nwg::InsertListViewItem {
+                index: Some(i as i32),
+                column_index: 1,
+                text: Some(truncate_str(&rule.filter_name, 50)),
+                image: None,
+            });
+
+            self.list_rules.update_item(i, nwg::InsertListViewItem {
+                index: Some(i as i32),
+                column_index: 2,
+                text: Some(truncate_str(&rule.description, 60)),
+                image: None,
+            });
+
+            self.list_rules.update_item(i, nwg::InsertListViewItem {
+                index: Some(i as i32),
+                column_index: 3,
+                text: Some(truncate_str(&rule.definition, 80)),
+                image: None,
+            });
+        }
+
+        // Re-enable redraw and refresh
+        self.list_rules.set_redraw(true);
+        *self.bulk_operation.borrow_mut() = false;
+
+        self.log(&format!("Displayed {} rules in list", rules.len()));
+    }
+
     fn select_all(&self) {
         let count = self.list_rules.len();
-        let mut selected = self.selected_indices.borrow_mut();
+        if count == 0 {
+            self.log("No rules to select");
+            return;
+        }
+
+        self.log(&format!("Selecting all {} rules...", count));
+
+        // Set bulk operation flag
+        *self.bulk_operation.borrow_mut() = true;
+
+        // Disable redraw during bulk selection
+        self.list_rules.set_redraw(false);
+
+        // Select all items
         for i in 0..count {
             self.list_rules.select_item(i, true);
-            selected.insert(i);
         }
+
+        // Re-enable redraw
+        self.list_rules.set_redraw(true);
+        *self.bulk_operation.borrow_mut() = false;
+
+        self.log(&format!("Selected {} rules", count));
     }
 
     fn deselect_all(&self) {
         let count = self.list_rules.len();
-        let mut selected = self.selected_indices.borrow_mut();
+        if count == 0 {
+            return;
+        }
+
+        self.log("Deselecting all rules...");
+
+        // Set bulk operation flag
+        *self.bulk_operation.borrow_mut() = true;
+
+        // Disable redraw during bulk deselection
+        self.list_rules.set_redraw(false);
+
         for i in 0..count {
             self.list_rules.select_item(i, false);
         }
-        selected.clear();
+
+        // Re-enable redraw
+        self.list_rules.set_redraw(true);
+        *self.bulk_operation.borrow_mut() = false;
+
+        self.log("Deselected all rules");
     }
 
     fn export_selected(&self) {
-        let rules = self.rules.borrow();
-        let selected = self.selected_indices.borrow();
-        let mut selected_rules = Vec::new();
+        // Get selected indices directly from ListView (no separate tracking needed)
+        let selected_indices: Vec<usize> = self.list_rules.selected_items();
 
-        self.log(&format!("DEBUG: {} items selected", selected.len()));
-
-        for &i in selected.iter() {
-            if let Some(rule) = rules.get(i) {
-                self.log(&format!("DEBUG: Adding rule {} for export", rule.filter_number));
-                selected_rules.push(rule.clone());
-            }
-        }
-
-        drop(rules);
-        drop(selected);
-
-        if selected_rules.is_empty() {
+        if selected_indices.is_empty() {
             self.log("No rules selected for export");
             nwg::modal_info_message(&self.window, "No Selection", "Please select at least one rule to export.");
             return;
         }
 
-        self.log(&format!("Exporting {} rules...", selected_rules.len()));
+        self.log(&format!("Exporting {} selected rules...", selected_indices.len()));
+
+        // Collect selected rules
+        let rules = self.rules.borrow();
+        let selected_rules: Vec<RuleRow> = selected_indices
+            .iter()
+            .filter_map(|&i| rules.get(i).cloned())
+            .collect();
+        drop(rules);
+
+        if selected_rules.is_empty() {
+            self.log("ERROR: Could not retrieve selected rules");
+            return;
+        }
 
         // Get category from config
         let category = self.config.borrow()
@@ -430,9 +454,7 @@ impl RuleConverterApp {
             .map(|c| c.output.flag_category.clone())
             .unwrap_or_else(|| "QM".to_string());
 
-        self.log("DEBUG: Opening file dialog...");
-
-        // File save dialog - NWG filter format: "Name(*.ext)"
+        // File save dialog
         let mut file_dialog = nwg::FileDialog::default();
         let build_result = nwg::FileDialog::builder()
             .title("Save SQL File")
@@ -445,12 +467,9 @@ impl RuleConverterApp {
         }
 
         if file_dialog.run(Some(&self.window)) {
-            self.log("DEBUG: File dialog completed");
             match file_dialog.get_selected_item() {
                 Ok(path) => {
                     let path_str = path.to_string_lossy().to_string();
-                    self.log(&format!("DEBUG: Selected path: {}", path_str));
-
                     let path_with_ext = if !path_str.ends_with(".sql") {
                         format!("{}.sql", path_str)
                     } else {
@@ -458,13 +477,13 @@ impl RuleConverterApp {
                     };
 
                     match self.generate_and_save_sql(&selected_rules, &category, &path_with_ext) {
-                        Ok(_) => {
-                            self.log(&format!("Successfully exported {} rules to {}", selected_rules.len(), path_with_ext));
+                        Ok((success, errors)) => {
+                            self.log(&format!("Exported {} rules ({} errors) to {}", success, errors, path_with_ext));
                             nwg::modal_info_message(&self.window, "Export Complete",
-                                &format!("Exported {} rules to:\n{}", selected_rules.len(), path_with_ext));
+                                &format!("Exported {} rules ({} errors) to:\n{}", success, errors, path_with_ext));
                         }
                         Err(e) => {
-                            self.log(&format!("Export failed: {}", e));
+                            self.log(&format!("ERROR: Export failed: {}", e));
                             nwg::modal_error_message(&self.window, "Export Failed", &format!("{}", e));
                         }
                     }
@@ -474,14 +493,12 @@ impl RuleConverterApp {
                 }
             }
         } else {
-            self.log("DEBUG: File dialog cancelled");
+            self.log("Export cancelled");
         }
     }
 
-    fn generate_and_save_sql(&self, rules: &[RuleRow], category: &str, path: &str) -> Result<()> {
-        self.log(&format!("DEBUG: Generating SQL for {} rules to {}", rules.len(), path));
-
-        let mut sql = String::new();
+    fn generate_and_save_sql(&self, rules: &[RuleRow], category: &str, path: &str) -> Result<(usize, usize)> {
+        let mut sql = String::with_capacity(rules.len() * 2000); // Pre-allocate
         sql.push_str("-- Generated by Rule Converter GUI\n");
         sql.push_str("-- COMPOSITE template rules for Professional SMART\n\n");
 
@@ -489,10 +506,7 @@ impl RuleConverterApp {
         let mut error_count = 0;
 
         for rule in rules {
-            self.log(&format!("DEBUG: Processing rule {}", rule.filter_number));
-
             if rule.definition.is_empty() {
-                self.log(&format!("WARNING: Rule {} has empty definition, skipping", rule.filter_number));
                 sql.push_str(&format!("-- SKIPPED {}: Empty definition\n\n", rule.filter_number));
                 error_count += 1;
                 continue;
@@ -501,24 +515,21 @@ impl RuleConverterApp {
             match generate_sql_for_rule(&rule.filter_number, &rule.filter_name, &rule.description, &rule.definition, category) {
                 Ok(rule_sql) => {
                     sql.push_str(&rule_sql);
-                    sql.push_str("\n");
+                    sql.push('\n');
                     success_count += 1;
                 }
                 Err(e) => {
-                    self.log(&format!("WARNING: Failed to convert {}: {}", rule.filter_number, e));
                     sql.push_str(&format!("-- ERROR converting {}: {}\n", rule.filter_number, e));
-                    sql.push_str(&format!("-- Definition was: {}\n\n", rule.definition.replace('\n', " ").chars().take(200).collect::<String>()));
+                    sql.push_str(&format!("-- Definition: {}\n\n", truncate_str(&rule.definition.replace('\n', " "), 200)));
                     error_count += 1;
                 }
             }
         }
 
-        self.log(&format!("DEBUG: Writing SQL file... ({} rules converted, {} errors)", success_count, error_count));
-
         fs::write(path, &sql).map_err(|e| anyhow!("Failed to write file: {}", e))?;
 
         self.log(&format!("Wrote {} bytes to {}", sql.len(), path));
-        Ok(())
+        Ok((success_count, error_count))
     }
 
     fn exit(&self) {
