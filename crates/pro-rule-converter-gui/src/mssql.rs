@@ -1,7 +1,7 @@
 //! MS SQL Server client using tiberius with SQL Server Authentication
 
-use anyhow::Result;
-use tiberius::{Client, Config, AuthMethod};
+use anyhow::{anyhow, Result};
+use tiberius::{Client, Config};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 
@@ -18,24 +18,25 @@ impl MsSqlClient {
         username: Option<&str>,
         password: Option<&str>,
     ) -> Result<Self> {
-        let mut config = Config::new();
+        // Build ADO.NET style connection string with Encrypt=false and TrustServerCertificate=true
+        let conn_str = format!(
+            "Server={};Database={};User Id={};Password={};Encrypt=false;TrustServerCertificate=true",
+            server,
+            database,
+            username.unwrap_or(""),
+            password.unwrap_or("")
+        );
 
-        config.host(server);
-        config.port(1433);
-        config.database(database);
+        let config = Config::from_ado_string(&conn_str)
+            .map_err(|e| anyhow!("Failed to parse connection string: {}", e))?;
 
-        // Use SQL Server Authentication
-        if let (Some(user), Some(pass)) = (username, password) {
-            config.authentication(AuthMethod::sql_server(user, pass));
-        }
-
-        // Note: TLS/encryption is disabled at compile time by not including
-        // the rustls or native-tls features in Cargo.toml
-
-        let tcp = TcpStream::connect(config.get_addr()).await?;
+        let addr = config.get_addr();
+        let tcp = TcpStream::connect(&addr).await
+            .map_err(|e| anyhow!("TCP connection to {} failed: {}. Verify SQL Server has TCP/IP enabled on port 1433.", addr, e))?;
         tcp.set_nodelay(true)?;
 
-        let client = Client::connect(config, tcp.compat_write()).await?;
+        let client = Client::connect(config, tcp.compat_write()).await
+            .map_err(|e| anyhow!("SQL Server login failed: {}", e))?;
 
         Ok(Self { client })
     }

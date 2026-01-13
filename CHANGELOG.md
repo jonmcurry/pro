@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.12.73.3] - 2025-01-13
+
+### Fixed
+- **Rule Converter GUI Definition Column**: Added missing definition column to ListView
+  - Now shows Rule Code, Rule Name, Description, and Definition columns
+  - Definition is truncated to 80 chars in display (full text used for export)
+- **Rule Converter GUI Export Crash**: Fixed application crash when clicking "Export Selected to SQL"
+  - Added extensive debug logging to diagnose export issues
+  - Added proper error handling for empty definitions
+  - Shows warning in log and SQL output for rules that fail to convert
+  - Shows success/error counts after export
+
+## [2.12.73.1] - 2025-01-13
+
+### Fixed
+- **Rule Converter GUI MS SQL Connection**: Fixed connection to MS SQL Server
+  - Now uses ADO.NET connection string with `Encrypt=false` and `TrustServerCertificate=true`
+  - Added Username and Password input fields to GUI
+  - Properly handles SQL Server Authentication
+
 ## [2.12.73.0] - 2025-01-13
 
 ### Added

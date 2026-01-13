@@ -108,32 +108,38 @@ pub struct RuleConverterApp {
     #[nwg_events(OnWindowClose: [RuleConverterApp::exit], OnInit: [RuleConverterApp::on_init])]
     window: nwg::Window,
 
-    // Connection section
+    // Connection section - Row 1: Server, Port
     #[nwg_control(parent: window, text: "Database Connection", position: (16, 12), size: (200, 22))]
     lbl_connection_header: nwg::Label,
 
-    #[nwg_control(parent: window, text: "Server:", position: (16, 40), size: (60, 20))]
+    #[nwg_control(parent: window, text: "Server:", position: (16, 40), size: (50, 20))]
     lbl_server: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (80, 38), size: (150, 24))]
+    #[nwg_control(parent: window, text: "localhost", position: (70, 38), size: (150, 24))]
     txt_server: nwg::TextInput,
 
-    #[nwg_control(parent: window, text: "Database:", position: (240, 40), size: (70, 20))]
+    #[nwg_control(parent: window, text: "Port:", position: (230, 40), size: (35, 20))]
+    lbl_port: nwg::Label,
+
+    #[nwg_control(parent: window, text: "1433", position: (270, 38), size: (55, 24))]
+    txt_port: nwg::TextInput,
+
+    #[nwg_control(parent: window, text: "Database:", position: (340, 40), size: (65, 20))]
     lbl_database: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (315, 38), size: (150, 24))]
+    #[nwg_control(parent: window, text: "", position: (410, 38), size: (140, 24))]
     txt_database: nwg::TextInput,
 
-    #[nwg_control(parent: window, text: "Username:", position: (480, 40), size: (70, 20))]
+    #[nwg_control(parent: window, text: "Username:", position: (565, 40), size: (70, 20))]
     lbl_username: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (555, 38), size: (120, 24))]
+    #[nwg_control(parent: window, text: "", position: (640, 38), size: (110, 24))]
     txt_username: nwg::TextInput,
 
-    #[nwg_control(parent: window, text: "Password:", position: (690, 40), size: (70, 20))]
+    #[nwg_control(parent: window, text: "Password:", position: (760, 40), size: (65, 20))]
     lbl_password: nwg::Label,
 
-    #[nwg_control(parent: window, text: "", position: (765, 38), size: (110, 24), flags: "VISIBLE|TAB_STOP", password: Some('*'))]
+    #[nwg_control(parent: window, text: "", position: (830, 38), size: (50, 24), flags: "VISIBLE|TAB_STOP", password: Some('*'))]
     txt_password: nwg::TextInput,
 
     #[nwg_control(parent: window, text: "Connect & Load Rules", position: (16, 70), size: (150, 28))]
@@ -188,26 +194,33 @@ impl RuleConverterApp {
         self.list_rules.insert_column(nwg::InsertListViewColumn {
             index: Some(0),
             fmt: None,
-            width: Some(120),
+            width: Some(100),
             text: Some("Rule Code".into()),
         });
         self.list_rules.insert_column(nwg::InsertListViewColumn {
             index: Some(1),
             fmt: None,
-            width: Some(300),
+            width: Some(200),
             text: Some("Rule Name".into()),
         });
         self.list_rules.insert_column(nwg::InsertListViewColumn {
             index: Some(2),
             fmt: None,
-            width: Some(420),
+            width: Some(200),
             text: Some("Description".into()),
+        });
+        self.list_rules.insert_column(nwg::InsertListViewColumn {
+            index: Some(3),
+            fmt: None,
+            width: Some(340),
+            text: Some("Definition".into()),
         });
 
         // Load config
         match load_config() {
             Ok(config) => {
                 self.txt_server.set_text(&config.database.server);
+                self.txt_port.set_text(&config.database.port.to_string());
                 self.txt_database.set_text(&config.database.database);
                 if let Some(ref username) = config.database.username {
                     self.txt_username.set_text(username);
@@ -333,8 +346,8 @@ impl RuleConverterApp {
                                 text: Some(rule.filter_name.clone()),
                                 image: None,
                             });
-                            let desc = if rule.description.len() > 80 {
-                                format!("{}...", &rule.description[..80])
+                            let desc = if rule.description.len() > 60 {
+                                format!("{}...", &rule.description[..60])
                             } else {
                                 rule.description.clone()
                             };
@@ -342,6 +355,18 @@ impl RuleConverterApp {
                                 index: Some(i as i32),
                                 column_index: 2,
                                 text: Some(desc),
+                                image: None,
+                            });
+                            // Add definition column (truncated for display)
+                            let def = if rule.definition.len() > 80 {
+                                format!("{}...", &rule.definition[..80])
+                            } else {
+                                rule.definition.clone()
+                            };
+                            self.list_rules.insert_item(nwg::InsertListViewItem {
+                                index: Some(i as i32),
+                                column_index: 3,
+                                text: Some(def),
                                 image: None,
                             });
                         }
@@ -379,14 +404,21 @@ impl RuleConverterApp {
         let selected = self.selected_indices.borrow();
         let mut selected_rules = Vec::new();
 
+        self.log(&format!("DEBUG: {} items selected", selected.len()));
+
         for &i in selected.iter() {
             if let Some(rule) = rules.get(i) {
+                self.log(&format!("DEBUG: Adding rule {} for export", rule.filter_number));
                 selected_rules.push(rule.clone());
             }
         }
 
+        drop(rules);
+        drop(selected);
+
         if selected_rules.is_empty() {
             self.log("No rules selected for export");
+            nwg::modal_info_message(&self.window, "No Selection", "Please select at least one rule to export.");
             return;
         }
 
@@ -398,57 +430,94 @@ impl RuleConverterApp {
             .map(|c| c.output.flag_category.clone())
             .unwrap_or_else(|| "QM".to_string());
 
-        // File save dialog
+        self.log("DEBUG: Opening file dialog...");
+
+        // File save dialog - NWG filter format: "Name(*.ext)"
         let mut file_dialog = nwg::FileDialog::default();
-        nwg::FileDialog::builder()
+        let build_result = nwg::FileDialog::builder()
             .title("Save SQL File")
             .action(nwg::FileDialogAction::Save)
-            .filters("SQL Files (*.sql)|*.sql|All Files (*.*)|*.*")
-            .build(&mut file_dialog)
-            .expect("Failed to create file dialog");
+            .build(&mut file_dialog);
+
+        if let Err(e) = build_result {
+            self.log(&format!("ERROR: Failed to create file dialog: {}", e));
+            return;
+        }
 
         if file_dialog.run(Some(&self.window)) {
-            if let Ok(path) = file_dialog.get_selected_item() {
-                let path_str = path.to_string_lossy().to_string();
-                let path_with_ext = if !path_str.ends_with(".sql") {
-                    format!("{}.sql", path_str)
-                } else {
-                    path_str
-                };
+            self.log("DEBUG: File dialog completed");
+            match file_dialog.get_selected_item() {
+                Ok(path) => {
+                    let path_str = path.to_string_lossy().to_string();
+                    self.log(&format!("DEBUG: Selected path: {}", path_str));
 
-                match self.generate_and_save_sql(&selected_rules, &category, &path_with_ext) {
-                    Ok(_) => {
-                        self.log(&format!("Successfully exported {} rules to {}", selected_rules.len(), path_with_ext));
-                        nwg::modal_info_message(&self.window, "Export Complete",
-                            &format!("Exported {} rules to:\n{}", selected_rules.len(), path_with_ext));
-                    }
-                    Err(e) => {
-                        self.log(&format!("Export failed: {}", e));
-                        nwg::modal_error_message(&self.window, "Export Failed", &format!("{}", e));
+                    let path_with_ext = if !path_str.ends_with(".sql") {
+                        format!("{}.sql", path_str)
+                    } else {
+                        path_str
+                    };
+
+                    match self.generate_and_save_sql(&selected_rules, &category, &path_with_ext) {
+                        Ok(_) => {
+                            self.log(&format!("Successfully exported {} rules to {}", selected_rules.len(), path_with_ext));
+                            nwg::modal_info_message(&self.window, "Export Complete",
+                                &format!("Exported {} rules to:\n{}", selected_rules.len(), path_with_ext));
+                        }
+                        Err(e) => {
+                            self.log(&format!("Export failed: {}", e));
+                            nwg::modal_error_message(&self.window, "Export Failed", &format!("{}", e));
+                        }
                     }
                 }
+                Err(e) => {
+                    self.log(&format!("ERROR: Failed to get selected file: {}", e));
+                }
             }
+        } else {
+            self.log("DEBUG: File dialog cancelled");
         }
     }
 
     fn generate_and_save_sql(&self, rules: &[RuleRow], category: &str, path: &str) -> Result<()> {
+        self.log(&format!("DEBUG: Generating SQL for {} rules to {}", rules.len(), path));
+
         let mut sql = String::new();
         sql.push_str("-- Generated by Rule Converter GUI\n");
         sql.push_str("-- COMPOSITE template rules for Professional SMART\n\n");
 
+        let mut success_count = 0;
+        let mut error_count = 0;
+
         for rule in rules {
+            self.log(&format!("DEBUG: Processing rule {}", rule.filter_number));
+
+            if rule.definition.is_empty() {
+                self.log(&format!("WARNING: Rule {} has empty definition, skipping", rule.filter_number));
+                sql.push_str(&format!("-- SKIPPED {}: Empty definition\n\n", rule.filter_number));
+                error_count += 1;
+                continue;
+            }
+
             match generate_sql_for_rule(&rule.filter_number, &rule.filter_name, &rule.description, &rule.definition, category) {
                 Ok(rule_sql) => {
                     sql.push_str(&rule_sql);
                     sql.push_str("\n");
+                    success_count += 1;
                 }
                 Err(e) => {
-                    sql.push_str(&format!("-- ERROR converting {}: {}\n\n", rule.filter_number, e));
+                    self.log(&format!("WARNING: Failed to convert {}: {}", rule.filter_number, e));
+                    sql.push_str(&format!("-- ERROR converting {}: {}\n", rule.filter_number, e));
+                    sql.push_str(&format!("-- Definition was: {}\n\n", rule.definition.replace('\n', " ").chars().take(200).collect::<String>()));
+                    error_count += 1;
                 }
             }
         }
 
-        fs::write(path, sql)?;
+        self.log(&format!("DEBUG: Writing SQL file... ({} rules converted, {} errors)", success_count, error_count));
+
+        fs::write(path, &sql).map_err(|e| anyhow!("Failed to write file: {}", e))?;
+
+        self.log(&format!("Wrote {} bytes to {}", sql.len(), path));
         Ok(())
     }
 
