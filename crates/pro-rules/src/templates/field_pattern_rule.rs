@@ -103,6 +103,7 @@ impl RuleTemplate for FieldPatternRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         self.validate_parameters(&params)?;
@@ -137,6 +138,7 @@ impl RuleTemplate for FieldPatternRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             field,
             pattern: pattern_str,
             regex,
@@ -153,6 +155,7 @@ pub struct FieldPatternRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    pub issue_code: String,
     pub field: String,
     pub pattern: String,
     pub regex: Regex,
@@ -188,6 +191,7 @@ impl Rule for FieldPatternRule {
             Ok(Some(
                 RuleResult::new(self.flag_issue_type, ctx.to_flag_context())
                     .with_details(message)
+                    .with_issue_code(self.issue_code.clone())
             ))
         } else {
             Ok(None)

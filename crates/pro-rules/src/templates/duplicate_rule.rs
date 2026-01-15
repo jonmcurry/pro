@@ -161,6 +161,7 @@ impl RuleTemplate for DuplicateRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         self.validate_parameters(&params)?;
@@ -196,6 +197,7 @@ impl RuleTemplate for DuplicateRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             table,
             match_fields,
             scope,
@@ -212,6 +214,7 @@ pub struct DuplicateRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    pub issue_code: String,
     pub table: String,
     pub match_fields: Vec<String>,
     pub scope: String,
@@ -250,6 +253,7 @@ impl Rule for DuplicateRule {
                             duplicate_count,
                             self.match_fields.join(", ")
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }
@@ -271,6 +275,7 @@ impl Rule for DuplicateRule {
                             duplicate_count,
                             self.match_fields.join(", ")
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }

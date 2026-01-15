@@ -478,7 +478,7 @@ pub fn run_service() -> Result<()> {
         let mut worker_handles = Vec::new();
         for worker_id in 0..worker_count {
             let worker_id_str = format!("worker-{}", worker_id);
-            let processor = crate::claims_processor::ClaimsProcessor::new(db_pool.clone());
+            let processor = crate::claims_processor::ClaimsProcessor::new(db_pool.clone()).await;
             let batch_rx_clone = batch_rx.clone();
             let result_tx_clone = result_tx.clone();
 

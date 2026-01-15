@@ -20,6 +20,9 @@ pub struct RuleResult {
     pub details: Option<String>,
     pub financial_impact: Option<Decimal>,
     pub context: FlagContext,
+    /// Database issue_code for flag_issue JOIN (e.g., "TEST_99213_SA", "QM_AHRQOP001A")
+    /// This is the actual issue_code from claims.flag_issue table, NOT the FlagIssueType enum code
+    pub issue_code: Option<String>,
 }
 
 impl RuleResult {
@@ -31,7 +34,13 @@ impl RuleResult {
             details: None,
             financial_impact: None,
             context,
+            issue_code: None,
         }
+    }
+
+    pub fn with_issue_code(mut self, issue_code: String) -> Self {
+        self.issue_code = Some(issue_code);
+        self
     }
 
     pub fn with_details(mut self, details: String) -> Self {
@@ -559,64 +568,10 @@ impl RuleEngine {
                 }
             }
 
-            // PHASE 8: Measure execution time for statistics
-            let start = std::time::Instant::now();
-
             // Execute rule with cache
             match rule.execute_with_cache(ctx, cache, &self.pool).await {
-                Ok(Some(result)) => {
-                    let execution_time_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-                    // PHASE 8: Log statistics to database (fire and forget to avoid blocking)
-                    let pool_clone = self.pool.clone();
-                    let rule_name = rule.name().to_string();
-                    let flag_type_str = format!("{:?}", rule.flag_type());
-                    let financial_impact = result.financial_impact;
-                    let org_id = ctx.organization_id;
-                    let facility_id = ctx.facility_id;
-
-                    tokio::spawn(async move {
-                        let _ = sqlx::query(
-                            "SELECT claims.log_rule_execution($1, $2, $3, $4, $5, $6, $7)"
-                        )
-                        .bind(&flag_type_str)
-                        .bind(&rule_name)
-                        .bind(true)  // triggered
-                        .bind(financial_impact)
-                        .bind(execution_time_ms as f32)
-                        .bind(org_id)
-                        .bind(facility_id)
-                        .execute(&pool_clone)
-                        .await;
-                    });
-
-                    results.push(result);
-                }
-                Ok(None) => {
-                    // PHASE 8: Log non-trigger statistics
-                    let execution_time_ms = start.elapsed().as_secs_f64() * 1000.0;
-
-                    let pool_clone = self.pool.clone();
-                    let rule_name = rule.name().to_string();
-                    let flag_type_str = format!("{:?}", rule.flag_type());
-                    let org_id = ctx.organization_id;
-                    let facility_id = ctx.facility_id;
-
-                    tokio::spawn(async move {
-                        let _ = sqlx::query(
-                            "SELECT claims.log_rule_execution($1, $2, $3, $4, $5, $6, $7)"
-                        )
-                        .bind(&flag_type_str)
-                        .bind(&rule_name)
-                        .bind(false)  // triggered
-                        .bind(None::<f64>)  // no financial impact
-                        .bind(execution_time_ms as f32)
-                        .bind(org_id)
-                        .bind(facility_id)
-                        .execute(&pool_clone)
-                        .await;
-                    });
-                }
+                Ok(Some(result)) => results.push(result),
+                Ok(None) => {} // Rule didn't trigger
                 Err(e) => {
                     // Log error but continue with other rules
                     eprintln!("Error executing rule {}: {}", rule.name(), e);
@@ -761,107 +716,167 @@ impl RuleEngine {
     }
 
     /// Create a single flag in the database
+    /// Routes to encounter_flag or service_line_flag based on context
     async fn create_flag(&self, result: &RuleResult) -> Result<i64> {
         let flag_code = result.flag_type.code();
-        let flag_category = result.flag_type.category().code();
         let severity = result.severity.as_str();
 
-        let query = r#"
-            INSERT INTO claims.flag (
-                encounter_id,
-                service_line_id,
-                organization_id,
-                facility_id,
-                provider_id,
-                coder_id,
-                flag_category,
-                flag_issue_code,
-                flag_issue_type,
-                flag_severity,
-                flag_description,
-                flag_details,
-                financial_impact,
-                flag_status,
-                created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'OPEN', CURRENT_TIMESTAMP)
-            RETURNING flag_id
-        "#;
+        // Build flag reason from description + details
+        let flag_reason = match &result.details {
+            Some(details) => format!("{}: {}", result.description, details),
+            None => result.description.clone(),
+        };
 
-        let flag_issue_type = result.flag_type.name();
+        // Determine if this is a service line flag or encounter flag
+        if let Some(service_line_id) = result.context.service_line_id {
+            // Service line level flag
+            let query = r#"
+                INSERT INTO claims.service_line_flag (
+                    service_line_id,
+                    issue_id,
+                    flag_type,
+                    severity,
+                    flag_reason,
+                    flagged_element,
+                    flag_status,
+                    created_at,
+                    created_by
+                )
+                SELECT $1, fi.issue_id, 'POST_BILL', $2, $3, $4, 'OPEN', CURRENT_TIMESTAMP, 'RULES_ENGINE'
+                FROM claims.flag_issue fi
+                WHERE fi.issue_code = $5
+                RETURNING flag_id
+            "#;
 
-        let row = sqlx::query_as::<_, (i64,)>(query)
-            .bind(result.context.encounter_id)
-            .bind(result.context.service_line_id)
-            .bind(result.context.organization_id)
-            .bind(result.context.facility_id)
-            .bind(result.context.provider_id)
-            .bind(result.context.coder_id)
-            .bind(flag_category)
-            .bind(flag_code)
-            .bind(flag_issue_type)
-            .bind(severity)
-            .bind(&result.description)
-            .bind(&result.details)
-            .bind(result.financial_impact)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| Error::Database(e))?;
+            let row = sqlx::query_as::<_, (i64,)>(query)
+                .bind(service_line_id)
+                .bind(severity)
+                .bind(&flag_reason)
+                .bind(flag_code)  // flagged_element = issue code
+                .bind(flag_code)  // issue_code lookup
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| Error::Database(e))?;
 
-        Ok(row.0)
+            Ok(row.0)
+        } else if let Some(encounter_id) = result.context.encounter_id {
+            // Encounter level flag
+            let query = r#"
+                INSERT INTO claims.encounter_flag (
+                    encounter_id,
+                    issue_id,
+                    flag_type,
+                    severity,
+                    flag_reason,
+                    flagged_element,
+                    flag_status,
+                    created_at,
+                    created_by
+                )
+                SELECT $1, fi.issue_id, 'POST_BILL', $2, $3, $4, 'OPEN', CURRENT_TIMESTAMP, 'RULES_ENGINE'
+                FROM claims.flag_issue fi
+                WHERE fi.issue_code = $5
+                RETURNING flag_id
+            "#;
+
+            let row = sqlx::query_as::<_, (i64,)>(query)
+                .bind(encounter_id)
+                .bind(severity)
+                .bind(&flag_reason)
+                .bind(flag_code)  // flagged_element = issue code
+                .bind(flag_code)  // issue_code lookup
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| Error::Database(e))?;
+
+            Ok(row.0)
+        } else {
+            Err(Error::Validation("Flag must have either encounter_id or service_line_id".into()))
+        }
     }
 
     /// Create a single flag within transaction (PHASE 2 OPTIMIZATION)
+    /// Routes to encounter_flag or service_line_flag based on context
     async fn create_flag_with_tx(
         &self,
         result: &RuleResult,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     ) -> Result<i64> {
         let flag_code = result.flag_type.code();
-        let flag_category = result.flag_type.category().code();
         let severity = result.severity.as_str();
 
-        let query = r#"
-            INSERT INTO claims.flag (
-                encounter_id,
-                service_line_id,
-                organization_id,
-                facility_id,
-                provider_id,
-                coder_id,
-                flag_category,
-                flag_issue_code,
-                flag_issue_type,
-                flag_severity,
-                flag_description,
-                flag_details,
-                financial_impact,
-                flag_status,
-                created_at
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 'OPEN', CURRENT_TIMESTAMP)
-            RETURNING flag_id
-        "#;
+        // Build flag reason from description + details
+        let flag_reason = match &result.details {
+            Some(details) => format!("{}: {}", result.description, details),
+            None => result.description.clone(),
+        };
 
-        let flag_issue_type = result.flag_type.name();
+        // Determine if this is a service line flag or encounter flag
+        if let Some(service_line_id) = result.context.service_line_id {
+            // Service line level flag
+            let query = r#"
+                INSERT INTO claims.service_line_flag (
+                    service_line_id,
+                    issue_id,
+                    flag_type,
+                    severity,
+                    flag_reason,
+                    flagged_element,
+                    flag_status,
+                    created_at,
+                    created_by
+                )
+                SELECT $1, fi.issue_id, 'POST_BILL', $2, $3, $4, 'OPEN', CURRENT_TIMESTAMP, 'RULES_ENGINE'
+                FROM claims.flag_issue fi
+                WHERE fi.issue_code = $5
+                RETURNING flag_id
+            "#;
 
-        let row = sqlx::query_as::<_, (i64,)>(query)
-            .bind(result.context.encounter_id)
-            .bind(result.context.service_line_id)
-            .bind(result.context.organization_id)
-            .bind(result.context.facility_id)
-            .bind(result.context.provider_id)
-            .bind(result.context.coder_id)
-            .bind(flag_category)
-            .bind(flag_code)
-            .bind(flag_issue_type)
-            .bind(severity)
-            .bind(&result.description)
-            .bind(&result.details)
-            .bind(result.financial_impact)
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(|e| Error::Database(e))?;
+            let row = sqlx::query_as::<_, (i64,)>(query)
+                .bind(service_line_id)
+                .bind(severity)
+                .bind(&flag_reason)
+                .bind(flag_code)  // flagged_element = issue code
+                .bind(flag_code)  // issue_code lookup
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| Error::Database(e))?;
 
-        Ok(row.0)
+            Ok(row.0)
+        } else if let Some(encounter_id) = result.context.encounter_id {
+            // Encounter level flag
+            let query = r#"
+                INSERT INTO claims.encounter_flag (
+                    encounter_id,
+                    issue_id,
+                    flag_type,
+                    severity,
+                    flag_reason,
+                    flagged_element,
+                    flag_status,
+                    created_at,
+                    created_by
+                )
+                SELECT $1, fi.issue_id, 'POST_BILL', $2, $3, $4, 'OPEN', CURRENT_TIMESTAMP, 'RULES_ENGINE'
+                FROM claims.flag_issue fi
+                WHERE fi.issue_code = $5
+                RETURNING flag_id
+            "#;
+
+            let row = sqlx::query_as::<_, (i64,)>(query)
+                .bind(encounter_id)
+                .bind(severity)
+                .bind(&flag_reason)
+                .bind(flag_code)  // flagged_element = issue code
+                .bind(flag_code)  // issue_code lookup
+                .fetch_one(&mut **tx)
+                .await
+                .map_err(|e| Error::Database(e))?;
+
+            Ok(row.0)
+        } else {
+            Err(Error::Validation("Flag must have either encounter_id or service_line_id".into()))
+        }
     }
 
     /// Get rule count

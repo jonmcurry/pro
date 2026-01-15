@@ -1,5 +1,43 @@
 # Changelog
 
+## [2.12.73.11] - 2025-01-15
+
+### Fixed
+- **Remove PHASE 8 Rule Logging**: Removed incomplete PHASE 8 rule execution logging code from `execute_all_with_cache()`
+  - The code was calling non-existent `claims.log_rule_execution()` stored procedure
+  - Spawned background tasks for every rule execution (triggered or not), causing potential connection pool exhaustion
+  - While not directly called by claims_processor (which uses `execute_all`), the code path exists and could cause issues
+
+## [2.12.73.10] - 2025-01-15
+
+### Fixed
+- **Rules Engine Flag INSERT JOIN Fix**: Fixed critical bug where flags were not being inserted into `claims.service_line_flag`
+  - Root cause: `RuleResult.flag_type.code()` returned hardcoded enum codes like `"OTH-003"` but the database `claims.flag_issue.issue_code` contains custom values like `"TEST_99213_SA"`
+  - The INSERT JOIN `ON fi.issue_code = fd.issue_code` was failing because codes didn't match
+  - Added `issue_code: Option<String>` field to `RuleResult` struct
+  - Added `with_issue_code()` builder method to `RuleResult`
+  - Updated `RuleTemplate::instantiate()` signature to accept `issue_code` parameter
+  - Updated loader to extract `issue_code` from database row and pass to all templates
+  - Updated all template rules to store and return `issue_code` in their `execute()` methods:
+    - `composite_rule.rs` (COMPOSITE template)
+    - `threshold_rule.rs` (THRESHOLD template)
+    - `duplicate_rule.rs` (DUPLICATE template)
+    - `missing_field_rule.rs` (MISSING_FIELD template)
+    - `field_pattern_rule.rs` (FIELD_PATTERN template)
+    - `cross_field_rule.rs` (CROSS_FIELD template)
+  - Updated `claims_processor.rs` to use `result.issue_code` when available, falling back to `result.flag_type.code()` for legacy rules
+  - Added debug logging in loader to show `issue_code` during rule instantiation
+
+## [2.12.73.5] - 2025-01-13
+
+### Fixed
+- **Rules Engine Flag Persistence**: Fixed critical bug where flags were not being inserted
+  - Rule engine was trying to insert into non-existent `claims.flag` table
+  - Now correctly inserts into `claims.encounter_flag` for encounter-level flags
+  - Now correctly inserts into `claims.service_line_flag` for service line-level flags
+  - Flags now link to `flag_issue` table via `issue_id` using the `issue_code` lookup
+  - Added proper routing based on whether `service_line_id` or `encounter_id` is present
+
 ## [2.12.73.4] - 2025-01-13
 
 ### Fixed

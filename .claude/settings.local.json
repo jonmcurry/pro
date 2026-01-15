@@ -231,7 +231,16 @@
       "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.72.0\")",
       "Bash(\"C:/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" Product.wxs DatabaseConfigDlg.wxs PrerequisiteDlg.wxs -dSolutionDir=../ -ext WixUtilExtension -ext WixUIExtension)",
       "Bash(\"C:/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" Product.wixobj DatabaseConfigDlg.wixobj PrerequisiteDlg.wixobj -o ProfessionalSMART.msi -ext WixUtilExtension -ext WixUIExtension)",
-      "Bash(.build.ps1)"
+      "Bash(.build.ps1)",
+      "Bash(wc:*)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/candle.exe\" -ext WixUIExtension -ext WixUtilExtension -dSolutionDir=../ Product.wxs PrerequisiteDlg.wxs DatabaseConfigDlg.wxs)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -out \"ProfessionalSMART-2.12.73.6.msi\" Product.wixobj PrerequisiteDlg.wixobj DatabaseConfigDlg.wixobj)",
+      "Bash(\"/c/Program Files \\(x86\\)/WiX Toolset v3.14/bin/light.exe\" -ext WixUIExtension -ext WixUtilExtension -out \"ProfessionalSMART.msi\" Product.wixobj PrerequisiteDlg.wixobj DatabaseConfigDlg.wixobj)",
+      "Bash(dir \"C:\\\\Program Files \\(x86\\)\\\\WiX Toolset*\")",
+      "Bash(dir \"C:\\\\Program Files\\\\WiX Toolset*\")",
+      "Bash(cmd /c \"where candle\")",
+      "Bash(cmd /c \"dir \"\"C:\\\\Program Files \\(x86\\)\\\\WiX*\"\" /b\")",
+      "Bash(cmd /c \"if exist \"\"C:\\\\Program Files \\(x86\\)\\\\WiX Toolset v3.14\\\\bin\\\\candle.exe\"\" echo FOUND\")"
     ],
     "deny": [],
     "ask": []

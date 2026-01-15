@@ -145,6 +145,7 @@ impl RuleTemplate for ThresholdRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         self.validate_parameters(&params)?;
@@ -160,6 +161,7 @@ impl RuleTemplate for ThresholdRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             field,
             operator,
             threshold,
@@ -175,6 +177,7 @@ pub struct ThresholdRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    pub issue_code: String,
     pub field: String,
     pub operator: ComparisonOperator,
     pub threshold: Decimal,
@@ -203,6 +206,7 @@ impl Rule for ThresholdRule {
                             "{} ({}) is below minimum threshold ({})",
                             self.field, value, min
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }
@@ -215,6 +219,7 @@ impl Rule for ThresholdRule {
                             "{} ({}) exceeds maximum threshold ({})",
                             self.field, value, max
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }
@@ -237,6 +242,7 @@ impl Rule for ThresholdRule {
                         },
                         self.threshold
                     ))
+                    .with_issue_code(self.issue_code.clone())
             ))
         } else {
             Ok(None)

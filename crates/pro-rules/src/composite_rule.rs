@@ -83,6 +83,8 @@ impl CompositeRule {
             details: Some(format!("{} of {} sub-rules triggered", subrule_results.len(), self.subrules.len())),
             financial_impact: Some(total_impact),
             context: ctx.to_flag_context(),
+            // Legacy composite rule doesn't have database issue_code
+            issue_code: None,
         }
     }
 }

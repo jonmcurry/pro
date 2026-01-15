@@ -149,6 +149,12 @@ Function WriteConfig()
     configFile.WriteLine "# BATCH_SIZE: Claims per batch for processing (default: 750, proven optimal for 666+ claims/sec)"
     configFile.WriteLine "STAGE2_WORKER_COUNT=8"
     configFile.WriteLine "BATCH_SIZE=750"
+    configFile.WriteLine ""
+    configFile.WriteLine "# Rules Engine Configuration"
+    configFile.WriteLine "# ENABLE_DATABASE_RULES: Set to true to load rules from database (required for COMPOSITE rules)"
+    configFile.WriteLine "# RULE_ENCRYPTION_KEY: Secret key for encrypting/decrypting rule parameters (must match PostgreSQL setting)"
+    configFile.WriteLine "ENABLE_DATABASE_RULES=true"
+    configFile.WriteLine "RULE_ENCRYPTION_KEY=ProfessionalSmartRulesKey2024"
 
     configFile.Close
     On Error GoTo 0

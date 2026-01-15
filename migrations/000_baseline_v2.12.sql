@@ -10520,5 +10520,34 @@ VALUES
     ('066_enforce_postgresql_settings.sql', NOW(), 'baseline', 'Enforce PostgreSQL configuration settings'),
     ('067_create_encounter_procedure_modifiers.sql', NOW(), 'baseline', 'Create encounter procedure modifiers table'),
     ('068_create_encounter_view.sql', NOW(), 'baseline', 'Create encounter summary view'),
-    ('069_setup_smartproaudit_fdw.sql', NOW(), 'baseline', 'Setup SmartProAudit foreign data wrapper')
+    ('069_setup_smartproaudit_fdw.sql', NOW(), 'baseline', 'Setup SmartProAudit foreign data wrapper'),
+    ('070_set_rule_encryption_key.sql', NOW(), 'baseline', 'Set default rule encryption key configuration')
 ON CONFLICT (migration_name) DO NOTHING;
+
+-- ============================================================================
+-- Source: 070_set_rule_encryption_key.sql
+-- ============================================================================
+
+-- Migration: 070_set_rule_encryption_key
+-- Description: Set default rule encryption key for pgp_sym_encrypt/decrypt
+-- Date: 2025-01-15
+-- Note: This sets a default key. Production installations should change this
+--       to a unique secret key and ensure it matches RULE_ENCRYPTION_KEY in .env
+
+-- Set the rule encryption key at the database level
+-- This will be used by pgp_sym_encrypt/pgp_sym_decrypt for rule parameters
+DO $$
+BEGIN
+    -- Set default encryption key (should be overridden in production)
+    EXECUTE format('ALTER DATABASE %I SET app.rule_encryption_key = %L',
+                   current_database(),
+                   'ProfessionalSmartRulesKey2024');
+    RAISE NOTICE 'Set app.rule_encryption_key for database %', current_database();
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Could not set app.rule_encryption_key: %. You may need to set it manually.', SQLERRM;
+END $$;
+
+-- Also set it for the current session so it's immediately available
+SET app.rule_encryption_key = 'ProfessionalSmartRulesKey2024';
+
+COMMENT ON DATABASE current_database() IS 'Professional SMART - Healthcare Claims Auditing System. Rule encryption key is set via app.rule_encryption_key configuration.';

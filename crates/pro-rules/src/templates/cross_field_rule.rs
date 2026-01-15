@@ -151,6 +151,7 @@ impl RuleTemplate for CrossFieldRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         self.validate_parameters(&params)?;
@@ -164,6 +165,7 @@ impl RuleTemplate for CrossFieldRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             field1,
             operator,
             field2,
@@ -177,6 +179,7 @@ pub struct CrossFieldRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    pub issue_code: String,
     pub field1: String,
     pub operator: CrossFieldOperator,
     pub field2: String,
@@ -205,6 +208,7 @@ impl Rule for CrossFieldRule {
                             self.field2,
                             val2
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }
@@ -224,6 +228,7 @@ impl Rule for CrossFieldRule {
                             self.field2,
                             date2
                         ))
+                        .with_issue_code(self.issue_code.clone())
                 ));
             }
         }

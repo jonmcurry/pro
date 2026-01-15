@@ -2541,6 +2541,7 @@ dependencies = [
  "pro-npi-enrichment",
  "pro-parser-csv",
  "pro-parser-edi",
+ "pro-rules",
  "pro-upgrade-manager",
  "pro-worker",
  "rand 0.8.5",

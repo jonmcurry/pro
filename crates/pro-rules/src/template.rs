@@ -150,11 +150,19 @@ pub trait RuleTemplate: Send + Sync {
     }
 
     /// Create a Rule instance from parameters
+    ///
+    /// # Arguments
+    /// * `rule_code` - Unique rule identifier (e.g., "TEST_99213_SA")
+    /// * `rule_name` - Human-readable rule name
+    /// * `flag_issue_type` - Type of flag to create when rule triggers
+    /// * `issue_code` - Database issue_code from claims.flag_issue for JOIN (e.g., "TEST_99213_SA")
+    /// * `params` - JSON parameters for rule configuration
     fn instantiate(
         &self,
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>>;
 }

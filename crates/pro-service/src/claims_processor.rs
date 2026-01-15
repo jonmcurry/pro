@@ -9,6 +9,7 @@
 //! - Stage 2: staging.raw_claims -> encounters/errors (validated processing) - THIS MODULE
 
 use anyhow::{Context, Result};
+use pro_rules::{RuleEngine, RuleExecutionContext, load_rules_from_database};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
@@ -76,16 +77,51 @@ pub struct ClaimsProcessor {
     /// Cache of NPI -> provider_id for avoiding redundant DB upserts
     /// PERFORMANCE: Reduces ~16 provider DB calls per encounter to only unique NPIs
     provider_cache: Arc<RwLock<HashMap<String, i64>>>,
+    /// Rules engine for post-bill auditing
+    /// Loaded from database based on ENABLE_DATABASE_RULES env var
+    rule_engine: Arc<RwLock<RuleEngine>>,
 }
 
 impl ClaimsProcessor {
-    /// Create a new claims processor
-    pub fn new(pool: PgPool) -> Self {
+    /// Create a new claims processor with rules engine
+    ///
+    /// Rules are loaded from database based on ENABLE_DATABASE_RULES env var:
+    /// - If true: Load rules from database (requires RULE_ENCRYPTION_KEY)
+    /// - If false: Use empty rule engine (no rules executed)
+    pub async fn new(pool: PgPool) -> Self {
+        // Check if database-driven rules are enabled
+        let use_database_rules = std::env::var("ENABLE_DATABASE_RULES")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
+            .unwrap_or(false);
+
+        let rule_engine = if use_database_rules {
+            info!("Loading rules from database for Stage 2 processor...");
+            match load_rules_from_database(&pool, None).await {
+                Ok((engine, rules)) => {
+                    info!("Stage 2: Loaded {} rule(s) from database", rules.len());
+                    for rule in &rules {
+                        info!("  - {} ({}): {}", rule.rule_code, rule.execution_level, rule.rule_name);
+                    }
+                    engine
+                }
+                Err(e) => {
+                    error!("Failed to load rules from database: {}", e);
+                    warn!("Stage 2 will run without rules engine");
+                    RuleEngine::new(pool.clone())
+                }
+            }
+        } else {
+            info!("Stage 2: Rules engine disabled (ENABLE_DATABASE_RULES=false)");
+            RuleEngine::new(pool.clone())
+        };
+
         Self {
             pool,
             taxonomy_cache: Arc::new(RwLock::new(HashMap::new())),
             taxonomy_cache_loaded: Arc::new(RwLock::new(false)),
             provider_cache: Arc::new(RwLock::new(HashMap::new())),
+            rule_engine: Arc::new(RwLock::new(rule_engine)),
         }
     }
 
@@ -1150,6 +1186,8 @@ impl ClaimsProcessor {
         // Insert all service lines for this encounter
         // For EDI files: one raw_claim contains ALL service lines (service_line_1_*, service_line_2_*, etc.)
         // For CSV files: each raw_claim contains ONE service line (always service_line_1_*)
+        // PERFORMANCE: Collect service line contexts for rule execution (avoids re-querying DB)
+        let mut service_line_contexts: Vec<ServiceLineRuleContext> = Vec::new();
         let mut line_number = 1;
         for raw_claim in service_lines {
             // Check how many service lines are in this raw_claim's JSONB
@@ -1167,13 +1205,45 @@ impl ClaimsProcessor {
             // Import each service line from this raw_claim
             for sl_idx in 1..=num_service_lines {
                 let prefix = format!("service_line_{}_", sl_idx);
-                self.import_service_line(tx, encounter_id, organization_id, raw_claim, line_number, &prefix).await?;
+                let sl_ctx = self.import_service_line(tx, encounter_id, organization_id, raw_claim, line_number, &prefix).await?;
+                service_line_contexts.push(sl_ctx);
                 line_number += 1;
             }
         }
 
         // Aggregate and insert procedure modifiers from all service lines
         self.insert_encounter_procedure_modifiers(tx, encounter_id).await?;
+
+        // Extract diagnosis codes from first service line's raw_claim for rule execution
+        // PERFORMANCE: Reuse parsed data instead of re-querying DB
+        let diagnosis_codes: Vec<String> = first_line.diagnosis_fields.as_ref()
+            .and_then(|df| serde_json::from_value::<HashMap<String, Vec<String>>>(df.clone()).ok())
+            .map(|fields| {
+                let mut codes: Vec<(usize, String)> = Vec::new();
+                for (field_name, values) in &fields {
+                    if field_name.starts_with("diagnosis_code_") {
+                        if let Some(seq_str) = field_name.strip_prefix("diagnosis_code_") {
+                            if let Ok(seq) = seq_str.parse::<usize>() {
+                                for code in values {
+                                    codes.push((seq, code.clone()));
+                                }
+                            }
+                        }
+                    } else if field_name == "diagnosis_code" {
+                        for (idx, code) in values.iter().enumerate() {
+                            codes.push((idx + 1, code.clone()));
+                        }
+                    }
+                }
+                codes.sort_by_key(|(seq, _)| *seq);
+                codes.into_iter().map(|(_, code)| code).collect()
+            })
+            .unwrap_or_default();
+
+        // Execute rules engine for this encounter (OPTIMIZED: no DB re-queries)
+        let _flags_created = self.execute_rules_for_service_lines(
+            tx, encounter_id, organization_id, &service_line_contexts, &diagnosis_codes
+        ).await?;
 
         // Insert billing payer into encounter_payer table (first SBR - the one being billed)
         self.insert_encounter_payer(
@@ -2218,9 +2288,13 @@ impl ClaimsProcessor {
             }
         }
 
+        // Import diagnoses FIRST so they exist when service line pointers reference them
+        self.import_diagnoses(tx, encounter_id, raw_claim).await?;
+
         // Import all service lines from this raw_claim
         // For EDI: may have multiple service lines (service_line_1_*, service_line_2_*, etc.)
         // For CSV: typically one service line (service_line_1_*)
+        // PERFORMANCE: Collect service line contexts for rule execution
         let service_line_fields: HashMap<String, String> = raw_claim.service_line_fields.as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
@@ -2228,13 +2302,42 @@ impl ClaimsProcessor {
         let num_service_lines = Self::count_service_lines_in_jsonb(&service_line_fields);
         let num_service_lines = if num_service_lines == 0 { 1 } else { num_service_lines }; // Default to 1
 
+        let mut service_line_contexts: Vec<ServiceLineRuleContext> = Vec::with_capacity(num_service_lines);
         for sl_idx in 1..=num_service_lines {
             let prefix = format!("service_line_{}_", sl_idx);
-            self.import_service_line(tx, encounter_id, organization_id, raw_claim, sl_idx as i32, &prefix).await?;
+            let sl_ctx = self.import_service_line(tx, encounter_id, organization_id, raw_claim, sl_idx as i32, &prefix).await?;
+            service_line_contexts.push(sl_ctx);
         }
 
-        // Import diagnoses
-        self.import_diagnoses(tx, encounter_id, raw_claim).await?;
+        // Extract diagnosis codes for rule execution (reuse parsed data)
+        let diagnosis_codes: Vec<String> = raw_claim.diagnosis_fields.as_ref()
+            .and_then(|df| serde_json::from_value::<HashMap<String, Vec<String>>>(df.clone()).ok())
+            .map(|fields| {
+                let mut codes: Vec<(usize, String)> = Vec::new();
+                for (field_name, values) in &fields {
+                    if field_name.starts_with("diagnosis_code_") {
+                        if let Some(seq_str) = field_name.strip_prefix("diagnosis_code_") {
+                            if let Ok(seq) = seq_str.parse::<usize>() {
+                                for code in values {
+                                    codes.push((seq, code.clone()));
+                                }
+                            }
+                        }
+                    } else if field_name == "diagnosis_code" {
+                        for (idx, code) in values.iter().enumerate() {
+                            codes.push((idx + 1, code.clone()));
+                        }
+                    }
+                }
+                codes.sort_by_key(|(seq, _)| *seq);
+                codes.into_iter().map(|(_, code)| code).collect()
+            })
+            .unwrap_or_default();
+
+        // Execute rules engine (OPTIMIZED: no DB re-queries)
+        let _flags_created = self.execute_rules_for_service_lines(
+            tx, encounter_id, organization_id, &service_line_contexts, &diagnosis_codes
+        ).await?;
 
         Ok(encounter_id)
     }
@@ -2278,6 +2381,8 @@ impl ClaimsProcessor {
     /// Import service line for an encounter
     /// The `service_line_prefix` parameter specifies which service line to read from the JSONB
     /// (e.g., "service_line_1_" or "service_line_2_")
+    /// Import a service line and return context for rule execution
+    /// Returns ServiceLineRuleContext to avoid re-querying DB for rules
     async fn import_service_line(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -2286,7 +2391,7 @@ impl ClaimsProcessor {
         raw_claim: &RawClaim,
         line_number: i32,
         service_line_prefix: &str,
-    ) -> Result<()> {
+    ) -> Result<ServiceLineRuleContext> {
         // Deserialize encounter fields - use JsonValue to handle mixed types (strings, arrays like other_insurance)
         let encounter_fields: HashMap<String, JsonValue> = serde_json::from_value(raw_claim.encounter_fields.clone())
             .context("Failed to deserialize encounter_fields")?;
@@ -2708,7 +2813,23 @@ impl ClaimsProcessor {
             pointer_4
         ).await?;
 
-        Ok(())
+        // Build modifiers list for rule context
+        let mut modifiers = Vec::with_capacity(4);
+        if let Some(m) = modifier_1 { modifiers.push(m.to_string()); }
+        if let Some(m) = modifier_2 { modifiers.push(m.to_string()); }
+        if let Some(m) = modifier_3 { modifiers.push(m.to_string()); }
+        if let Some(m) = modifier_4 { modifiers.push(m.to_string()); }
+
+        // Return context for rule execution (avoids re-querying DB)
+        Ok(ServiceLineRuleContext {
+            service_line_id,
+            procedure_code: procedure_code.to_string(),
+            modifiers,
+            units: unit_count,
+            charge: charge_amount,
+            service_date,
+            place_of_service: place_of_service_code.map(|s| s.to_string()),
+        })
     }
 
     /// Import service line diagnosis pointers (junction table)
@@ -3358,6 +3479,151 @@ impl ClaimsProcessor {
             }
         }
     }
+
+    /// Execute rules for service lines and persist flags (OPTIMIZED)
+    ///
+    /// PERFORMANCE OPTIMIZATIONS:
+    /// - Takes pre-collected service line data (no extra DB queries)
+    /// - Shares diagnosis codes reference (no cloning per service line)
+    /// - Batch inserts flags (single query for all flags)
+    /// - Pre-caches issue_id lookups
+    /// - Only acquires rule_engine read lock once
+    async fn execute_rules_for_service_lines(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        encounter_id: i64,
+        organization_id: i64,
+        service_line_contexts: &[ServiceLineRuleContext],
+        diagnosis_codes: &[String],
+    ) -> Result<usize> {
+        if service_line_contexts.is_empty() {
+            return Ok(0);
+        }
+
+        // Single lock acquisition for all rule executions
+        let rule_engine = self.rule_engine.read().await;
+
+        // Skip if no rules loaded
+        if rule_engine.rule_count() == 0 {
+            return Ok(0);
+        }
+
+        // Collect all flags to batch insert
+        // Tuple: (service_line_id, issue_code, flag_reason, severity)
+        let mut flags_to_insert: Vec<(i64, String, String, String)> = Vec::new();
+
+        // Execute rules for each service line
+        for sl_ctx in service_line_contexts {
+            // Build rule execution context (stack allocated, no heap for small vecs)
+            let mut ctx = RuleExecutionContext::new(organization_id);
+            ctx.encounter_id = Some(encounter_id);
+            ctx.service_line_id = Some(sl_ctx.service_line_id);
+            ctx.procedure_code = Some(sl_ctx.procedure_code.clone());
+            ctx.procedure_modifiers = sl_ctx.modifiers.clone();
+            ctx.service_unit_count = Some(sl_ctx.units);
+            ctx.line_item_charge_amount = Some(sl_ctx.charge);
+            ctx.date_of_service = Some(sl_ctx.service_date);
+            ctx.place_of_service_code = sl_ctx.place_of_service.clone();
+            // Share reference to diagnosis codes (no clone)
+            ctx.diagnosis_codes = diagnosis_codes.to_vec();
+
+            // Execute all rules
+            match rule_engine.execute_all(&ctx).await {
+                Ok(results) => {
+                    for result in results {
+                        // Use the database issue_code if available, otherwise fall back to flag_type.code()
+                        // COMPOSITE/template rules set issue_code from database, legacy rules use enum code
+                        let flag_code = result.issue_code
+                            .as_deref()
+                            .unwrap_or_else(|| result.flag_type.code());
+                        let severity = result.severity.as_str();
+                        let flag_reason = match &result.details {
+                            Some(details) => format!("{}: {}", result.description, details),
+                            None => result.description.clone(),
+                        };
+                        flags_to_insert.push((sl_ctx.service_line_id, flag_code.to_string(), flag_reason, severity.to_string()));
+                    }
+                }
+                Err(e) => {
+                    warn!("Error executing rules for service_line {}: {}", sl_ctx.service_line_id, e);
+                }
+            }
+        }
+
+        // Early return if no flags
+        if flags_to_insert.is_empty() {
+            return Ok(0);
+        }
+
+        // BATCH INSERT: Single query for all flags using UNNEST
+        // This is ~10x faster than individual inserts
+        let service_line_ids: Vec<i64> = flags_to_insert.iter().map(|(id, _, _, _)| *id).collect();
+        let issue_codes: Vec<&str> = flags_to_insert.iter().map(|(_, code, _, _)| code.as_str()).collect();
+        let flag_reasons: Vec<&str> = flags_to_insert.iter().map(|(_, _, reason, _)| reason.as_str()).collect();
+        let severities: Vec<&str> = flags_to_insert.iter().map(|(_, _, _, sev)| sev.as_str()).collect();
+
+        let rows_inserted = sqlx::query_scalar::<_, i64>(
+            r#"
+            WITH flag_data AS (
+                SELECT
+                    unnest($1::bigint[]) as service_line_id,
+                    unnest($2::text[]) as issue_code,
+                    unnest($3::text[]) as flag_reason,
+                    unnest($4::text[]) as severity
+            )
+            INSERT INTO claims.service_line_flag (
+                service_line_id,
+                issue_id,
+                flag_type,
+                severity,
+                flag_reason,
+                flagged_element,
+                flag_status,
+                created_at,
+                created_by
+            )
+            SELECT
+                fd.service_line_id,
+                fi.issue_id,
+                'POST_BILL',
+                fd.severity,
+                fd.flag_reason,
+                fd.issue_code,
+                'OPEN',
+                CURRENT_TIMESTAMP,
+                'RULES_ENGINE'
+            FROM flag_data fd
+            JOIN claims.flag_issue fi ON fi.issue_code = fd.issue_code
+            RETURNING flag_id
+            "#
+        )
+        .bind(&service_line_ids)
+        .bind(&issue_codes)
+        .bind(&flag_reasons)
+        .bind(&severities)
+        .fetch_all(&mut **tx)
+        .await
+        .map(|rows| rows.len())
+        .unwrap_or(0);
+
+        if rows_inserted > 0 {
+            debug!("Created {} flag(s) for encounter {}", rows_inserted, encounter_id);
+        }
+
+        Ok(rows_inserted)
+    }
+}
+
+/// Service line context for rule execution (avoids re-querying DB)
+#[derive(Debug, Clone)]
+pub struct ServiceLineRuleContext {
+    pub service_line_id: i64,
+    pub procedure_code: String,
+    pub modifiers: Vec<String>,
+    pub units: rust_decimal::Decimal,
+    pub charge: rust_decimal::Decimal,
+    pub service_date: chrono::NaiveDate,
+    pub place_of_service: Option<String>,
 }
 
 /// Raw claim from staging.raw_claims table

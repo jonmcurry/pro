@@ -64,6 +64,7 @@ impl RuleTemplate for CompositeRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         // Parse operator
@@ -100,6 +101,7 @@ impl RuleTemplate for CompositeRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             operator: logic_operator,
             conditions: compiled_conditions,
         }))
@@ -313,6 +315,8 @@ pub struct CompositeRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    /// Database issue_code for flag_issue JOIN (e.g., "TEST_99213_SA")
+    pub issue_code: String,
     pub operator: LogicOperator,
     pub conditions: Vec<CompiledCondition>,
 }
@@ -355,7 +359,8 @@ impl Rule for CompositeRule {
             Ok(Some(
                 RuleResult::new(self.flag_issue_type, ctx.to_flag_context())
                     .with_severity(FlagSeverity::Medium)
-                    .with_details(description),
+                    .with_details(description)
+                    .with_issue_code(self.issue_code.clone()),
             ))
         } else {
             Ok(None)

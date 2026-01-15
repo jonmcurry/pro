@@ -60,6 +60,7 @@ impl RuleTemplate for MissingFieldRuleTemplate {
         rule_code: String,
         rule_name: String,
         flag_issue_type: FlagIssueType,
+        issue_code: String,
         params: JsonValue,
     ) -> Result<Arc<dyn Rule>> {
         self.validate_parameters(&params)?;
@@ -75,6 +76,7 @@ impl RuleTemplate for MissingFieldRuleTemplate {
             rule_code,
             rule_name,
             flag_issue_type,
+            issue_code,
             fields,
             check_empty,
         }))
@@ -87,6 +89,7 @@ pub struct MissingFieldRule {
     pub rule_code: String,
     pub rule_name: String,
     pub flag_issue_type: FlagIssueType,
+    pub issue_code: String,
     pub fields: Vec<String>,
     pub check_empty: bool,
 }
@@ -111,6 +114,7 @@ impl Rule for MissingFieldRule {
             Ok(Some(
                 RuleResult::new(self.flag_issue_type, ctx.to_flag_context())
                     .with_details(format!("Missing required field(s): {}", missing_fields.join(", ")))
+                    .with_issue_code(self.issue_code.clone())
             ))
         } else {
             Ok(None)

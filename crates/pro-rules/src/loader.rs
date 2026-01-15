@@ -272,6 +272,8 @@ pub(crate) fn instantiate_rule(
     // Get rule metadata from row
     let rule_name: String = row.get("rule_name");
     let flag_issue_type_name: String = row.get("flag_issue_type_name");
+    // Get the database issue_code for flag_issue JOIN (e.g., "TEST_99213_SA")
+    let issue_code: String = row.get("issue_code");
 
     // PHASE 4: Parse flag_issue_type from database
     let flag_issue_type = parse_flag_issue_type(&flag_issue_type_name)?;
@@ -280,11 +282,27 @@ pub(crate) fn instantiate_rule(
     let rule_parameters: Option<String> = row.get("rule_parameters");
     let parameter_overrides: Option<String> = row.get("parameter_overrides");
 
+    // Debug: Log raw parameters for troubleshooting
+    debug!(
+        "Rule {}: template={:?}, issue_code={}, raw_params={:?}, overrides={:?}",
+        rule_code, template_code, issue_code, rule_parameters, parameter_overrides
+    );
+
+    // Check if decryption may have failed (NULL parameters for COMPOSITE rules)
+    if template_code.as_deref() == Some("COMPOSITE") && rule_parameters.is_none() {
+        warn!(
+            "Rule {} has COMPOSITE template but NULL parameters - encryption key mismatch? \
+             Ensure RULE_ENCRYPTION_KEY matches the key used during INSERT.",
+            rule_code
+        );
+    }
+
     // Merge base parameters with overrides
     let params = merge_parameters(rule_parameters, parameter_overrides)?;
 
     match template_code.as_deref() {
         // Legacy hard-coded rules (Phase 1)
+        // Note: Legacy rules don't support issue_code - they use hardcoded flag types
         Some("LEGACY") => match rule_code {
             "DUPLICATE_SERVICE" => Ok(Arc::new(DuplicateServiceRule)),
             "UNITS_EXCEED_MAX" => Ok(Arc::new(UnitsExceedMaximumRule::new(Decimal::from(999)))),
@@ -297,30 +315,30 @@ pub(crate) fn instantiate_rule(
             _ => Err(Error::Config(format!("Unknown legacy rule: {}", rule_code))),
         },
 
-        // Template-based rules (Phase 3)
+        // Template-based rules (Phase 3) - pass issue_code for database JOIN
         Some("THRESHOLD") => {
             let template = ThresholdRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
         Some("DUPLICATE") => {
             let template = DuplicateRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
         Some("MISSING_FIELD") => {
             let template = MissingFieldRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
         Some("FIELD_PATTERN") => {
             let template = FieldPatternRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
         Some("CROSS_FIELD") => {
             let template = CrossFieldRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
         Some("COMPOSITE") => {
             let template = CompositeRuleTemplate;
-            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, params)
+            template.instantiate(rule_code.to_string(), rule_name, flag_issue_type, issue_code, params)
         }
 
         // Unknown template
