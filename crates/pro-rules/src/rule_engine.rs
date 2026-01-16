@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use sqlx::{PgPool, Row};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::info;
 
 use chrono::NaiveDate;
 use rustc_hash::FxHashMap; // PHASE 4: Faster HashMap for performance
@@ -412,6 +413,25 @@ pub trait Rule: Send + Sync {
     fn is_enabled(&self) -> bool {
         true
     }
+
+    /// Check if rule requires database access during execution
+    /// Rules that don't require DB access can be executed synchronously for better performance
+    fn requires_db_access(&self) -> bool {
+        true // Default: assume rules need DB access (safe default)
+    }
+
+    /// Get the CPT codes this rule applies to (for indexing optimization)
+    /// Returns None if rule applies to all CPT codes or uses pattern matching
+    fn applicable_cpt_codes(&self) -> Option<&[String]> {
+        None // Default: rule applies to all CPT codes
+    }
+
+    /// Synchronous execution for rules that don't need database access
+    /// This avoids async overhead for CPU-only rules like COMPOSITE
+    fn execute_sync(&self, _ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+        // Default: not implemented (rules should override if they support sync execution)
+        Err(Error::Validation("Rule does not support synchronous execution".into()))
+    }
 }
 
 /// Main rule engine
@@ -423,6 +443,11 @@ pub struct RuleEngine {
     execution_planner: Option<crate::execution_planner::RuleExecutionPlanner>,
     /// PHASE 7: String interner for memory optimization
     string_interner: Option<std::sync::Arc<pro_common::StringInterner>>,
+    /// CPT code index: maps CPT codes to rule indices for O(1) lookup
+    /// Built when rules are loaded for fast filtering
+    cpt_rule_index: FxHashMap<String, Vec<usize>>,
+    /// Rules that apply to all CPT codes (no cpt_in filter or uses pattern matching)
+    universal_rules: Vec<usize>,
 }
 
 impl RuleEngine {
@@ -433,6 +458,60 @@ impl RuleEngine {
             enabled_flag_types: None,
             execution_planner: None,  // PHASE 7: Optional, enabled with enable_execution_planner()
             string_interner: None,    // PHASE 7: Optional, enabled with enable_string_interning()
+            cpt_rule_index: FxHashMap::default(),
+            universal_rules: Vec::new(),
+        }
+    }
+
+    /// Build the CPT code index for fast rule filtering
+    /// This dramatically improves performance when many rules are loaded (e.g., 500+ rules)
+    /// by allowing O(1) lookup of applicable rules instead of O(n) iteration
+    pub fn build_cpt_index(&mut self) {
+        self.cpt_rule_index.clear();
+        self.universal_rules.clear();
+
+        for (idx, rule) in self.rules.iter().enumerate() {
+            if let Some(cpt_codes) = rule.applicable_cpt_codes() {
+                // Rule has specific CPT codes - add to index
+                for cpt in cpt_codes {
+                    self.cpt_rule_index
+                        .entry(cpt.to_uppercase())
+                        .or_insert_with(Vec::new)
+                        .push(idx);
+                }
+            } else {
+                // Rule applies to all CPT codes
+                self.universal_rules.push(idx);
+            }
+        }
+
+        // Log index statistics
+        let indexed_cpts = self.cpt_rule_index.len();
+        let universal_count = self.universal_rules.len();
+        let total_rules = self.rules.len();
+        let indexed_rule_count = self.cpt_rule_index.values().map(|v| v.len()).sum::<usize>();
+        if total_rules > 0 {
+            info!(
+                total_rules = total_rules,
+                indexed_cpts = indexed_cpts,
+                indexed_rules = indexed_rule_count,
+                universal_rules = universal_count,
+                "CPT index built: {} CPT codes -> {} rules indexed, {} universal rules that run on every service line",
+                indexed_cpts, indexed_rule_count, universal_count
+            );
+
+            // PERFORMANCE WARNING: Too many universal rules will cause slow processing
+            // Universal rules run on EVERY service line regardless of CPT code
+            if universal_count > 50 {
+                tracing::warn!(
+                    universal_count = universal_count,
+                    total_rules = total_rules,
+                    "PERFORMANCE WARNING: {} universal rules (no cpt_in filter) will execute on every service line. \
+                     Consider adding cpt_in conditions to rules for better performance. \
+                     Target: <50 universal rules for optimal throughput.",
+                    universal_count
+                );
+            }
         }
     }
 
@@ -490,6 +569,8 @@ impl RuleEngine {
     }
 
     /// Execute all rules against a context
+    /// Uses sync execution for rules that don't need DB access (like COMPOSITE)
+    /// Uses CPT index for filtering when available
     pub async fn execute_all(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
         let mut results = Vec::new();
 
@@ -506,13 +587,108 @@ impl RuleEngine {
                 }
             }
 
-            // Execute rule
-            match rule.execute(ctx, &self.pool).await {
-                Ok(Some(result)) => results.push(result),
-                Ok(None) => {} // Rule didn't trigger
-                Err(e) => {
-                    // Log error but continue with other rules
-                    eprintln!("Error executing rule {}: {}", rule.name(), e);
+            // Use synchronous execution if rule supports it (avoids async overhead)
+            // This is critical for COMPOSITE rules which are CPU-only
+            if !rule.requires_db_access() {
+                match rule.execute_sync(ctx) {
+                    Ok(Some(result)) => results.push(result),
+                    Ok(None) => {} // Rule didn't trigger
+                    Err(_) => {
+                        // Sync not supported, fall back to async
+                        match rule.execute(ctx, &self.pool).await {
+                            Ok(Some(result)) => results.push(result),
+                            Ok(None) => {}
+                            Err(e) => {
+                                eprintln!("Error executing rule {}: {}", rule.name(), e);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Rule needs database access, use async execution
+                match rule.execute(ctx, &self.pool).await {
+                    Ok(Some(result)) => results.push(result),
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!("Error executing rule {}: {}", rule.name(), e);
+                    }
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Execute rules using CPT index for fast filtering
+    /// Only executes rules that apply to the given procedure code + universal rules
+    /// This can skip 95%+ of rules when many CPT-specific rules are loaded
+    ///
+    /// PERFORMANCE: For 600 rules where only 30 apply to a given CPT code,
+    /// this method executes ~30 rules instead of ~600 (20x speedup)
+    pub async fn execute_all_indexed(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
+        let mut results = Vec::new();
+
+        // Get procedure code (uppercase for index lookup)
+        let procedure_code = ctx.procedure_code.as_ref()
+            .map(|s| s.to_uppercase());
+
+        // Collect rule indices to execute
+        let mut rule_indices: Vec<usize> = Vec::new();
+
+        // Add rules for this specific CPT code
+        if let Some(cpt) = &procedure_code {
+            if let Some(indices) = self.cpt_rule_index.get(cpt) {
+                rule_indices.extend(indices.iter().copied());
+            }
+        }
+
+        // Add universal rules (apply to all CPT codes)
+        rule_indices.extend(self.universal_rules.iter().copied());
+
+        // Sort and dedup to avoid executing same rule twice
+        rule_indices.sort_unstable();
+        rule_indices.dedup();
+
+        // Execute only the applicable rules
+        for idx in rule_indices {
+            let rule = &self.rules[idx];
+
+            // Skip if rule is not enabled
+            if !rule.is_enabled() {
+                continue;
+            }
+
+            // Skip if not in enabled flag types list
+            if let Some(ref enabled) = self.enabled_flag_types {
+                if !enabled.contains(&rule.flag_type()) {
+                    continue;
+                }
+            }
+
+            // Use synchronous execution if rule supports it (avoids async overhead)
+            if !rule.requires_db_access() {
+                match rule.execute_sync(ctx) {
+                    Ok(Some(result)) => results.push(result),
+                    Ok(None) => {} // Rule didn't trigger
+                    Err(_) => {
+                        // Sync not supported, fall back to async
+                        match rule.execute(ctx, &self.pool).await {
+                            Ok(Some(result)) => results.push(result),
+                            Ok(None) => {}
+                            Err(e) => {
+                                eprintln!("Error executing rule {}: {}", rule.name(), e);
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Rule needs database access, use async execution
+                match rule.execute(ctx, &self.pool).await {
+                    Ok(Some(result)) => results.push(result),
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!("Error executing rule {}: {}", rule.name(), e);
+                    }
                 }
             }
         }

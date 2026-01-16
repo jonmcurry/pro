@@ -113,7 +113,6 @@ impl BatchManager {
         sqlx::query(
             r#"
             INSERT INTO staging.processing_metrics (
-                metric_id,
                 batch_id,
                 metric_type,
                 metric_name,
@@ -127,10 +126,9 @@ impl BatchManager {
                 details,
                 processing_stage
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             "#,
         )
-        .bind(0i64) // metric_id will be auto-generated or use default
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)

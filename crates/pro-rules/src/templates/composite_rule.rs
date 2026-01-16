@@ -91,6 +91,18 @@ impl RuleTemplate for CompositeRuleTemplate {
             return Err(Error::Config("Conditions array cannot be empty".to_string()));
         }
 
+        // Extract CPT codes from the first CptIn condition for indexing
+        // This allows the rule engine to skip this rule for non-matching CPT codes
+        let applicable_cpts: Option<Vec<String>> = conditions.iter()
+            .find_map(|c| {
+                if let Condition::CptIn { codes } = c {
+                    // Uppercase for consistent indexing
+                    Some(codes.iter().map(|s| s.to_uppercase()).collect())
+                } else {
+                    None
+                }
+            });
+
         // Compile regex patterns
         let compiled_conditions: Vec<CompiledCondition> = conditions
             .into_iter()
@@ -104,6 +116,7 @@ impl RuleTemplate for CompositeRuleTemplate {
             issue_code,
             operator: logic_operator,
             conditions: compiled_conditions,
+            applicable_cpts,
         }))
     }
 }
@@ -319,19 +332,13 @@ pub struct CompositeRule {
     pub issue_code: String,
     pub operator: LogicOperator,
     pub conditions: Vec<CompiledCondition>,
+    /// Cached CPT codes from the first CptIn condition (for index optimization)
+    pub applicable_cpts: Option<Vec<String>>,
 }
 
-#[async_trait]
-impl Rule for CompositeRule {
-    fn flag_type(&self) -> FlagIssueType {
-        self.flag_issue_type
-    }
-
-    fn name(&self) -> &str {
-        &self.rule_name
-    }
-
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+impl CompositeRule {
+    /// Execute the rule logic (shared between sync and async paths)
+    fn evaluate(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
         let results: Vec<bool> = self.conditions.iter().map(|c| c.evaluate(ctx)).collect();
 
         let triggered = match self.operator {
@@ -365,6 +372,38 @@ impl Rule for CompositeRule {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[async_trait]
+impl Rule for CompositeRule {
+    fn flag_type(&self) -> FlagIssueType {
+        self.flag_issue_type
+    }
+
+    fn name(&self) -> &str {
+        &self.rule_name
+    }
+
+    /// COMPOSITE rules don't need database access - they're pure CPU evaluation
+    fn requires_db_access(&self) -> bool {
+        false
+    }
+
+    /// Return the CPT codes this rule applies to (for index optimization)
+    /// This allows the rule engine to skip this rule for non-matching CPT codes
+    fn applicable_cpt_codes(&self) -> Option<&[String]> {
+        self.applicable_cpts.as_deref()
+    }
+
+    /// Synchronous execution - avoids async overhead for CPU-only rules
+    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+
+    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+        // Delegate to shared evaluation logic
+        self.evaluate(ctx)
     }
 }
 

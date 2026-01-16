@@ -305,7 +305,6 @@ impl ClaimsImporter {
         sqlx::query(
             r#"
             INSERT INTO staging.processing_metrics (
-                metric_id,
                 batch_id,
                 metric_type,
                 metric_name,
@@ -318,10 +317,9 @@ impl ClaimsImporter {
                 error_count,
                 details
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#
         )
-        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)
@@ -1158,7 +1156,6 @@ impl ClaimsImporter {
         sqlx::query(
             r#"
             INSERT INTO staging.processing_metrics (
-                metric_id,
                 batch_id,
                 metric_type,
                 metric_name,
@@ -1172,10 +1169,9 @@ impl ClaimsImporter {
                 details,
                 processing_stage
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             "#
         )
-        .bind(0i64) // TODO: Refactor to use RETURNING
         .bind(batch_id)
         .bind(metric_type)
         .bind(metric_name)

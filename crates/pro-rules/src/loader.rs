@@ -97,6 +97,10 @@ pub async fn load_rules_from_database(
 
     info!("Successfully loaded {} rule(s)", loaded_rules.len());
 
+    // Build CPT code index for fast rule filtering
+    // This dramatically improves performance when many rules are loaded
+    engine.build_cpt_index();
+
     Ok((engine, loaded_rules))
 }
 

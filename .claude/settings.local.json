@@ -240,7 +240,12 @@
       "Bash(dir \"C:\\\\Program Files\\\\WiX Toolset*\")",
       "Bash(cmd /c \"where candle\")",
       "Bash(cmd /c \"dir \"\"C:\\\\Program Files \\(x86\\)\\\\WiX*\"\" /b\")",
-      "Bash(cmd /c \"if exist \"\"C:\\\\Program Files \\(x86\\)\\\\WiX Toolset v3.14\\\\bin\\\\candle.exe\"\" echo FOUND\")"
+      "Bash(cmd /c \"if exist \"\"C:\\\\Program Files \\(x86\\)\\\\WiX Toolset v3.14\\\\bin\\\\candle.exe\"\" echo FOUND\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -Command \"cd ''C:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\installer''; .\\\\build-msi.ps1 -NoBuild\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.19\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.20\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.21\")",
+      "Bash(\"./build_msi.ps1\")"
     ],
     "deny": [],
     "ask": []

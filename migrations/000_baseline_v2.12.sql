@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-069
+-- Description: Complete schema baseline generated from migrations 001-073
 -- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
@@ -646,6 +646,12 @@ CREATE INDEX idx_service_line_revenue ON claims.service_line(revenue_code) WHERE
 CREATE INDEX idx_service_line_enc_line ON claims.service_line(encounter_id, line_number);
 CREATE INDEX idx_service_line_proc_date ON claims.service_line(procedure_code, service_date_from);
 
+-- Covering index for service_line to encounter JOINs in flag views
+CREATE INDEX idx_service_line_encounter_lookup
+ON claims.service_line (encounter_id)
+INCLUDE (service_line_id, procedure_code, line_item_charge_amount)
+WHERE line_status = 'ACTIVE';
+
 COMMENT ON TABLE claims.service_line IS 'Service line items (procedures) for encounters - Loop 2400 data';
 
 -- Trigger for updated_at
@@ -867,6 +873,27 @@ CREATE INDEX idx_service_line_flag_issue ON claims.service_line_flag(issue_id);
 CREATE INDEX idx_service_line_flag_status ON claims.service_line_flag(flag_status);
 CREATE INDEX idx_service_line_flag_type ON claims.service_line_flag(flag_type);
 CREATE INDEX idx_service_line_flag_created ON claims.service_line_flag(created_at);
+
+-- Unique constraint to prevent duplicate OPEN flags for same service_line + issue
+CREATE UNIQUE INDEX idx_service_line_flag_unique_open
+ON claims.service_line_flag (service_line_id, issue_id)
+WHERE flag_status = 'OPEN';
+
+-- Covering index for view JOINs (avoids heap access for common columns)
+CREATE INDEX idx_service_line_flag_view_lookup
+ON claims.service_line_flag (service_line_id, issue_id)
+INCLUDE (flag_id, severity, flag_status, flag_type, created_at, flagged_element);
+
+-- Partial index for recent open flags (dashboard queries)
+CREATE INDEX idx_service_line_flag_recent
+ON claims.service_line_flag (created_at DESC)
+INCLUDE (service_line_id, issue_id, severity, flag_status)
+WHERE flag_status = 'OPEN';
+
+-- Index for flag status filtering
+CREATE INDEX idx_service_line_flag_status_lookup
+ON claims.service_line_flag (flag_status, service_line_id)
+INCLUDE (issue_id, severity, created_at);
 
 COMMENT ON TABLE claims.service_line_flag IS 'Flags assigned to service lines by the rules engine';
 
@@ -4198,7 +4225,6 @@ VALUES
     ('008_create_audit_tables.sql', NOW(), 'legacy', 'Create audit and logging tables'),
     ('009_create_rvu_tables.sql', NOW(), 'legacy', 'Create RVU reference tables'),
     ('010_create_denial_tables.sql', NOW(), 'legacy', 'Create denial tracking tables'),
-    ('011_create_schedule_tables.sql', NOW(), 'legacy', 'Create schedule and appointment tables'),
     ('012_create_ml_tables.sql', NOW(), 'legacy', 'Create machine learning tables'),
     ('013_create_dashboard_views.sql', NOW(), 'legacy', 'Create dashboard and reporting views'),
     ('014_create_utility_functions.sql', NOW(), 'legacy', 'Create utility functions'),
@@ -10476,53 +10502,12 @@ END;
 $$ LANGUAGE plpgsql STABLE;
 
 -- ============================================================================
--- Register all migrations in schema_migrations
--- This ensures fresh installs correctly report schema version based on migrations
+-- NOTE: Migration tracking is handled programmatically by apply_baseline()
+-- in pro-upgrade-manager/src/migration.rs which iterates through the embedded
+-- migrations list and records each one with the correct filename.
+-- DO NOT add manual INSERT statements here as they will conflict with the
+-- embedded migration names.
 -- ============================================================================
-
-INSERT INTO staging.schema_migrations (migration_name, applied_at, checksum, description)
-VALUES
-    ('031_create_delete_project_procedure.sql', NOW(), 'baseline', 'Create stored procedure for deleting projects'),
-    ('032_create_raw_claims_tables.sql', NOW(), 'baseline', 'Create raw claims staging tables'),
-    ('033_add_cpt_hcpcs_to_service_line.sql', NOW(), 'baseline', 'Add CPT/HCPCS codes to service_line table'),
-    ('034_add_last_used_at_to_projects.sql', NOW(), 'baseline', 'Add last_used_at column to projects'),
-    ('035_add_service_line_modifiers.sql', NOW(), 'baseline', 'Add modifiers to service_line table'),
-    ('036_create_encounter_diagnosis_table.sql', NOW(), 'baseline', 'Create encounter_diagnosis junction table'),
-    ('037_add_batch_id_to_encounter.sql', NOW(), 'baseline', 'Add batch_id column to encounter'),
-    ('038_add_encounter_indexes.sql', NOW(), 'baseline', 'Add performance indexes to encounter table'),
-    ('039_add_service_line_indexes.sql', NOW(), 'baseline', 'Add performance indexes to service_line table'),
-    ('040_create_payer_table.sql', NOW(), 'baseline', 'Create payer reference table'),
-    ('041_add_payer_to_encounter.sql', NOW(), 'baseline', 'Add payer reference to encounter'),
-    ('042_create_claim_status_table.sql', NOW(), 'baseline', 'Create claim status reference table'),
-    ('043_add_claim_status_to_encounter.sql', NOW(), 'baseline', 'Add claim status to encounter'),
-    ('044_create_remittance_tables.sql', NOW(), 'baseline', 'Create remittance advice tables'),
-    ('045_add_allowed_amount_to_service_line.sql', NOW(), 'baseline', 'Add allowed amount to service_line'),
-    ('046_create_denial_reason_table.sql', NOW(), 'baseline', 'Create denial reason reference table'),
-    ('047_add_denial_tracking_to_service_line.sql', NOW(), 'baseline', 'Add denial tracking to service_line'),
-    ('048_create_appeal_table.sql', NOW(), 'baseline', 'Create appeal tracking table'),
-    ('049_add_appeal_to_encounter.sql', NOW(), 'baseline', 'Add appeal reference to encounter'),
-    ('050_create_payment_table.sql', NOW(), 'baseline', 'Create payment tracking table'),
-    ('051_add_payment_to_encounter.sql', NOW(), 'baseline', 'Add payment reference to encounter'),
-    ('052_create_adjustment_table.sql', NOW(), 'baseline', 'Create adjustment tracking table'),
-    ('053_add_adjustment_to_service_line.sql', NOW(), 'baseline', 'Add adjustment reference to service_line'),
-    ('054_create_authorization_table.sql', NOW(), 'baseline', 'Create prior authorization table'),
-    ('055_add_authorization_to_encounter.sql', NOW(), 'baseline', 'Add authorization reference to encounter'),
-    ('056_create_referring_provider_table.sql', NOW(), 'baseline', 'Create referring provider table'),
-    ('057_add_referring_provider_to_encounter.sql', NOW(), 'baseline', 'Add referring provider to encounter'),
-    ('058_create_patient_table.sql', NOW(), 'baseline', 'Create patient demographics table'),
-    ('059_add_patient_to_encounter.sql', NOW(), 'baseline', 'Add patient reference to encounter'),
-    ('060_add_patient_fields.sql', NOW(), 'baseline', 'Add additional patient fields'),
-    ('061_fix_patient_relationship_code_length.sql', NOW(), 'baseline', 'Fix patient relationship code column length'),
-    ('062_create_encounter_payer_table.sql', NOW(), 'baseline', 'Create encounter_payer junction table'),
-    ('063_add_billing_date_to_encounter.sql', NOW(), 'baseline', 'Add billing date to encounter'),
-    ('064_make_dates_nullable.sql', NOW(), 'baseline', 'Make date columns nullable for flexibility'),
-    ('065_cte_batch_acquisition_indexes.sql', NOW(), 'baseline', 'Add batch acquisition performance indexes'),
-    ('066_enforce_postgresql_settings.sql', NOW(), 'baseline', 'Enforce PostgreSQL configuration settings'),
-    ('067_create_encounter_procedure_modifiers.sql', NOW(), 'baseline', 'Create encounter procedure modifiers table'),
-    ('068_create_encounter_view.sql', NOW(), 'baseline', 'Create encounter summary view'),
-    ('069_setup_smartproaudit_fdw.sql', NOW(), 'baseline', 'Setup SmartProAudit foreign data wrapper'),
-    ('070_set_rule_encryption_key.sql', NOW(), 'baseline', 'Set default rule encryption key configuration')
-ON CONFLICT (migration_name) DO NOTHING;
 
 -- ============================================================================
 -- Source: 070_set_rule_encryption_key.sql
@@ -10550,4 +10535,285 @@ END $$;
 -- Also set it for the current session so it's immediately available
 SET app.rule_encryption_key = 'ProfessionalSmartRulesKey2024';
 
-COMMENT ON DATABASE current_database() IS 'Professional SMART - Healthcare Claims Auditing System. Rule encryption key is set via app.rule_encryption_key configuration.';
+-- ============================================================================
+-- Source: 071_service_line_flag_performance.sql
+-- ============================================================================
+
+-- Migration: 071_service_line_flag_performance
+-- Description: Add performance indexes for service_line_flag queries
+-- Date: 2025-01-15
+-- Note: Indexes are added inline in the service_line_flag table definition above
+-- Additional index idx_service_line_encounter_lookup added to service_line table
+
+-- ============================================================================
+-- Source: 072_processing_metrics_rollup.sql
+-- ============================================================================
+
+-- Migration: 072_processing_metrics_rollup
+-- Description: Add rollup views for processing throughput metrics
+-- Date: 2025-01-15
+
+-- Hourly Rollup View
+CREATE OR REPLACE VIEW staging.v_processing_metrics_hourly AS
+SELECT
+    date_trunc('hour', started_at) AS hour,
+    metric_type,
+    processing_stage,
+    COUNT(*) AS batch_count,
+    SUM(records_processed) AS total_records,
+    ROUND(AVG(records_per_second)::numeric, 2) AS avg_records_per_sec,
+    ROUND(MAX(records_per_second)::numeric, 2) AS max_records_per_sec,
+    ROUND(MIN(records_per_second)::numeric, 2) AS min_records_per_sec,
+    ROUND(SUM(duration_seconds)::numeric, 2) AS total_duration_sec,
+    ROUND(AVG(duration_seconds)::numeric, 2) AS avg_duration_sec,
+    SUM(success_count) AS total_success,
+    SUM(error_count) AS total_errors,
+    ROUND(
+        CASE WHEN SUM(success_count) + SUM(error_count) > 0
+        THEN (SUM(success_count)::numeric / (SUM(success_count) + SUM(error_count)) * 100)
+        ELSE 100 END, 2
+    ) AS success_rate_pct
+FROM staging.processing_metrics
+GROUP BY date_trunc('hour', started_at), metric_type, processing_stage;
+
+COMMENT ON VIEW staging.v_processing_metrics_hourly IS
+'Hourly aggregated processing metrics for throughput analysis';
+
+-- Daily Rollup View
+CREATE OR REPLACE VIEW staging.v_processing_metrics_daily AS
+SELECT
+    date_trunc('day', started_at) AS day,
+    metric_type,
+    processing_stage,
+    COUNT(*) AS batch_count,
+    SUM(records_processed) AS total_records,
+    ROUND(AVG(records_per_second)::numeric, 2) AS avg_records_per_sec,
+    ROUND(MAX(records_per_second)::numeric, 2) AS max_records_per_sec,
+    ROUND(MIN(records_per_second)::numeric, 2) AS min_records_per_sec,
+    ROUND(SUM(duration_seconds)::numeric, 2) AS total_duration_sec,
+    ROUND(AVG(duration_seconds)::numeric, 2) AS avg_duration_sec,
+    SUM(success_count) AS total_success,
+    SUM(error_count) AS total_errors,
+    ROUND(
+        CASE WHEN SUM(success_count) + SUM(error_count) > 0
+        THEN (SUM(success_count)::numeric / (SUM(success_count) + SUM(error_count)) * 100)
+        ELSE 100 END, 2
+    ) AS success_rate_pct,
+    ROUND(
+        CASE WHEN EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(started_at))) > 0
+        THEN SUM(records_processed)::numeric / EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(started_at)))
+        ELSE 0 END, 2
+    ) AS effective_records_per_sec
+FROM staging.processing_metrics
+GROUP BY date_trunc('day', started_at), metric_type, processing_stage;
+
+COMMENT ON VIEW staging.v_processing_metrics_daily IS
+'Daily aggregated processing metrics for throughput analysis';
+
+-- Overall Summary View (Last 24 Hours)
+CREATE OR REPLACE VIEW staging.v_processing_summary AS
+SELECT
+    metric_type,
+    processing_stage,
+    COUNT(*) AS batch_count,
+    SUM(records_processed) AS total_records,
+    ROUND(AVG(records_per_second)::numeric, 2) AS avg_records_per_sec,
+    ROUND(MAX(records_per_second)::numeric, 2) AS peak_records_per_sec,
+    ROUND(SUM(duration_seconds)::numeric, 2) AS total_processing_time_sec,
+    ROUND(SUM(duration_seconds) / 60.0, 2) AS total_processing_time_min,
+    SUM(success_count) AS total_success,
+    SUM(error_count) AS total_errors,
+    ROUND(
+        CASE WHEN SUM(success_count) + SUM(error_count) > 0
+        THEN (SUM(success_count)::numeric / (SUM(success_count) + SUM(error_count)) * 100)
+        ELSE 100 END, 2
+    ) AS success_rate_pct,
+    MIN(started_at) AS first_batch,
+    MAX(completed_at) AS last_batch,
+    ROUND(EXTRACT(EPOCH FROM (MAX(completed_at) - MIN(started_at))) / 60.0, 2) AS wall_clock_time_min
+FROM staging.processing_metrics
+WHERE started_at > NOW() - INTERVAL '24 hours'
+GROUP BY metric_type, processing_stage
+ORDER BY metric_type, processing_stage;
+
+COMMENT ON VIEW staging.v_processing_summary IS
+'Last 24 hours processing summary with throughput and success rates';
+
+-- Stage 2 Specific View (Claims Processing with Rules)
+CREATE OR REPLACE VIEW staging.v_stage2_throughput AS
+SELECT
+    date_trunc('hour', started_at) AS hour,
+    COUNT(*) AS batches_processed,
+    SUM(records_processed) AS claims_processed,
+    ROUND(AVG(records_per_second)::numeric, 2) AS avg_claims_per_sec,
+    ROUND(MAX(records_per_second)::numeric, 2) AS peak_claims_per_sec,
+    SUM(success_count) AS successful,
+    SUM(error_count) AS failed,
+    ROUND(SUM(duration_seconds)::numeric, 2) AS processing_time_sec
+FROM staging.processing_metrics
+WHERE metric_type = 'batch_processing'
+  AND processing_stage = 'sequenced_batch_stage2'
+  AND started_at > NOW() - INTERVAL '24 hours'
+GROUP BY date_trunc('hour', started_at)
+ORDER BY hour DESC;
+
+COMMENT ON VIEW staging.v_stage2_throughput IS
+'Hourly Stage 2 (claims processing) throughput for the last 24 hours';
+
+-- ============================================================================
+-- Source: 073_create_rules_processing_queue.sql
+-- ============================================================================
+
+-- Migration: 073_create_rules_processing_queue
+-- Description: Create queue for deferred rules processing
+-- Date: 2025-01-15
+-- Purpose: Enable high-throughput import by deferring rules execution to background
+
+-- RULES PROCESSING QUEUE
+-- When DEFER_RULES_EXECUTION=true, encounters are queued here for background
+-- rule processing. This separates import throughput from rules processing.
+
+CREATE TABLE IF NOT EXISTS staging.rules_processing_queue (
+    queue_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    encounter_id BIGINT NOT NULL,
+    organization_id BIGINT NOT NULL,
+    batch_id BIGINT,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    priority INTEGER NOT NULL DEFAULT 5,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    flags_created INTEGER,
+    error_message TEXT,
+    worker_id VARCHAR(50),
+
+    CONSTRAINT fk_rules_queue_encounter
+        FOREIGN KEY (encounter_id)
+        REFERENCES claims.encounter(encounter_id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_rules_queue_organization
+        FOREIGN KEY (organization_id)
+        REFERENCES claims.organization(organization_id)
+        ON DELETE CASCADE
+);
+
+-- Index for efficient queue polling
+CREATE INDEX IF NOT EXISTS idx_rules_queue_status_priority
+ON staging.rules_processing_queue(status, priority, created_at)
+WHERE status = 'PENDING';
+
+-- Index for finding stale processing items
+CREATE INDEX IF NOT EXISTS idx_rules_queue_processing
+ON staging.rules_processing_queue(status, started_at)
+WHERE status = 'PROCESSING';
+
+-- Index for encounter lookup
+CREATE INDEX IF NOT EXISTS idx_rules_queue_encounter
+ON staging.rules_processing_queue(encounter_id);
+
+COMMENT ON TABLE staging.rules_processing_queue IS
+'Queue for deferred rules processing. Enables high-throughput import by separating data ingestion from rule execution.';
+
+COMMENT ON COLUMN staging.rules_processing_queue.status IS
+'PENDING=awaiting processing, PROCESSING=being processed, COMPLETED=done, FAILED=error occurred';
+
+-- Function to enqueue an encounter for rules processing
+CREATE OR REPLACE FUNCTION staging.enqueue_for_rules_processing(
+    p_encounter_id BIGINT,
+    p_organization_id BIGINT,
+    p_batch_id BIGINT DEFAULT NULL,
+    p_priority INTEGER DEFAULT 5
+)
+RETURNS BIGINT AS $$
+DECLARE
+    v_queue_id BIGINT;
+BEGIN
+    INSERT INTO staging.rules_processing_queue (
+        encounter_id, organization_id, batch_id, priority
+    )
+    VALUES (p_encounter_id, p_organization_id, p_batch_id, p_priority)
+    ON CONFLICT DO NOTHING
+    RETURNING queue_id INTO v_queue_id;
+
+    RETURN v_queue_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to acquire next batch of encounters for processing
+CREATE OR REPLACE FUNCTION staging.acquire_rules_processing_batch(
+    p_worker_id VARCHAR(50),
+    p_batch_size INTEGER DEFAULT 100
+)
+RETURNS TABLE (
+    queue_id BIGINT,
+    encounter_id BIGINT,
+    organization_id BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH acquired AS (
+        UPDATE staging.rules_processing_queue rpq
+        SET status = 'PROCESSING',
+            started_at = CURRENT_TIMESTAMP,
+            worker_id = p_worker_id
+        WHERE rpq.queue_id IN (
+            SELECT q.queue_id
+            FROM staging.rules_processing_queue q
+            WHERE q.status = 'PENDING'
+            ORDER BY q.priority DESC, q.created_at ASC
+            LIMIT p_batch_size
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING rpq.queue_id, rpq.encounter_id, rpq.organization_id
+    )
+    SELECT * FROM acquired;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to mark queue item as completed
+CREATE OR REPLACE FUNCTION staging.complete_rules_processing(
+    p_queue_id BIGINT,
+    p_flags_created INTEGER
+)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE staging.rules_processing_queue
+    SET status = 'COMPLETED',
+        completed_at = CURRENT_TIMESTAMP,
+        flags_created = p_flags_created
+    WHERE queue_id = p_queue_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to mark queue item as failed
+CREATE OR REPLACE FUNCTION staging.fail_rules_processing(
+    p_queue_id BIGINT,
+    p_error_message TEXT
+)
+RETURNS VOID AS $$
+BEGIN
+    UPDATE staging.rules_processing_queue
+    SET status = 'FAILED',
+        completed_at = CURRENT_TIMESTAMP,
+        error_message = p_error_message
+    WHERE queue_id = p_queue_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Function to recover stale processing items (stuck > 5 minutes)
+CREATE OR REPLACE FUNCTION staging.recover_stale_rules_processing()
+RETURNS INTEGER AS $$
+DECLARE
+    v_recovered INTEGER;
+BEGIN
+    UPDATE staging.rules_processing_queue
+    SET status = 'PENDING',
+        started_at = NULL,
+        worker_id = NULL
+    WHERE status = 'PROCESSING'
+      AND started_at < CURRENT_TIMESTAMP - INTERVAL '5 minutes';
+
+    GET DIAGNOSTICS v_recovered = ROW_COUNT;
+    RETURN v_recovered;
+END;
+$$ LANGUAGE plpgsql;

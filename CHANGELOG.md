@@ -1,5 +1,206 @@
 # Changelog
 
+## [2.12.73.29] - 2025-01-16
+
+### Performance - ELIMINATE MODIFIER SELECT QUERY
+- **Critical Performance Fix**: Eliminated expensive SELECT DISTINCT ... LATERAL query for modifiers
+  - Problem: After inserting service lines, a SELECT query with LATERAL was reading them back (~40-50ms)
+  - Root cause: `insert_encounter_procedure_modifiers()` queried service_line table to get modifiers
+  - Solution: Collect modifiers from `ServiceLineRuleContext` (already in memory from import)
+  - New function `insert_encounter_procedure_modifiers_fast()` uses pre-collected data
+  - Eliminates 1 SELECT + 1 INSERT per encounter, replaced with just 1 INSERT
+  - Expected improvement: **3-5x throughput increase** (from 14 rec/sec to 42-70 rec/sec)
+
+## [2.12.73.28] - 2025-01-15
+
+### Performance - BATCH PROVIDER INSERTION
+- **Critical Performance Fix**: Batch insert ALL providers in `prewarm_provider_cache()`
+  - Problem: 4+ sequential `ensure_provider_exists()` calls per encounter (each a DB round-trip)
+  - For 10K claims × 2.5 service lines × 4 providers = ~100,000 sequential INSERT operations
+  - Solution: Batch INSERT all new providers in a single query using UNNEST
+  - All providers (existing + new) are now cached BEFORE encounter processing begins
+  - `ensure_provider_exists()` calls become instant cache hits (no DB query)
+  - Expected improvement: **3-5x throughput increase** (from 13 rec/sec to 40-65 rec/sec)
+
+## [2.12.73.27] - 2025-01-15
+
+### Performance - CPT INDEXING + SYNC EXECUTION
+- **Critical Performance Fix**: Switched from `execute_all()` to `execute_all_indexed()` in claims processor
+  - Problem: All 600+ rules were being evaluated for every service line (O(n) where n = total rules)
+  - Solution: Use CPT code index to filter rules (O(k) where k = rules applicable to this CPT + universal rules)
+  - Rules with `cpt_in` conditions are indexed at load time for O(1) lookup
+  - Only rules matching the service line's CPT code are executed
+  - Expected improvement: 5-20x speedup depending on how many rules have `cpt_in` filters
+
+- **Sync Execution for COMPOSITE Rules**: COMPOSITE rules now use synchronous execution path
+  - COMPOSITE rules are CPU-only (no database access required)
+  - `requires_db_access()` returns false, enabling `execute_sync()` path
+  - Avoids async/await overhead for pure CPU rule evaluation
+  - Expected improvement: 2-5x speedup for COMPOSITE rule execution
+
+- **Performance Warning for Universal Rules**: Added warning when >50 universal rules loaded
+  - Universal rules (no `cpt_in` filter) run on every service line
+  - Warning helps identify rules that should have CPT filters added
+  - Target: <50 universal rules for optimal throughput
+
+### Changed
+- **Removed Auto-Defer Threshold**: Inline execution is now default even with 600+ rules
+  - CPT indexing + sync execution makes inline execution viable for high rule counts
+  - `DEFER_RULES_EXECUTION` still available for explicit deferral if needed
+  - Previous auto-defer at 100 rules was a workaround, now properly fixed
+
+## [2.12.73.25] - 2025-01-15
+
+### Performance - AUTO-DEFER RULES
+- **Smart Auto-Detection for Deferred Rules**: System now automatically defers rules when count >= 100
+  - Problem: Users with 500+ rules were experiencing 5 rec/sec throughput without knowing to set `DEFER_RULES_EXECUTION=true`
+  - Solution: Auto-detect high rule counts and automatically enable deferred mode
+  - Threshold: 100+ rules triggers auto-deferral (configurable via code constant)
+  - Override: Users can still force inline execution with `DEFER_RULES_EXECUTION=false`
+  - Logs clear warnings when auto-deferring: "AUTO-DEFERRING rules execution - X rules exceeds threshold of 100"
+
+### Configuration
+- `DEFER_RULES_EXECUTION` behavior updated:
+  - **Not set (recommended)**: Auto-defers if rule count >= 100
+  - `true`: Always defer rules to background processing
+  - `false`: Always execute rules inline (slow with many rules)
+
+### Documentation
+- Updated `.env.example` with comprehensive rules engine configuration section
+- Added `ENABLE_DATABASE_RULES`, `DEFER_RULES_EXECUTION`, and `RULE_ENCRYPTION_KEY` documentation
+
+## [2.12.73.24] - 2025-01-15
+
+### Performance - CRITICAL
+- **Deferred Rules Execution Mode**: Added `DEFER_RULES_EXECUTION` environment variable for high-throughput import
+  - Root cause: Sequential rule execution consuming 200-300ms per claim (537 rules x 3 service lines = 1,611 rule evaluations per encounter)
+  - With 10K claims target in 30 seconds, inline rule execution is the bottleneck (theoretical max: 3-5 claims/sec)
+  - Solution: When `DEFER_RULES_EXECUTION=true`, rules are queued for background processing instead of inline execution
+  - Encounters are queued to `staging.rules_processing_queue` for async rule processing
+  - Expected throughput improvement: **50-100x** when enabled (from ~5 claims/sec to 300-500 claims/sec)
+  - Trade-off: Flags appear after import completes rather than immediately
+
+### Added
+- **Rules Processing Queue** (migration 073):
+  - `staging.rules_processing_queue` table for deferred rule execution
+  - `staging.enqueue_for_rules_processing()` - queue encounter for background processing
+  - `staging.acquire_rules_processing_batch()` - FIFO batch acquisition with SKIP LOCKED
+  - `staging.complete_rules_processing()` - mark completed with flag count
+  - `staging.fail_rules_processing()` - mark failed with error message
+  - `staging.recover_stale_rules_processing()` - recover stuck items (>5 min)
+
+### Configuration
+- New environment variables:
+  - `DEFER_RULES_EXECUTION=true` - Enable deferred rules for maximum import throughput
+  - `DEFER_RULES_EXECUTION=false` (default) - Inline rules execution (slower but immediate flags)
+
+## [2.12.73.23] - 2025-01-15
+
+### Performance
+- **Batch Provider Cache Pre-warming**: Added `prewarm_provider_cache()` optimization for Stage 2 processing
+  - Root cause: Each service line was doing 4 sequential database queries for provider lookups (rendering, ordering, supervising, referring)
+  - With 5 service lines per encounter, that's up to 20 DB round-trips per encounter
+  - Solution: Before processing service lines, collect all unique NPIs and query existing providers in ONE batch query
+  - Pre-populates provider cache so subsequent `ensure_provider_exists()` calls are instant cache hits
+  - Expected throughput improvement: 2-4x for encounters with multiple service lines
+  - Impact: Reduces DB round-trips from O(service_lines * 4) to O(1) per encounter for existing providers
+
+## [2.12.73.22] - 2025-01-15
+
+### Fixed
+- **Baseline SQL Syntax Error Blocking Views**: Removed invalid `COMMENT ON DATABASE current_database()` statement
+  - Root cause: This statement is syntactically invalid (cannot use function call in DDL statement)
+  - This caused the baseline execution to fail, preventing all subsequent statements from executing
+  - Migration 072 views (`v_processing_summary`, `v_stage2_throughput`, etc.) were never created
+  - Removed the invalid statement from baseline SQL
+
+## [2.12.73.21] - 2025-01-15
+
+### Fixed
+- **Baseline Migration Tracking Conflict**: Removed incorrect INSERT statements from baseline SQL
+  - Root cause: Baseline SQL had hardcoded INSERT statements for migrations 031-072 with wrong filenames
+  - These conflicted with the programmatic registration in `apply_baseline()` which uses correct embedded migration names
+  - Removed the incorrect INSERT block (migrations 031-072) from baseline
+  - Removed non-existent `011_create_schedule_tables.sql` from migration tracking
+  - Migration tracking is now handled entirely by `apply_baseline()` in migration.rs which iterates through embedded migrations
+
+## [2.12.73.20] - 2025-01-15
+
+### Fixed
+- **Fresh Install Missing Views**: Fixed `BASELINE_COVERS_THROUGH` constant not updated to 72
+  - Fresh installs were missing migration 072 views (`v_processing_summary`, `v_stage2_throughput`, etc.)
+  - Updated constant from 64 to 72 so baseline properly includes all migrations through 072
+
+## [2.12.73.19] - 2025-01-15
+
+### Performance
+- **Sync Execution for Universal Rules**: Fixed slow throughput (3-25 records/sec) when all rules are universal
+  - Root cause: `execute_all()` was only using sync execution when CPT index was populated
+  - With 537 universal COMPOSITE rules (no `cpt_in` filter), CPT index was empty
+  - Modified `execute_all()` to always use `execute_sync()` for rules that don't require database access
+  - Expected 2-5x throughput improvement for universal rule workloads
+
+- **CPT Index Logging Fix**: Changed CPT index statistics from `eprintln!` to `tracing::info!`
+  - Now properly appears in service.log instead of stderr
+
+### Added
+- **Processing Metrics Rollup Views** (migration 072):
+  - `staging.v_processing_metrics_hourly` - Hourly aggregated throughput metrics
+  - `staging.v_processing_metrics_daily` - Daily aggregated throughput metrics
+  - `staging.v_processing_summary` - Last 24 hours summary with success rates
+  - `staging.v_stage2_throughput` - Hourly Stage 2 claims processing throughput
+
+## [2.12.73.17] - 2025-01-15
+
+### Performance
+- **Service Line Flag Query Performance**: Fixed extremely slow queries on `claims.service_line_flag` (5+ minutes)
+  - Added migration 071 with performance indexes for flag queries
+  - Added covering index `idx_service_line_flag_view_lookup` for view JOINs
+  - Added partial index `idx_service_line_flag_recent` for open flag dashboards
+  - Added `idx_service_line_flag_status_lookup` for status filtering
+  - Added `idx_service_line_encounter_lookup` for service_line to encounter JOINs
+
+### Fixed
+- **Duplicate Flag Prevention**: Added unique constraint and ON CONFLICT handling to prevent duplicate flags
+  - Root cause: Reprocessing claims would create duplicate flags for the same service_line + issue combination
+  - Added unique index `idx_service_line_flag_unique_open` on `(service_line_id, issue_id) WHERE flag_status = 'OPEN'`
+  - Modified flag INSERT to use `ON CONFLICT DO NOTHING` - skips if flag already exists
+  - Prevents flag table bloat from reprocessing the same claims multiple times
+
+## [2.12.73.14] - 2025-01-15
+
+### Fixed
+- **Processing Metrics INSERT Fix**: Fixed critical bug preventing `staging.processing_metrics` records from being inserted
+  - Root cause: Code was providing a value (`0i64`) for `metric_id` column which is defined as `GENERATED ALWAYS AS IDENTITY`
+  - PostgreSQL rejects INSERT statements that explicitly provide values for GENERATED ALWAYS columns
+  - Metrics logging was silently failing, leaving `processing_metrics` table empty
+  - Fixed all 4 affected functions across 3 files:
+    - `claims_processor.rs::log_processing_metric()`
+    - `batch_manager.rs::log_processing_metric()`
+    - `claims_importer.rs::log_processing_metric()`
+    - `claims_importer.rs::log_processing_metric_with_stage()`
+  - Processing throughput metrics will now be properly recorded for performance monitoring
+
+## [2.12.73.12] - 2025-01-15
+
+### Performance
+- **CPT Code Index for Rule Engine**: Major performance optimization for large rule sets (500+ rules)
+  - Added CPT-based rule index that maps procedure codes to applicable rules
+  - Rules with `cpt_in` conditions are indexed by their CPT codes for O(1) lookup
+  - Instead of executing all 560 rules per service line, now only executes rules that match the procedure code
+  - Typical performance improvement: 95%+ reduction in rule evaluations per service line
+  - Added `build_cpt_index()` method called automatically after loading rules from database
+
+- **Synchronous Execution for COMPOSITE Rules**: Eliminated async overhead for CPU-only rules
+  - COMPOSITE rules now implement `execute_sync()` for direct synchronous execution
+  - Added `requires_db_access() = false` for COMPOSITE rules to use sync path
+  - Avoids tokio async machinery overhead when no database access is needed
+
+- **Rule Trait Extensions**: New trait methods for optimization
+  - `requires_db_access()`: Returns whether rule needs database during execution
+  - `applicable_cpt_codes()`: Returns CPT codes for index-based filtering
+  - `execute_sync()`: Synchronous execution path for CPU-only rules
+
 ## [2.12.73.11] - 2025-01-15
 
 ### Fixed
