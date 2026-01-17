@@ -97,6 +97,13 @@ pub struct RuleExecutionContext {
 
     // Additional context
     pub custom_data: HashMap<String, String>,
+
+    // PERFORMANCE: Pre-computed uppercase values for fast condition matching
+    // These avoid repeated to_uppercase() allocations in hot loops (537 rules × 3 service lines)
+    pub procedure_code_upper: Option<String>,
+    pub diagnosis_codes_upper: Vec<String>,
+    pub place_of_service_upper: Option<String>,
+    pub modifiers_upper: Vec<String>,
 }
 
 impl RuleExecutionContext {
@@ -124,7 +131,23 @@ impl RuleExecutionContext {
             facility_type: None,
             subscriber_id: None,
             custom_data: HashMap::new(),
+            // PERFORMANCE: Initialize empty, will be populated via finalize()
+            procedure_code_upper: None,
+            diagnosis_codes_upper: Vec::new(),
+            place_of_service_upper: None,
+            modifiers_upper: Vec::new(),
         }
+    }
+
+    /// PERFORMANCE: Pre-compute uppercase values before rule execution
+    /// Call this once after setting all context fields, before executing rules
+    /// This avoids thousands of repeated to_uppercase() allocations
+    #[inline]
+    pub fn finalize(&mut self) {
+        self.procedure_code_upper = self.procedure_code.as_ref().map(|s| s.to_uppercase());
+        self.diagnosis_codes_upper = self.diagnosis_codes.iter().map(|s| s.to_uppercase()).collect();
+        self.place_of_service_upper = self.place_of_service_code.as_ref().map(|s| s.to_uppercase());
+        self.modifiers_upper = self.procedure_modifiers.iter().map(|s| s.to_uppercase()).collect();
     }
 
     pub fn to_flag_context(&self) -> FlagContext {
@@ -448,6 +471,9 @@ pub struct RuleEngine {
     cpt_rule_index: FxHashMap<String, Vec<usize>>,
     /// Rules that apply to all CPT codes (no cpt_in filter or uses pattern matching)
     universal_rules: Vec<usize>,
+    /// PERFORMANCE: Cached flag indicating all rules support sync execution
+    /// Computed once when index is built, avoids per-call iteration
+    all_sync_capable: bool,
 }
 
 impl RuleEngine {
@@ -460,6 +486,7 @@ impl RuleEngine {
             string_interner: None,    // PHASE 7: Optional, enabled with enable_string_interning()
             cpt_rule_index: FxHashMap::default(),
             universal_rules: Vec::new(),
+            all_sync_capable: true,   // Default true, updated when rules are loaded
         }
     }
 
@@ -469,6 +496,9 @@ impl RuleEngine {
     pub fn build_cpt_index(&mut self) {
         self.cpt_rule_index.clear();
         self.universal_rules.clear();
+
+        // PERFORMANCE: Compute sync capability once during index build
+        self.all_sync_capable = self.rules.iter().all(|r| !r.requires_db_access());
 
         for (idx, rule) in self.rules.iter().enumerate() {
             if let Some(cpt_codes) = rule.applicable_cpt_codes() {
@@ -496,8 +526,9 @@ impl RuleEngine {
                 indexed_cpts = indexed_cpts,
                 indexed_rules = indexed_rule_count,
                 universal_rules = universal_count,
-                "CPT index built: {} CPT codes -> {} rules indexed, {} universal rules that run on every service line",
-                indexed_cpts, indexed_rule_count, universal_count
+                all_sync = self.all_sync_capable,
+                "CPT index built: {} CPT codes -> {} rules indexed, {} universal rules, sync_capable={}",
+                indexed_cpts, indexed_rule_count, universal_count, self.all_sync_capable
             );
 
             // PERFORMANCE WARNING: Too many universal rules will cause slow processing
@@ -569,9 +600,16 @@ impl RuleEngine {
     }
 
     /// Execute all rules against a context
-    /// Uses sync execution for rules that don't need DB access (like COMPOSITE)
-    /// Uses CPT index for filtering when available
+    /// PERFORMANCE: Uses fully synchronous path when all rules are sync-capable
+    /// Falls back to mixed sync/async for rules needing DB access
     pub async fn execute_all(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
+        // PERFORMANCE: Use fully synchronous path when all rules are CPU-only
+        // This eliminates ALL async overhead (tokio task switching, state machines, etc.)
+        if self.all_sync_capable {
+            return self.execute_all_sync(ctx);
+        }
+
+        // Fallback: mixed sync/async for rules that need DB access
         let mut results = Vec::new();
 
         for rule in &self.rules {
@@ -619,6 +657,49 @@ impl RuleEngine {
         Ok(results)
     }
 
+    /// PERFORMANCE-CRITICAL: Fully synchronous execution of ALL rules
+    /// - Zero async overhead (no tokio task switching, no state machines)
+    /// - Pre-allocated result vector
+    /// - Minimal branching in hot loop
+    /// - Used when all rules are CPU-only (like COMPOSITE rules)
+    #[inline]
+    pub fn execute_all_sync(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
+        // Pre-allocate results (most rules won't trigger)
+        let mut results = Vec::with_capacity(16);
+
+        // PERFORMANCE: Check enabled_flag_types once outside the loop
+        let has_filter = self.enabled_flag_types.is_some();
+
+        // Execute ALL rules - TIGHT LOOP
+        for rule in &self.rules {
+            // Skip if rule is not enabled (rare)
+            if !rule.is_enabled() {
+                continue;
+            }
+
+            // Skip if not in enabled flag types list (rare)
+            if has_filter {
+                if let Some(ref enabled) = self.enabled_flag_types {
+                    if !enabled.contains(&rule.flag_type()) {
+                        continue;
+                    }
+                }
+            }
+
+            // Execute synchronously - all rules are sync-capable in this path
+            match rule.execute_sync(ctx) {
+                Ok(Some(result)) => results.push(result),
+                Ok(None) => {} // Rule didn't trigger - most common path
+                Err(e) => {
+                    // Should not happen if all_sync_capable is true
+                    eprintln!("Error executing rule {}: {}", rule.name(), e);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     /// Execute rules using CPT index for fast filtering
     /// Only executes rules that apply to the given procedure code + universal rules
     /// This can skip 95%+ of rules when many CPT-specific rules are loaded
@@ -626,6 +707,13 @@ impl RuleEngine {
     /// PERFORMANCE: For 600 rules where only 30 apply to a given CPT code,
     /// this method executes ~30 rules instead of ~600 (20x speedup)
     pub async fn execute_all_indexed(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
+        // PERFORMANCE: Try fully synchronous path first (avoids ALL async overhead)
+        // This is critical for high-throughput ingestion with 500+ rules
+        if self.all_rules_sync_capable() {
+            return self.execute_all_indexed_sync(ctx);
+        }
+
+        // Fallback: mixed sync/async execution for rules needing DB access
         let mut results = Vec::new();
 
         // Get procedure code (uppercase for index lookup)
@@ -690,6 +778,78 @@ impl RuleEngine {
                         eprintln!("Error executing rule {}: {}", rule.name(), e);
                     }
                 }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Check if all loaded rules support synchronous execution
+    /// PERFORMANCE: Returns cached value computed during build_cpt_index()
+    #[inline]
+    fn all_rules_sync_capable(&self) -> bool {
+        self.all_sync_capable
+    }
+
+    /// PERFORMANCE-CRITICAL: Fully synchronous rule execution
+    /// - Zero async overhead (no tokio task switching)
+    /// - Pre-allocated result vector
+    /// - Minimal branching in hot loop
+    /// - Direct iteration without index indirection when possible
+    #[inline]
+    pub fn execute_all_indexed_sync(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
+        // Pre-allocate results (most rules won't trigger, but avoid reallocations)
+        let mut results = Vec::with_capacity(16);
+
+        // Get procedure code (uppercase for index lookup)
+        let procedure_code = ctx.procedure_code.as_ref()
+            .map(|s| s.to_uppercase());
+
+        // Collect rule indices to execute
+        // PERFORMANCE: Use SmallVec if available, otherwise pre-allocate
+        let estimated_rules = self.universal_rules.len() + 50; // Universal + ~50 CPT-specific
+        let mut rule_indices: Vec<usize> = Vec::with_capacity(estimated_rules);
+
+        // Add rules for this specific CPT code
+        if let Some(cpt) = &procedure_code {
+            if let Some(indices) = self.cpt_rule_index.get(cpt) {
+                rule_indices.extend(indices.iter().copied());
+            }
+        }
+
+        // Add universal rules (apply to all CPT codes)
+        rule_indices.extend(self.universal_rules.iter().copied());
+
+        // Sort and dedup to avoid executing same rule twice
+        rule_indices.sort_unstable();
+        rule_indices.dedup();
+
+        // PERFORMANCE: Check enabled_flag_types once outside the loop
+        let has_filter = self.enabled_flag_types.is_some();
+
+        // Execute only the applicable rules - TIGHT LOOP
+        for idx in rule_indices {
+            let rule = &self.rules[idx];
+
+            // Skip if rule is not enabled (rare)
+            if !rule.is_enabled() {
+                continue;
+            }
+
+            // Skip if not in enabled flag types list (rare)
+            if has_filter {
+                if let Some(ref enabled) = self.enabled_flag_types {
+                    if !enabled.contains(&rule.flag_type()) {
+                        continue;
+                    }
+                }
+            }
+
+            // Direct sync execution - no async fallback in this path
+            match rule.execute_sync(ctx) {
+                Ok(Some(result)) => results.push(result),
+                Ok(None) => {} // Rule didn't trigger (common case)
+                Err(_) => {} // Sync not supported - skip (shouldn't happen if all_rules_sync_capable is true)
             }
         }
 

@@ -898,6 +898,88 @@ INCLUDE (issue_id, severity, created_at);
 COMMENT ON TABLE claims.service_line_flag IS 'Flags assigned to service lines by the rules engine';
 
 -- ============================================================================
+-- Source: 074_service_line_flag_performance_tuning.sql
+-- ============================================================================
+
+-- BRIN index for time-range queries (very efficient for append-only data)
+CREATE INDEX idx_service_line_flag_created_brin
+ON claims.service_line_flag USING BRIN (created_at)
+WITH (pages_per_range = 32);
+
+COMMENT ON INDEX claims.idx_service_line_flag_created_brin IS
+'BRIN index for time-range queries - extremely efficient for append-only tables';
+
+-- Covering index for single flag lookups by flag_id
+CREATE INDEX idx_service_line_flag_pk_covering
+ON claims.service_line_flag (flag_id)
+INCLUDE (service_line_id, issue_id, severity, flag_status, created_at);
+
+COMMENT ON INDEX claims.idx_service_line_flag_pk_covering IS
+'Covering index for single flag lookups by flag_id';
+
+-- Set TOAST threshold to reduce TOAST storage for smaller flag_reason values
+ALTER TABLE claims.service_line_flag
+SET (toast_tuple_target = 4096);
+
+-- Fast view for list queries (excludes TEXT columns)
+CREATE OR REPLACE VIEW claims.v_service_line_flag_list AS
+SELECT
+    slf.flag_id,
+    slf.service_line_id,
+    slf.issue_id,
+    slf.flag_type,
+    slf.severity,
+    slf.flagged_element,
+    slf.proposed_code,
+    slf.proposed_modifier,
+    slf.proposed_quantity,
+    slf.flag_status,
+    slf.resolved_at,
+    slf.resolved_by,
+    slf.created_at,
+    slf.created_by
+FROM claims.service_line_flag slf;
+
+COMMENT ON VIEW claims.v_service_line_flag_list IS
+'Fast view for service_line_flag - excludes TEXT columns (flag_reason, resolution_note) for list queries';
+
+-- Detail view with JOINs (for single flag lookup)
+CREATE OR REPLACE VIEW claims.v_service_line_flag_detail AS
+SELECT
+    slf.flag_id,
+    slf.service_line_id,
+    slf.issue_id,
+    slf.flag_type,
+    slf.severity,
+    slf.flag_reason,
+    slf.flagged_element,
+    slf.proposed_code,
+    slf.proposed_modifier,
+    slf.proposed_quantity,
+    slf.flag_status,
+    slf.resolution_note,
+    slf.resolved_at,
+    slf.resolved_by,
+    slf.created_at,
+    slf.created_by,
+    fi.issue_code,
+    fi.issue_description,
+    fc.category_code,
+    fc.category_name,
+    sl.procedure_code,
+    sl.line_item_charge_amount,
+    e.encounter_id,
+    e.date_of_service_from
+FROM claims.service_line_flag slf
+JOIN claims.flag_issue fi ON slf.issue_id = fi.issue_id
+JOIN claims.flag_category fc ON fi.category_id = fc.category_id
+JOIN claims.service_line sl ON slf.service_line_id = sl.service_line_id
+JOIN claims.encounter e ON sl.encounter_id = e.encounter_id;
+
+COMMENT ON VIEW claims.v_service_line_flag_detail IS
+'Full detail view for single flag lookup - includes TEXT columns and JOINs to related tables';
+
+-- ============================================================================
 -- Source: 007_create_staging_tables.sql
 -- ============================================================================
 

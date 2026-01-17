@@ -1,5 +1,349 @@
 # Changelog
 
+## [2.12.73.44] - 2025-01-16
+
+### Performance - PARALLEL ENCOUNTER PROCESSING
+- **Problem**: Stage 2 at 50 rec/sec, target is 333 rec/sec (10K claims / 30 seconds)
+- **Root Cause**: Sequential encounter processing within each batch
+- **Solution**: Process encounters in PARALLEL within each batch
+
+### FIFO Safety Analysis
+This change is FIFO-safe because:
+1. FIFO is enforced at **BATCH level** by `SequentialCompletionManager`
+2. Within a batch, encounters were already in arbitrary order (HashMap iteration)
+3. The `BatchResult` is reported AFTER all encounters complete
+4. `CompletionManager` commits batches in strict sequence order
+
+### Implementation Details
+- Added `MAX_CONCURRENT_ENCOUNTERS = 8` constant to limit parallelism
+- Uses `tokio::sync::Semaphore` to control concurrent encounter processing
+- Thread-safe facility cache using `Arc<RwLock<HashMap>>`
+- Uses `futures::future::join_all()` to wait for all encounters before reporting batch result
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Added `MAX_CONCURRENT_ENCOUNTERS` constant (8 concurrent)
+  - Added `process_encounter_with_service_lines_parallel()` method
+  - Converted sequential `for` loop to parallel `tokio::spawn()` with semaphore
+  - Results aggregated after all parallel tasks complete
+
+### Expected Performance Impact
+| Scenario | Speed | Notes |
+|----------|-------|-------|
+| Before (sequential) | 50 rec/sec | 1 encounter at a time |
+| After (8x parallel) | 200-400 rec/sec | 8 concurrent encounters |
+| Target | 333 rec/sec | 10K claims / 30 sec |
+
+### Configuration
+- DB connection pool: 50 connections (unchanged)
+- Concurrent encounters per worker: 8 (configurable via `MAX_CONCURRENT_ENCOUNTERS`)
+
+## [2.12.73.43] - 2025-01-16
+
+### Database - SERVICE_LINE_FLAG QUERY PERFORMANCE
+- **Problem**: `SELECT * FROM claims.service_line_flag` taking ~20 minutes for 900K rows
+- **Root Cause**: TEXT columns (`flag_reason`, `resolution_note`) require TOAST decompression for every row
+
+### Solution: Migration 074
+Added migration `074_service_line_flag_performance_tuning.sql`:
+
+1. **Fast List View** (`v_service_line_flag_list`)
+   - Excludes TEXT columns for dashboard/list queries
+   - Returns in seconds instead of minutes
+
+2. **Detail View** (`v_service_line_flag_detail`)
+   - Includes TEXT columns and JOINs
+   - For single flag lookup only
+
+3. **BRIN Index** (`idx_service_line_flag_created_brin`)
+   - Block Range Index for time-range queries
+   - 100-1000x smaller than B-tree, very fast for append-only tables
+
+4. **Covering Index** (`idx_service_line_flag_pk_covering`)
+   - For single flag lookups by flag_id
+   - Includes common columns to avoid heap access
+
+5. **TOAST Tuning**
+   - Increased `toast_tuple_target` to 4096 bytes
+   - Keeps smaller flag_reason values inline
+
+### Usage
+```sql
+-- ❌ SLOW (20+ minutes):
+SELECT * FROM claims.service_line_flag;
+
+-- ✅ FAST (for lists):
+SELECT * FROM claims.v_service_line_flag_list
+WHERE flag_status = 'OPEN'
+ORDER BY created_at DESC
+LIMIT 1000;
+
+-- ✅ FAST (for single flag):
+SELECT * FROM claims.v_service_line_flag_detail
+WHERE flag_id = 12345;
+```
+
+## [2.12.73.42] - 2025-01-16
+
+### Performance - CPT INDEXING ENABLED
+- **Problem**: Stage 2 at 12 rec/sec, evaluating 537 rules × 3 service lines = 1,611 evaluations per claim
+- **Solution**: Re-enabled CPT indexing for rule execution
+
+### Analysis of home_fixed.txt Rules
+| Metric | Count |
+|--------|-------|
+| Total rules | 537 |
+| Rules WITH cpt_in (indexable) | 492 (91.6%) |
+| Rules WITHOUT cpt_in (universal) | 45 (8.4%) |
+
+### How CPT Indexing Works
+- **Before**: All 537 rules execute for every service line
+- **After**: Only rules matching the service line's CPT code execute
+  - 45 universal rules (no cpt_in) always run
+  - ~50-70 CPT-specific rules run per service line (varies by CPT code)
+  - **Expected reduction: ~80% fewer rule evaluations**
+
+### Expected Performance Impact
+| Scenario | Evaluations/Claim | Est. Time |
+|----------|-------------------|-----------|
+| Without indexing | 1,611 | ~12 rec/sec |
+| With indexing | ~315 | 50-60+ rec/sec |
+
+### Technical Details
+- `crates/pro-service/src/claims_processor.rs`:
+  - Changed from `execute_all()` to `execute_all_indexed()`
+  - CPT index maps CPT codes → applicable rule indices
+  - Universal rules (no cpt_in) always execute
+
+## [2.12.73.41] - 2025-01-16
+
+### Performance - STRING ALLOCATION OPTIMIZATION
+- **Problem**: Stage 2 still at 12 rec/sec with 50+ rules triggering per claim
+- **Root Cause**: Excessive string allocations when rules trigger
+  - Each triggered rule was building detailed condition descriptions
+  - Flag collection was formatting strings multiple times
+  - Per-encounter logging adding overhead
+
+### Fixes Applied
+1. **Simplified Rule Description**
+   - Changed from detailed "X conditions matched (cond1; cond2; ...)" to just rule name
+   - Eliminates: `description()` call per condition, `join()`, `format!()`
+   - Saves ~4-6 string allocations per triggered rule
+
+2. **Reduced Flag Collection Allocations**
+   - Use `issue_code` directly instead of cloning
+   - Simplified flag_reason to use details directly
+   - Removed debug logging from flag collection loop
+
+3. **Downgraded Per-Encounter Logging**
+   - Changed "RULES: Executing X rules for encounter Y" from `info!()` to `debug!()`
+   - Saves one log operation per encounter
+
+### Technical Details
+- `crates/pro-rules/src/templates/composite_rule.rs`:
+  - Simplified `evaluate()` to just clone rule_name for description
+  - Removed condition description collection and joining
+
+- `crates/pro-service/src/claims_processor.rs`:
+  - Simplified flag collection to minimize string operations
+  - Downgraded per-encounter log to debug level
+
+## [2.12.73.40] - 2025-01-16
+
+### Performance - MAJOR RULE EXECUTION OPTIMIZATION
+- **Problem**: Stage 2 still slow at 11 rec/sec after v2.12.73.39 (target: 300+ rec/sec)
+- **Root Causes Identified**:
+  1. Async overhead in `execute_all()` even for sync-capable rules
+  2. Repeated `to_uppercase()` allocations in hot loop (537 rules x 3 service lines = 1,611 calls per claim)
+
+### Fixes Applied
+1. **Fully Synchronous `execute_all()` Path**
+   - Added `execute_all_sync()` method that bypasses ALL async overhead
+   - `execute_all()` now auto-detects when all rules are sync-capable and uses sync path
+   - Eliminates tokio task switching and state machine overhead for CPU-only rules
+
+2. **Pre-computed Uppercase Values**
+   - Added `finalize()` method to `RuleExecutionContext`
+   - Pre-computes uppercase for: procedure_code, diagnosis_codes, place_of_service, modifiers
+   - Called ONCE before rule execution instead of thousands of times in hot loop
+   - Eliminates ~1,611 string allocations per claim
+
+3. **Inlined Hot Path Functions**
+   - Added `#[inline]` to `evaluate()` and `finalize()` methods
+   - Reduces function call overhead in tight loops
+
+### Technical Details
+- `crates/pro-rules/src/rule_engine.rs`:
+  - Added `execute_all_sync()` for zero-async-overhead execution
+  - `execute_all()` auto-routes to sync path when `all_sync_capable` is true
+  - Added `procedure_code_upper`, `diagnosis_codes_upper`, `place_of_service_upper`, `modifiers_upper` fields
+  - Added `finalize()` method to pre-compute uppercase values
+
+- `crates/pro-rules/src/templates/composite_rule.rs`:
+  - Updated condition evaluation to use pre-computed uppercase values
+  - Added `#[inline]` attribute to `evaluate()` method
+
+- `crates/pro-service/src/claims_processor.rs`:
+  - Calls `ctx.finalize()` before rule execution
+
+## [2.12.73.39] - 2025-01-16
+
+### Performance - RULE EXECUTION OPTIMIZATION
+- **Problem**: Stage 2 processing at 4 rec/sec with 500+ rules (target: 300+ rec/sec)
+- **Root Causes Identified**:
+  1. INFO-level logging in hot path - millions of log writes with high rule counts
+  2. Double condition evaluation - re-evaluating conditions when building flag descriptions
+
+### Fixes Applied
+1. **Downgraded Hot Path Logging to DEBUG Level**
+   - `claims_processor.rs`: Changed per-service-line and per-flag logging from `info!()` to `debug!()`
+   - Eliminates millions of unnecessary log operations
+   - Summary logging (flags inserted per encounter) remains at INFO level
+
+2. **Eliminated Double Condition Evaluation in CompositeRule**
+   - `composite_rule.rs`: Captures matched condition indices during initial evaluation
+   - Reuses captured indices for description building (no re-evaluation)
+   - ~2x faster for rules that trigger
+
+### Technical Details
+- `crates/pro-service/src/claims_processor.rs`:
+  - Lines 3769-3786: Changed `info!()` to `debug!()` for rule execution logging
+  - Line 3798: Changed `info!()` to `debug!()` for "no flags collected" message
+
+- `crates/pro-rules/src/templates/composite_rule.rs`:
+  - Refactored `evaluate()` method to track matched indices during evaluation
+  - Builds description from indices instead of re-filtering conditions
+
+## [2.12.73.38] - 2025-01-16
+
+### Fixed - FLAGS NOT INSERTING INTO service_line_flag
+- **Root Cause**: AUTO_DEFER_RULE_THRESHOLD logic (added in v2.12.73.30) was auto-deferring rules when count >= 100
+  - With 537 rules and DEFER_RULES_EXECUTION not set, rules were being queued to `rules_processing_queue`
+  - No background worker exists to process that queue, so flags never got inserted
+  - This broke the behavior that was working in v2.12.73.27
+- **Solution**: Removed AUTO_DEFER_RULE_THRESHOLD auto-detection logic
+  - Rules now execute inline by default (DEFER_RULES_EXECUTION defaults to false)
+  - Explicit `DEFER_RULES_EXECUTION=true` still available if user wants deferred processing
+  - Matches v2.12.73.27 behavior where rules executed inline regardless of count
+
+### Technical Details
+- `crates/pro-service/src/claims_processor.rs`:
+  - Removed `AUTO_DEFER_RULE_THRESHOLD` constant
+  - Removed auto-defer logic that checked rule count against threshold
+  - `defer_rules` now simply reads `DEFER_RULES_EXECUTION` env var (defaults to false)
+
+## [2.12.73.37] - 2025-01-16
+
+### Fixed - RULES NOT TRIGGERING
+- **Critical Bug Fix**: Reverted from `execute_all_indexed()` to `execute_all()` for rule execution
+  - Problem: `execute_all_indexed()` (introduced in v2.12.73.27) was skipping rules due to CPT indexing
+  - Rules with `cpt_in` conditions were only executing for exact CPT matches in the index
+  - If a claim's CPT code wasn't in any rule's `cpt_in` list, NO rules would execute
+  - Solution: Revert to `execute_all()` which iterates all rules directly without CPT filtering
+  - Trade-off: Slightly slower (executes all 537 rules per service line) but rules actually trigger
+
+### Technical Details
+- `crates/pro-service/src/claims_processor.rs`:
+  - Changed `rule_engine.execute_all_indexed(&ctx)` to `rule_engine.execute_all(&ctx)`
+  - All rules now execute for every service line (correct behavior)
+
+## [2.12.73.36] - 2025-01-16
+
+### Diagnostics - INFO-LEVEL LOGGING FOR RULES ENGINE
+- **Enhanced Logging**: Added info-level logging to rule execution path for debugging flag insertion issues
+  - Logs rule count, encounter ID, and service line count at start of rule execution
+  - Logs triggered rule count per service line with CPT code
+  - Logs each flag collected with issue_code and severity
+  - Logs when no flags are collected for an encounter
+  - Logs successful flag insertions
+  - Warns when flags are collected but 0 inserted (issue_code mismatch)
+
+### Technical Details
+- `crates/pro-service/src/claims_processor.rs`:
+  - Changed debug! to info! for key rule execution logging
+  - Added per-service-line trigger counts
+  - Added individual flag collection logging
+
+## [2.12.73.34] - 2025-01-16
+
+### Performance - FULLY SYNCHRONOUS RULE EXECUTION PATH
+- **Critical Performance Fix**: Added zero-async-overhead execution path for CPU-only rules
+  - Problem: Even with sync-capable rules, `execute_all_indexed` was async and had tokio overhead
+  - Each rule execution involved async state machine, task switching overhead
+  - With 537 rules × 3 service lines = 1,611 async operations per encounter
+
+- **Solution: `execute_all_indexed_sync()` method**
+  - New fully synchronous execution path bypasses all async infrastructure
+  - `all_sync_capable` flag computed once at index build time (not per-call)
+  - Pre-allocated result vectors to avoid reallocations in hot loop
+  - Minimal branching in tight execution loop
+  - When all rules are CPU-only (like COMPOSITE), uses sync path automatically
+
+- **Debug Logging for Flag Investigation**
+  - Added logging when flags are collected but INSERT returns 0 rows
+  - Helps identify issue_code mismatches with flag_issue table
+
+- **Expected Performance**:
+  - Eliminates ~50-100 microseconds async overhead per rule
+  - With 537 rules: saves 27-54ms per service line
+  - Target: 150-300 rec/sec with inline execution
+
+### Technical Details
+- `crates/pro-rules/src/rule_engine.rs`:
+  - Added `all_sync_capable: bool` field to RuleEngine
+  - `build_cpt_index()` computes sync capability once
+  - `execute_all_indexed()` calls sync path when all rules are CPU-only
+  - `execute_all_indexed_sync()` - tight loop, no async, no fallbacks
+
+## [2.12.73.31] - 2025-01-16
+
+### Performance - O(1) HASHSET LOOKUPS + SHORT-CIRCUIT EVALUATION
+- **Critical Performance Fix**: Optimized COMPOSITE rule evaluation from O(N*M) to O(N*1)
+  - Problem: DxIn condition used nested iteration: `codes.iter().any(|c| c.eq_ignore_ascii_case(dx))`
+  - For 10 diagnosis codes × 50 allowed codes = 500 string comparisons per condition
+  - With 537 rules × 3 conditions avg = 805,500 string comparisons per service line!
+
+- **Solution 1: FxHashSet for O(1) lookups**
+  - Replaced `Vec<String>` with `FxHashSet<String>` for all code lookups
+  - CptIn, DxIn, PosIn, ModifierIn, ModifierNotIn now use O(1) HashSet.contains()
+  - All codes normalized to UPPERCASE at compile time (no runtime case conversion)
+  - DxIn complexity: O(N*M) → O(N) where N = diagnosis codes per claim
+
+- **Solution 2: Short-circuit evaluation for AND/OR**
+  - AND conditions: Stop evaluating on first FALSE (most rules fail early)
+  - OR conditions: Stop evaluating on first TRUE
+  - Previously evaluated ALL conditions before checking result
+  - Most rules with 3+ AND conditions now exit after 1-2 checks
+
+- **Expected Performance**:
+  - COMPOSITE rule evaluation: **10-50x faster** per rule
+  - Combined with CPT indexing: May enable inline execution for 500+ rules
+  - Target: Inline execution at 200-400 rec/sec (vs 5-15 rec/sec before)
+
+### Technical Details
+- `crates/pro-rules/src/templates/composite_rule.rs`:
+  - `CompiledCondition` enum uses `FxHashSet<String>` instead of `Vec<String>`
+  - `compile()` converts codes to uppercase and collects into HashSet
+  - `evaluate()` uses `codes.contains(&code.to_uppercase())` for O(1) lookup
+  - `CompositeRule::evaluate()` uses short-circuit `.all()` and `.any()` iterators
+
+## [2.12.73.30] - 2025-01-16
+
+### Performance - RESTORE AUTO-DEFER FOR HIGH RULE COUNTS
+- **Critical Fix**: Restored auto-defer threshold that was incorrectly removed in v2.12.73.27
+  - Problem: Version 2.12.73.27 removed auto-defer assuming CPT indexing would solve performance
+  - Reality: With 537 universal rules (no `cpt_in` filter), CPT indexing doesn't help
+  - All 537 rules still execute on every service line = 1,611 evaluations per encounter
+  - This caused throughput to drop from 300-500 rec/sec to 5-15 rec/sec
+  - Solution: Restored `AUTO_DEFER_RULE_THRESHOLD = 100`
+  - When rule count >= 100 and `DEFER_RULES_EXECUTION` not set, auto-defers to background
+  - Expected improvement: **20-40x throughput** (from 15 rec/sec back to 300-500 rec/sec)
+
+### Key Insight
+- CPT indexing only helps when rules have `cpt_in` conditions
+- Universal rules (rules without `cpt_in`) execute on EVERY service line regardless of CPT code
+- With 537 universal rules, inline execution is fundamentally too slow for the 10K/15-30sec target
+
 ## [2.12.73.29] - 2025-01-16
 
 ### Performance - ELIMINATE MODIFIER SELECT QUERY

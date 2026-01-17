@@ -9,13 +9,19 @@
 //! - Stage 2: staging.raw_claims -> encounters/errors (validated processing) - THIS MODULE
 
 use anyhow::{Context, Result};
+use futures::future::join_all;
 use pro_rules::{RuleEngine, RuleExecutionContext, load_rules_from_database};
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
+
+/// Maximum concurrent encounters to process in parallel within a batch
+/// This balances throughput vs DB connection pool pressure
+/// With 50 max connections and multiple workers, 8 concurrent per worker is safe
+const MAX_CONCURRENT_ENCOUNTERS: usize = 8;
 
 /// Helper function to extract a string value from a serde_json::Value
 /// Handles both String values and converts other types to strings
@@ -104,11 +110,12 @@ impl ClaimsProcessor {
             .unwrap_or(false);
 
         // Check if rules should be deferred to background processing
-        // Can be explicitly set via DEFER_RULES_EXECUTION env var
-        // Default: inline execution with CPT indexing + sync execution optimizations
-        let defer_rules_explicit = std::env::var("DEFER_RULES_EXECUTION")
-            .ok()
-            .and_then(|s| s.parse::<bool>().ok());
+        // Default: false (inline execution) - rules execute during claim processing
+        // Set DEFER_RULES_EXECUTION=true to queue rules for background processing instead
+        let defer_rules_setting = std::env::var("DEFER_RULES_EXECUTION")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse::<bool>()
+            .unwrap_or(false);
 
         let (rule_engine, defer_rules) = if use_database_rules {
             info!("Loading rules from database for Stage 2 processor...");
@@ -117,26 +124,13 @@ impl ClaimsProcessor {
                     let rule_count = rules.len();
                     info!("Stage 2: Loaded {} rule(s) from database", rule_count);
 
-                    // Determine defer mode: explicit setting takes precedence
-                    // OPTIMIZATION: With CPT indexing + sync execution, inline mode handles high rule counts
-                    let defer = match defer_rules_explicit {
-                        Some(explicit) => {
-                            if explicit {
-                                info!("Stage 2: Rules execution DEFERRED (DEFER_RULES_EXECUTION=true)");
-                            } else {
-                                info!("Stage 2: Rules execution INLINE (DEFER_RULES_EXECUTION=false)");
-                            }
-                            explicit
-                        }
-                        None => {
-                            // Default to inline execution - CPT indexing + sync execution handles high rule counts
-                            info!("Stage 2: Rules will execute INLINE with CPT indexing optimization");
-                            info!("Stage 2: To defer to background, set DEFER_RULES_EXECUTION=true");
-                            false
-                        }
-                    };
+                    if defer_rules_setting {
+                        info!("Stage 2: Rules execution DEFERRED (DEFER_RULES_EXECUTION=true)");
+                    } else {
+                        info!("Stage 2: Rules execution INLINE (DEFER_RULES_EXECUTION not set or false)");
+                    }
 
-                    (engine, defer)
+                    (engine, defer_rules_setting)
                 }
                 Err(e) => {
                     error!("Failed to load rules from database: {}", e);
@@ -1325,6 +1319,75 @@ impl ClaimsProcessor {
         self.import_encounter_payers_from_cob(tx, encounter_id, encounter_fields.inner(), billing_provider_id).await?;
 
         Ok(encounter_id)
+    }
+
+    /// Process an encounter with thread-safe facility cache (for parallel processing)
+    /// This is a wrapper around process_encounter_with_service_lines that handles
+    /// the Arc<RwLock<HashMap>> cache instead of a mutable HashMap reference.
+    async fn process_encounter_with_service_lines_parallel(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        service_lines: &[RawClaim],
+        facility_cache: &Arc<tokio::sync::RwLock<HashMap<String, (Option<i64>, i64, Option<i64>)>>>,
+    ) -> Result<i64> {
+        if service_lines.is_empty() {
+            return Err(anyhow::anyhow!("No service lines provided"));
+        }
+
+        // Use first service line for encounter-level data
+        let first_line = &service_lines[0];
+
+        // Deserialize encounter fields from first line
+        let encounter_fields = EncounterFieldsWrapper::new(first_line.encounter_fields.clone())
+            .context("Failed to deserialize encounter_fields")?;
+
+        // Pre-warm provider cache
+        self.prewarm_provider_cache(tx, &encounter_fields, service_lines).await?;
+
+        // Extract facility_code
+        let facility_code = encounter_fields.get("facility_code")
+            .or_else(|| encounter_fields.get("facility_npi"))
+            .context("Missing facility_code or facility_npi")?;
+
+        // Thread-safe cache lookup/insert
+        let (facility_id, organization_id, region_id) = {
+            // First try read lock
+            let cache_read = facility_cache.read().await;
+            if let Some(cached) = cache_read.get(&facility_code) {
+                *cached
+            } else {
+                // Drop read lock before acquiring write lock
+                drop(cache_read);
+
+                // Query database
+                let facility = sqlx::query_as::<_, (Option<i64>, i64, Option<i64>)>(
+                    r#"
+                    SELECT facility_id, organization_id, region_id
+                    FROM claims.facility
+                    WHERE facility_code = $1 OR npi = $1
+                    "#
+                )
+                .bind(&facility_code)
+                .fetch_optional(&mut **tx)
+                .await?;
+
+                let facility_result = facility
+                    .with_context(|| format!("Facility not found: {}", facility_code))?;
+
+                // Insert into cache with write lock
+                let mut cache_write = facility_cache.write().await;
+                cache_write.insert(facility_code.clone(), facility_result);
+                facility_result
+            }
+        };
+
+        // Create a local mutable HashMap with the single facility we need
+        // This allows us to reuse the original method's logic without duplicating code
+        let mut local_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
+        local_cache.insert(facility_code.clone(), (facility_id, organization_id, region_id));
+
+        // Call the original method with the local cache (it will find the facility in cache)
+        self.process_encounter_with_service_lines(tx, service_lines, &mut local_cache).await
     }
 
     /// Insert a payer record into encounter_payer table
@@ -3244,10 +3307,12 @@ impl ClaimsProcessor {
 
         let batch_id = raw_claims[0].batch_id;
 
-        // Facility lookup cache (shared across encounters)
-        let mut facility_cache: HashMap<String, (Option<i64>, i64, Option<i64>)> = HashMap::new();
+        // Thread-safe facility lookup cache (shared across parallel encounters)
+        let facility_cache: Arc<tokio::sync::RwLock<HashMap<String, (Option<i64>, i64, Option<i64>)>>> =
+            Arc::new(tokio::sync::RwLock::new(HashMap::new()));
 
         // PHASE 2 FIX: Collect successful/failed claim IDs for batch status updates
+        // These will be collected from parallel task results
         let mut successful_claim_ids: Vec<i64> = Vec::with_capacity(claim_ids.len());
         let mut failed_claims: Vec<(i64, i64, i32, String, String)> = Vec::new(); // (raw_claim_id, batch_id, row_number, error_message, raw_data)
 
@@ -3295,58 +3360,119 @@ impl ClaimsProcessor {
             encounter_groups.entry(encounter_key).or_insert_with(Vec::new).push(raw_claim);
         }
 
+        let encounter_count = encounter_groups.len();
         debug!("Worker {} grouped {} raw claims into {} encounters",
-            worker_id, claim_ids.len(), encounter_groups.len());
+            worker_id, claim_ids.len(), encounter_count);
 
-        // Process each encounter group with per-encounter transactions
-        // PHASE 2 FIX: Per-encounter transactions prevent cascading failures
+        // PERFORMANCE OPTIMIZATION: Process encounters in PARALLEL within this batch
+        // This is FIFO-safe because:
+        // 1. FIFO is enforced at BATCH level by SequentialCompletionManager
+        // 2. Within a batch, encounters are already in arbitrary order (HashMap)
+        // 3. The BatchResult is reported AFTER all encounters complete
+        // 4. CompletionManager commits batches in strict sequence order
+
+        // Semaphore limits concurrent encounters to avoid DB connection exhaustion
+        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_ENCOUNTERS));
+
+        // Spawn parallel tasks for each encounter
+        let mut handles = Vec::with_capacity(encounter_count);
+
         for ((patient_control_number, date_of_service), service_lines) in encounter_groups {
-            debug!("Processing encounter: {} on {} ({} service lines)",
-                patient_control_number, date_of_service, service_lines.len());
+            // Clone Arcs for the spawned task
+            let pool = self.pool.clone();
+            let facility_cache = Arc::clone(&facility_cache);
+            let semaphore = Arc::clone(&semaphore);
+            let processor = self.clone();
+            let pcn = patient_control_number.clone();
+            let dos = date_of_service.clone();
 
-            // Per-encounter transaction - failures don't cascade
-            let mut tx = self.pool.begin().await
-                .context("Failed to begin encounter transaction")?;
+            let handle = tokio::spawn(async move {
+                // Acquire semaphore permit (limits concurrent encounters)
+                let _permit = semaphore.acquire().await.expect("Semaphore closed");
 
-            // Validate and insert encounter with all service lines
-            match self.process_encounter_with_service_lines(&mut tx, &service_lines, &mut facility_cache).await {
-                Ok(encounter_id) => {
-                    // Commit this encounter immediately
-                    tx.commit().await
-                        .context("Failed to commit encounter transaction")?;
+                debug!("Processing encounter: {} on {} ({} service lines)",
+                    pcn, dos, service_lines.len());
 
-                    success_count += service_lines.len();
-
-                    // Collect claim IDs for batch status update later
-                    for service_line in &service_lines {
-                        successful_claim_ids.push(service_line.raw_claim_id);
+                // Per-encounter transaction - failures don't cascade
+                let tx_result = pool.begin().await;
+                let mut tx = match tx_result {
+                    Ok(tx) => tx,
+                    Err(e) => {
+                        let error_str = format!("Failed to begin transaction: {}", e);
+                        error!("Failed to begin encounter transaction for {} on {}: {}", pcn, dos, e);
+                        // Return failure info for all service lines
+                        let failed: Vec<(i64, i64, i32, String, String)> = service_lines.iter().map(|sl| {
+                            let error_message = format!("Row {}: {}", sl.row_number, error_str);
+                            let raw_data = serde_json::to_string(&sl.encounter_fields).unwrap_or_default();
+                            (sl.raw_claim_id, sl.batch_id, sl.row_number, error_message, raw_data)
+                        }).collect();
+                        return (vec![], failed, vec![error_str]);
                     }
+                };
 
-                    debug!("Successfully processed encounter: {} on {} -> encounter_id {} ({} service lines)",
-                        patient_control_number, date_of_service, encounter_id, service_lines.len());
+                // Process the encounter with thread-safe facility cache
+                match processor.process_encounter_with_service_lines_parallel(&mut tx, &service_lines, &facility_cache).await {
+                    Ok(encounter_id) => {
+                        // Commit this encounter immediately
+                        if let Err(e) = tx.commit().await {
+                            let error_str = format!("Failed to commit transaction: {}", e);
+                            error!("Failed to commit encounter {} on {}: {}", pcn, dos, e);
+                            let failed: Vec<(i64, i64, i32, String, String)> = service_lines.iter().map(|sl| {
+                                let error_message = format!("Row {}: {}", sl.row_number, error_str);
+                                let raw_data = serde_json::to_string(&sl.encounter_fields).unwrap_or_default();
+                                (sl.raw_claim_id, sl.batch_id, sl.row_number, error_message, raw_data)
+                            }).collect();
+                            return (vec![], failed, vec![error_str]);
+                        }
+
+                        // Collect successful claim IDs
+                        let successful: Vec<i64> = service_lines.iter().map(|sl| sl.raw_claim_id).collect();
+
+                        debug!("Successfully processed encounter: {} on {} -> encounter_id {} ({} service lines)",
+                            pcn, dos, encounter_id, service_lines.len());
+
+                        (successful, vec![], vec![])
+                    }
+                    Err(e) => {
+                        // Rollback failed encounter (may already be rolled back by DB)
+                        let _ = tx.rollback().await;
+
+                        let error_str = e.to_string();
+                        error!("Failed to process encounter {} on {}: {}", pcn, dos, error_str);
+
+                        // Collect failed claim info
+                        let failed: Vec<(i64, i64, i32, String, String)> = service_lines.iter().map(|sl| {
+                            let error_message = format!("Row {}: {}", sl.row_number, error_str);
+                            let raw_data = serde_json::to_string(&sl.encounter_fields).unwrap_or_default();
+                            (sl.raw_claim_id, sl.batch_id, sl.row_number, error_message, raw_data)
+                        }).collect();
+
+                        (vec![], failed, vec![error_str])
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for ALL encounters in this batch to complete
+        // This maintains FIFO ordering at the batch level
+        let results = join_all(handles).await;
+
+        // Aggregate results from all parallel tasks
+        for result in results {
+            match result {
+                Ok((successful, failed, errs)) => {
+                    success_count += successful.len();
+                    successful_claim_ids.extend(successful);
+                    failure_count += failed.len();
+                    failed_claims.extend(failed);
+                    errors.extend(errs);
                 }
                 Err(e) => {
-                    // Rollback failed encounter (may already be rolled back by DB)
-                    let _ = tx.rollback().await;
-
-                    let error_str = e.to_string();
-
-                    failure_count += service_lines.len();
-                    error!("Failed to process encounter {} on {}: {}", patient_control_number, date_of_service, error_str);
-
-                    // Collect failed claim info for batch error logging later
-                    for service_line in &service_lines {
-                        let error_message = format!("Row {}: {}", service_line.row_number, error_str);
-                        errors.push(error_message.clone());
-                        let raw_data = serde_json::to_string(&service_line.encounter_fields).unwrap_or_default();
-                        failed_claims.push((
-                            service_line.raw_claim_id,
-                            service_line.batch_id,
-                            service_line.row_number,
-                            error_message,
-                            raw_data,
-                        ));
-                    }
+                    // Task panicked - this shouldn't happen but handle it gracefully
+                    error!("Encounter processing task panicked: {}", e);
+                    errors.push(format!("Task panic: {}", e));
                 }
             }
         }
@@ -3744,9 +3870,17 @@ impl ClaimsProcessor {
         let rule_engine = self.rule_engine.read().await;
 
         // Skip if no rules loaded
-        if rule_engine.rule_count() == 0 {
+        let rule_count = rule_engine.rule_count();
+        if rule_count == 0 {
+            debug!("RULES: No rules loaded, skipping rule execution for encounter {}", encounter_id);
             return Ok(0);
         }
+
+        // PERFORMANCE: Use debug! - this runs for every encounter (thousands per batch)
+        debug!(
+            "RULES: Executing {} rules for encounter {} with {} service lines",
+            rule_count, encounter_id, service_line_contexts.len()
+        );
 
         // Collect all flags to batch insert
         // Tuple: (service_line_id, issue_code, flag_reason, severity)
@@ -3767,23 +3901,32 @@ impl ClaimsProcessor {
             // Share reference to diagnosis codes (no clone)
             ctx.diagnosis_codes = diagnosis_codes.to_vec();
 
-            // Execute rules using CPT index for fast filtering
-            // This uses the index built at rule load time to skip irrelevant rules
-            // For 600 rules where only 30 apply to this CPT, executes ~30 instead of ~600
+            // PERFORMANCE: Pre-compute uppercase values ONCE before executing 537 rules
+            // This avoids thousands of to_uppercase() allocations in the hot loop
+            ctx.finalize();
+
+            // Execute rules for this service line using CPT indexing
+            // CPT indexing skips rules that don't match this service line's CPT code
+            // Analysis: 492/537 rules (91.6%) have cpt_in conditions and are indexable
+            // Only 45 universal rules (no cpt_in) run on every service line
+            // Expected: ~80% reduction in rule evaluations (1,611 -> ~315 per claim)
             match rule_engine.execute_all_indexed(&ctx).await {
                 Ok(results) => {
+                    // PERFORMANCE: Use debug! instead of info! - this runs millions of times with 500+ rules
+                    debug!(
+                        "RULES: service_line {} (CPT={}) triggered {} rules",
+                        sl_ctx.service_line_id, sl_ctx.procedure_code, results.len()
+                    );
                     for result in results {
-                        // Use the database issue_code if available, otherwise fall back to flag_type.code()
-                        // COMPOSITE/template rules set issue_code from database, legacy rules use enum code
+                        // PERFORMANCE: Minimize allocations - with 50+ flags per claim, this adds up
+                        // Use issue_code directly if available, fall back to flag_type.code()
                         let flag_code = result.issue_code
-                            .as_deref()
-                            .unwrap_or_else(|| result.flag_type.code());
-                        let severity = result.severity.as_str();
-                        let flag_reason = match &result.details {
-                            Some(details) => format!("{}: {}", result.description, details),
-                            None => result.description.clone(),
-                        };
-                        flags_to_insert.push((sl_ctx.service_line_id, flag_code.to_string(), flag_reason, severity.to_string()));
+                            .unwrap_or_else(|| result.flag_type.code().to_string());
+                        let severity = result.severity.as_str().to_string();
+                        // Simplified flag_reason - just use description (details already included)
+                        let flag_reason = result.details.unwrap_or(result.description);
+
+                        flags_to_insert.push((sl_ctx.service_line_id, flag_code, flag_reason, severity));
                     }
                 }
                 Err(e) => {
@@ -3794,8 +3937,18 @@ impl ClaimsProcessor {
 
         // Early return if no flags
         if flags_to_insert.is_empty() {
+            // PERFORMANCE: Use debug! instead of info! - runs for every encounter without flags
+            debug!("RULES: No flags collected for encounter {}", encounter_id);
             return Ok(0);
         }
+
+        // Debug: Log flags being inserted
+        debug!(
+            "Attempting to insert {} flags for encounter {}: {:?}",
+            flags_to_insert.len(),
+            encounter_id,
+            flags_to_insert.iter().map(|(sl, code, _, _)| (sl, code.as_str())).collect::<Vec<_>>()
+        );
 
         // BATCH INSERT: Single query for all flags using UNNEST
         // This is ~10x faster than individual inserts
@@ -3851,7 +4004,15 @@ impl ClaimsProcessor {
         .unwrap_or(0);
 
         if rows_inserted > 0 {
-            debug!("Created {} flag(s) for encounter {}", rows_inserted, encounter_id);
+            info!("RULES: Inserted {} flag(s) for encounter {}", rows_inserted, encounter_id);
+        } else if !flags_to_insert.is_empty() {
+            // Flags were collected but none inserted - likely issue_code mismatch with flag_issue table
+            warn!(
+                "RULES: {} flags collected but 0 inserted for encounter {}. Issue codes may not exist in flag_issue table: {:?}",
+                flags_to_insert.len(),
+                encounter_id,
+                issue_codes
+            );
         }
 
         Ok(rows_inserted)

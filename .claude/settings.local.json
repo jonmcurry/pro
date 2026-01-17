@@ -245,7 +245,12 @@
       "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.19\")",
       "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.20\")",
       "Bash(powershell.exe -ExecutionPolicy Bypass -File ./build-msi.ps1 -Version \"2.12.73.21\")",
-      "Bash(\"./build_msi.ps1\")"
+      "Bash(\"./build_msi.ps1\")",
+      "Bash(powershell.exe -Command \"& {./build_msi.bat}\")",
+      "Bash(powershell.exe:*)",
+      "Bash(more:*)",
+      "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.ps1\")",
+      "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.py\")"
     ],
     "deny": [],
     "ask": []

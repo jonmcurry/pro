@@ -29,7 +29,7 @@ pub const BASELINE: EmbeddedMigration = EmbeddedMigration {
 
 /// Version at which the baseline was created
 /// All migrations up to and including this number are covered by the baseline
-pub const BASELINE_COVERS_THROUGH: u32 = 73;
+pub const BASELINE_COVERS_THROUGH: u32 = 74;
 
 /// Get the baseline migration
 pub fn get_baseline() -> &'static EmbeddedMigration {
@@ -394,6 +394,11 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             version: "073",
             name: "create_rules_processing_queue",
             sql: include_str!("../../../migrations/073_create_rules_processing_queue.sql"),
+        },
+        EmbeddedMigration {
+            version: "074",
+            name: "service_line_flag_performance_tuning",
+            sql: include_str!("../../../migrations/074_service_line_flag_performance_tuning.sql"),
         },
     ]
 }
