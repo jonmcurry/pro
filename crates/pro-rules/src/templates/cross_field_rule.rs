@@ -191,7 +191,24 @@ impl Rule for CrossFieldRule {
         self.flag_issue_type
     }
 
+    /// CROSS_FIELD rules don't need database access - they're pure CPU evaluation
+    fn requires_db_access(&self) -> bool {
+        false
+    }
+
+    /// Synchronous execution - avoids async overhead for CPU-only rules
+    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+
     async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+}
+
+impl CrossFieldRule {
+    /// Core evaluation logic - shared between sync and async paths
+    fn evaluate(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
         // Try to compare as decimals first
         if let (Some(val1), Some(val2)) = (
             self.get_decimal_field(ctx, &self.field1),
@@ -239,9 +256,7 @@ impl Rule for CrossFieldRule {
 
         Ok(None)
     }
-}
 
-impl CrossFieldRule {
     fn get_decimal_field(&self, ctx: &RuleExecutionContext, field: &str) -> Option<Decimal> {
         match field {
             "total_claim_charge_amount" => ctx.total_claim_charge_amount,

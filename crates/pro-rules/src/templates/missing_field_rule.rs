@@ -100,7 +100,24 @@ impl Rule for MissingFieldRule {
         self.flag_issue_type
     }
 
+    /// MISSING_FIELD rules don't need database access - they're pure CPU evaluation
+    fn requires_db_access(&self) -> bool {
+        false
+    }
+
+    /// Synchronous execution - avoids async overhead for CPU-only rules
+    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+
     async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+}
+
+impl MissingFieldRule {
+    /// Core evaluation logic - shared between sync and async paths
+    fn evaluate(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
         let mut missing_fields = Vec::new();
 
         for field in &self.fields {

@@ -35,10 +35,25 @@ impl Default for DbConfig {
                 .unwrap_or_else(|_| "postgresql://localhost/professional_smart".to_string())
                 .trim()
                 .to_string(),
-            max_connections: 50,
-            min_connections: 5,
+            // Connection pool sizing - balance between throughput and resource usage
+            max_connections: std::env::var("DB_MAX_CONNECTIONS")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(75),  // Default: 75 for high parallel throughput
+            // PERFORMANCE: min_connections=0 allows pool to fully shrink when idle
+            // This releases connections back to PostgreSQL for web app usage
+            // Connections are created on-demand when processing starts
+            min_connections: std::env::var("DB_MIN_CONNECTIONS")
+                .ok()
+                .and_then(|s| s.parse::<u32>().ok())
+                .unwrap_or(0),  // Default: 0 (allow full shrinkage after batch processing)
             connection_timeout_seconds: 30,
-            idle_timeout_seconds: 600,
+            // Idle timeout - how long to keep unused connections open
+            // Lower values release connections faster, higher values reduce reconnection overhead
+            idle_timeout_seconds: std::env::var("DB_IDLE_TIMEOUT")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(60),  // Default: 60 seconds (reduced from 600 to release connections faster)
             max_lifetime_seconds: 1800,
 
             // PHASE 5: Performance defaults

@@ -446,12 +446,12 @@ pub fn run_service() -> Result<()> {
         let worker_count = std::env::var("STAGE2_WORKER_COUNT")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(8); // Default: 8 workers
+            .unwrap_or(12); // Default: 12 workers (optimal based on testing)
 
         let batch_size = std::env::var("BATCH_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(750); // Default: 750 (Aegis proven optimal)
+            .unwrap_or(250); // Default: 250 (smaller batches for consistent throughput)
 
         info!("Starting STAGE 2 with {} workers (batch_size: {})", worker_count, batch_size);
 

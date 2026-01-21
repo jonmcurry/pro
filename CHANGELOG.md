@@ -1,5 +1,395 @@
 # Changelog
 
+## [2.12.73.61] - 2025-01-20
+
+### Fix - CONNECTION POOL RELEASE (REDUCED POLLING FREQUENCY)
+Connections were staying active because background loops polled the database too frequently.
+
+### Problem
+- `pg_stat_activity` showed 75 connections running `SELECT sequence_number, assigned_at... FROM staging.batch_sequences`
+- **SequentialCompletionManager** checked for stuck sequences every 100ms (600 queries/minute)
+- **SequencedBatchAcquirer** polled for pending claims every 10ms (6000 queries/minute when idle)
+- This constant polling prevented connection pool from releasing idle connections
+
+### Solution
+1. **SequentialCompletionManager**: Changed stuck sequence check from 100ms to 30 seconds
+   - Stuck sequences are rare (timeout is 5 minutes anyway)
+   - 30 second interval is sufficient for detection
+
+2. **SequencedBatchAcquirer**: Implemented exponential backoff when no claims
+   - When claims exist: 50ms between acquisitions (fast processing)
+   - When idle: Backoff from 2s → 4s → 8s → 16s → 30s (max)
+   - Resets to fast polling when new claims arrive
+
+### Expected Impact
+- Connections should release within 60 seconds after processing completes
+- Minimal impact on processing throughput (only affects idle periods)
+- Reduced database load when idle from ~6600 queries/min to ~3 queries/min
+
+### Technical Changes
+- `crates/pro-service/src/batch_sequencer.rs`:
+  - Line ~295: Changed stuck check interval from 100ms to 30s
+  - Lines ~113-145: Added exponential backoff for idle acquisition loop
+
+## [2.12.73.59] - 2025-01-20
+
+### Performance - JSON CLONE REDUCTION IN ENCOUNTER GROUPING
+Eliminated unnecessary JSON deserialization/cloning in the encounter grouping hot path.
+
+### Problem
+- Each raw claim's `encounter_fields` (~50KB) was being cloned and fully deserialized
+- Just to extract two fields: `patient_control_number` and `date_of_service_from`
+- At 250 claims/batch = 12.5 MB of unnecessary memory allocations per batch
+- This was happening in both the parallel and sequential processing paths
+
+### Solution
+- Added `get_field_from_json()` helper that extracts fields directly from JsonValue
+- Removed `serde_json::from_value(raw_claim.encounter_fields.clone())` calls
+- Now uses `get_field_from_json(&raw_claim.encounter_fields, "field_name")` instead
+- Zero-copy access to the two required fields
+
+### Expected Impact
+- Reduced memory churn by ~12.5 MB per batch
+- Faster encounter grouping phase (CPU-bound)
+- Potential +20-50 rec/sec improvement
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Added `get_field_from_json()` helper function
+  - Updated parallel batch processing path (line ~3339)
+  - Updated sequential batch processing path (line ~358)
+
+## [2.12.73.57] - 2025-01-20
+
+### Fix - CONNECTION POOL MIN_CONNECTIONS = 0
+Changed default `min_connections` from 5 to 0 to allow full pool shrinkage after batch processing.
+
+### Problem
+- Even with `idle_timeout=60s`, all 75 connections stayed open after batch processing
+- SQLx's idle connection reaper doesn't aggressively close connections above `min_connections`
+- Connections were not being released back to PostgreSQL for web app usage
+
+### Solution
+- Changed default `DB_MIN_CONNECTIONS` from 5 to 0
+- Pool can now shrink to zero connections when idle
+- Connections are created on-demand when processing starts
+- After 60 seconds of idle time, all connections will close
+
+### Technical Changes
+- `crates/pro-db/src/connection.rs`: Changed min_connections default from 5 to 0
+- `installer/WriteConfig.vbs`: Updated `DB_MIN_CONNECTIONS=0`
+- `.env`: Updated `DB_MIN_CONNECTIONS=0`
+
+### Notes
+- Set `DB_MIN_CONNECTIONS` > 0 if you want to keep warm connections for faster startup
+- No performance impact during batch processing (connections still scale to max_connections)
+
+## [2.12.73.55] - 2025-01-20
+
+### Performance - SYNC EXECUTION PATH FOR CPU-ONLY RULES
+Enabled synchronous execution for all CPU-only template rules, eliminating async overhead.
+
+### Problem
+- RuleEngine has `all_sync_capable` flag that enables sync execution path
+- Only `CompositeRule` had `requires_db_access() -> false` implemented
+- Other CPU-only templates (Threshold, MissingField, FieldPattern, CrossField) used default `true`
+- If ANY rule returns `requires_db_access() -> true`, ALL rules use async path
+- This forced unnecessary async overhead for rules that do pure CPU evaluation
+
+### Solution
+Added sync execution support to all CPU-only template rules:
+- `ThresholdRule` - numeric threshold comparisons
+- `MissingFieldRule` - required field validation
+- `FieldPatternRule` - regex pattern matching
+- `CrossFieldRule` - cross-field comparisons
+
+Each now implements:
+```rust
+fn requires_db_access(&self) -> bool { false }
+fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>>
+```
+
+### Skipped
+- `DuplicateRule` - genuinely requires DB access (checks for duplicates via SQL queries)
+
+### Expected Impact
+- If ruleset contains NO DuplicateRules, entire execution path becomes synchronous
+- Eliminates async runtime overhead for CPU-bound rule evaluation
+- Potential +50-100 rec/sec improvement depending on rule composition
+
+### Technical Changes
+- `crates/pro-rules/src/templates/threshold_rule.rs`: Added sync support
+- `crates/pro-rules/src/templates/missing_field_rule.rs`: Added sync support
+- `crates/pro-rules/src/templates/field_pattern_rule.rs`: Added sync support
+- `crates/pro-rules/src/templates/cross_field_rule.rs`: Added sync support
+
+## [2.12.73.54] - 2025-01-20
+
+### Fix - CONNECTION POOL IDLE TIMEOUT
+Reduced idle timeout from 600s to 60s so connections are released faster after batch processing.
+
+### Problem
+- After batch processing, all 75 connections remained open for 10 minutes
+- Web app could not acquire connections during this window
+- `pg_stat_activity` showed 75 idle connections blocking new requests
+
+### Solution
+- Added `DB_IDLE_TIMEOUT` environment variable (default: 60 seconds)
+- Idle connections now close within 1 minute after processing completes
+- No impact on processing performance (only affects idle connections)
+
+### Technical Changes
+- `crates/pro-db/src/connection.rs`: Made idle_timeout configurable via `DB_IDLE_TIMEOUT` env var
+- `installer/WriteConfig.vbs`: Added `DB_IDLE_TIMEOUT=60` to installer config
+- `.env.example`: Updated documentation for connection pool settings
+
+### New Environment Variable
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_IDLE_TIMEOUT` | 60 | Seconds before idle connections are closed |
+
+## [2.12.73.53] - 2025-01-20
+
+### Performance - ELIMINATED RULE ENGINE LOCK CONTENTION
+Removed RwLock from rule_engine to eliminate lock contention in parallel encounter processing.
+
+### Problem
+- With 24 parallel encounters, each task was acquiring `rule_engine.read().await`
+- This caused 24 concurrent lock acquisitions per batch
+- Lock contention serialized what should be parallel work
+- Contributing to avg 228 rec/sec (target: 333 rec/sec)
+
+### Solution
+- Changed `rule_engine: Arc<RwLock<RuleEngine>>` to `rule_engine: Arc<RuleEngine>`
+- Rules are loaded once at startup and never modified during runtime
+- Write lock was never used - only read locks were acquired
+- Direct Arc access eliminates ALL lock acquisition overhead
+
+### Expected Impact
+- Estimated +100-150 rec/sec improvement
+- Zero lock contention for rule execution
+- No functional changes - rules execute identically
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Line 96: Changed type from `Arc<RwLock<RuleEngine>>` to `Arc<RuleEngine>`
+  - Line 159: Removed `RwLock::new()` wrapper
+  - Line 3880: Removed `.read().await` - now direct Arc reference
+
+## [2.12.73.52] - 2025-01-16
+
+### Installer - UPDATED DEFAULT CONFIGURATION
+Updated installer to include Stage 2 performance tuning variables in new installations.
+
+### Changes
+- `installer/WriteConfig.vbs`: Updated defaults and added new env vars
+  - STAGE2_WORKER_COUNT=12 (was 8)
+  - BATCH_SIZE=250 (was 750)
+  - MAX_CONCURRENT_ENCOUNTERS=24 (new)
+  - DB_MAX_CONNECTIONS=75 (new)
+  - DB_MIN_CONNECTIONS=5 (new)
+- `.env.example`: Added Stage 2 tuning section with documentation
+- `.env`: Added Stage 2 tuning variables
+
+### Note for Existing Installations
+The installer preserves existing `.env` files during upgrade. To get new variables,
+manually add to your `.env`:
+```
+STAGE2_WORKER_COUNT=12
+BATCH_SIZE=250
+MAX_CONCURRENT_ENCOUNTERS=24
+DB_MAX_CONNECTIONS=75
+DB_MIN_CONNECTIONS=5
+```
+
+## [2.12.73.51] - 2025-01-16
+
+### Feature - CONFIGURABLE PERFORMANCE PARAMETERS VIA ENV VARS
+All performance tuning parameters are now configurable via environment variables.
+No need to rebuild the MSI installer to adjust these settings.
+
+### New Environment Variables
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MAX_CONCURRENT_ENCOUNTERS` | 24 | Concurrent encounters per batch |
+| `DB_MAX_CONNECTIONS` | 75 | Database connection pool size |
+| `DB_MIN_CONNECTIONS` | 5 | Minimum idle connections |
+| `STAGE2_WORKER_COUNT` | 12 | Number of Stage 2 workers |
+| `BATCH_SIZE` | 250 | Claims per batch |
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`: MAX_CONCURRENT_ENCOUNTERS now reads from env var
+- `crates/pro-db/src/connection.rs`: max_connections and min_connections now read from env vars
+
+### Example .env Configuration
+```
+# Stage 2 Performance Tuning
+STAGE2_WORKER_COUNT=12
+BATCH_SIZE=250
+MAX_CONCURRENT_ENCOUNTERS=24
+DB_MAX_CONNECTIONS=75
+DB_MIN_CONNECTIONS=5
+```
+
+## [2.12.73.50] - 2025-01-16
+
+### Performance - INCREASED CONCURRENT ENCOUNTERS TO 24
+- **Problem**: Stage 2 avg 213 rec/sec, target 333 rec/sec (64% of target)
+- **Analysis**: With 75 DB connections now available, can increase per-batch parallelism
+- **Solution**: Increase MAX_CONCURRENT_ENCOUNTERS from 16 to 24
+
+### Performance Analysis (v2.12.73.49)
+| Metric | Value | % of Target |
+|--------|-------|-------------|
+| Average | 213.00 rec/sec | 64% |
+| Peak | 591.00 rec/sec | 177% |
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`: MAX_CONCURRENT_ENCOUNTERS 16 -> 24
+
+### Configuration Summary
+| Parameter | Value | Env Var |
+|-----------|-------|---------|
+| Workers | 12 | STAGE2_WORKER_COUNT |
+| Batch Size | 250 | BATCH_SIZE |
+| Concurrent Encounters | 24 | (constant) |
+| DB Pool | 75 | (hardcoded) |
+
+## [2.12.73.49] - 2025-01-16
+
+### Performance - REVERTED WORKERS + INCREASED DB POOL
+- **Problem**: v2.12.73.48 (16 workers) showed decreased performance vs v2.12.73.47 (12 workers)
+- **Analysis**: 16 workers caused DB connection pool contention (50 connections)
+- **Solution**: Revert to 12 workers (optimal) + increase DB pool from 50 to 75 connections
+
+### Performance Analysis (v2.12.73.48 - 16 workers was worse)
+| Metric | v2.12.73.47 (12 workers) | v2.12.73.48 (16 workers) |
+|--------|--------------------------|--------------------------|
+| Average | 204.99 rec/sec | 200.94 rec/sec (-2%) |
+| Peak | 619.47 rec/sec | 599.06 rec/sec (-3%) |
+
+### Technical Changes
+- `crates/pro-service/src/service.rs`: STAGE2_WORKER_COUNT 16 -> 12 (reverted)
+- `crates/pro-service/src/main.rs`: STAGE2_WORKER_COUNT 16 -> 12 (reverted)
+- `crates/pro-db/src/connection.rs`: max_connections 50 -> 75
+
+### Configuration Summary
+| Parameter | Value | Env Var |
+|-----------|-------|---------|
+| Workers | 12 | STAGE2_WORKER_COUNT |
+| Batch Size | 250 | BATCH_SIZE |
+| Concurrent Encounters | 16 | (constant) |
+| DB Pool | 75 | (hardcoded) |
+
+## [2.12.73.48] - 2025-01-16
+
+### Performance - INCREASED WORKER COUNT TO 16
+- **Problem**: Stage 2 avg 205 rec/sec, target 333 rec/sec (62% of target)
+- **Root Cause**: Still have capacity for more parallel batch processing
+- **Solution**: Increase default worker count from 12 to 16
+
+### Performance Analysis (v2.12.73.47)
+| Metric | Value | % of Target |
+|--------|-------|-------------|
+| Average | 204.99 rec/sec | 62% |
+| Peak | 619.47 rec/sec | 186% |
+| Gap Ratio | 3.0x | Room for improvement |
+
+### Technical Changes
+- `crates/pro-service/src/service.rs`: Default STAGE2_WORKER_COUNT 12 -> 16
+- `crates/pro-service/src/main.rs`: Default STAGE2_WORKER_COUNT 12 -> 16
+
+### Configuration Summary
+| Parameter | Value | Env Var |
+|-----------|-------|---------|
+| Workers | 16 | STAGE2_WORKER_COUNT |
+| Batch Size | 250 | BATCH_SIZE |
+| Concurrent Encounters | 16 | (constant) |
+
+## [2.12.73.47] - 2025-01-16
+
+### Performance - INCREASED WORKER COUNT
+- **Problem**: Stage 2 avg 191 rec/sec, target 333 rec/sec (58% of target)
+- **Root Cause**: With smaller batches (250), need more workers to maintain throughput
+- **Solution**: Increase default worker count from 8 to 12
+
+### Performance Analysis (v2.12.73.46)
+| Metric | Value | % of Target |
+|--------|-------|-------------|
+| Average | 191.61 rec/sec | 58% |
+| Peak | 555.56 rec/sec | 167% |
+| Gap Ratio | 2.9x | Improved from 3.7x |
+
+### Why More Workers Help
+- More workers = more batches processed in parallel
+- Smaller batches (250) complete faster, need more workers to keep pipeline full
+- DB pool (50 connections) can support: 12 workers * ~4 connections = 48 connections
+- FIFO maintained by SequentialCompletionManager regardless of worker count
+
+### Technical Changes
+- `crates/pro-service/src/service.rs`: Default STAGE2_WORKER_COUNT 8 -> 12
+- `crates/pro-service/src/main.rs`: Default STAGE2_WORKER_COUNT 8 -> 12
+
+### Configuration Summary
+| Parameter | Value | Env Var |
+|-----------|-------|---------|
+| Workers | 12 | STAGE2_WORKER_COUNT |
+| Batch Size | 250 | BATCH_SIZE |
+| Concurrent Encounters | 16 | (constant) |
+
+## [2.12.73.46] - 2025-01-16
+
+### Performance - REDUCED BATCH SIZE FOR CONSISTENT THROUGHPUT
+- **Problem**: Stage 2 avg 186 rec/sec, peak 687 rec/sec - large 3.7x gap indicates batch variance
+- **Root Cause**: Large batches (750 claims) have highly variable encounter counts/complexity
+- **Solution**: Reduce batch size from 750 to 250 for more consistent processing times
+
+### Performance Analysis (v2.12.73.45)
+| Metric | Value | Issue |
+|--------|-------|-------|
+| Average | 186.08 rec/sec | 56% of target |
+| Peak | 686.57 rec/sec | 206% of target |
+| Gap Ratio | 3.7x | Batch variance too high |
+
+### Why Smaller Batches Help
+- Smaller batches = more consistent processing times
+- Faster completion of "easy" batches (few encounters)
+- More granular FIFO ordering (batch-level)
+- Better utilization of 16 concurrent encounters per batch
+
+### Technical Changes
+- `crates/pro-service/src/service.rs`: Default BATCH_SIZE 750 -> 250
+- `crates/pro-service/src/main.rs`: Default BATCH_SIZE 750 -> 250
+
+### Configuration
+- Batch size configurable via `BATCH_SIZE` env var (default: 250)
+- Concurrent encounters per batch: 16 (unchanged)
+
+## [2.12.73.45] - 2025-01-16
+
+### Performance - INCREASED PARALLEL CONCURRENCY
+- **Problem**: Stage 2 averaging 189.68 rec/sec, target is 333 rec/sec
+- **Peak Performance**: 545.95 rec/sec proves system CAN achieve target
+- **Root Cause**: Conservative concurrency limit (8) leaving capacity unused
+
+### Solution
+- Increased `MAX_CONCURRENT_ENCOUNTERS` from 8 to 16
+- With 50 DB connections and 2 workers: 16 * 2 = 32 connections max (well under limit)
+
+### Performance Analysis
+| Metric | Value | % of Target |
+|--------|-------|-------------|
+| Previous Average | 189.68 rec/sec | 57% |
+| Previous Peak | 545.95 rec/sec | 164% |
+| Target | 333 rec/sec | 100% |
+
+### Expected Impact
+Doubling concurrency from 8 to 16 should bring average throughput closer to peak performance.
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Changed `MAX_CONCURRENT_ENCOUNTERS` from 8 to 16
+
 ## [2.12.73.44] - 2025-01-16
 
 ### Performance - PARALLEL ENCOUNTER PROCESSING

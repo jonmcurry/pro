@@ -18,10 +18,18 @@ use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
-/// Maximum concurrent encounters to process in parallel within a batch
+/// Default maximum concurrent encounters to process in parallel within a batch
+/// Configurable via MAX_CONCURRENT_ENCOUNTERS env var
 /// This balances throughput vs DB connection pool pressure
-/// With 50 max connections and multiple workers, 8 concurrent per worker is safe
-const MAX_CONCURRENT_ENCOUNTERS: usize = 8;
+const DEFAULT_MAX_CONCURRENT_ENCOUNTERS: usize = 24;
+
+/// Get the configured max concurrent encounters from env or use default
+fn get_max_concurrent_encounters() -> usize {
+    std::env::var("MAX_CONCURRENT_ENCOUNTERS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_ENCOUNTERS)
+}
 
 /// Helper function to extract a string value from a serde_json::Value
 /// Handles both String values and converts other types to strings
@@ -39,6 +47,12 @@ fn get_string_value(value: &JsonValue) -> Option<String> {
 /// Helper function to get a string from a HashMap<String, JsonValue>
 fn get_field_as_string(fields: &HashMap<String, JsonValue>, key: &str) -> Option<String> {
     fields.get(key).and_then(get_string_value)
+}
+
+/// PERFORMANCE: Extract a field directly from a JsonValue object without deserializing
+/// This avoids cloning the entire JsonValue just to get one field
+fn get_field_from_json(value: &JsonValue, key: &str) -> Option<String> {
+    value.get(key).and_then(get_string_value)
 }
 
 /// Wrapper type for encounter fields that provides String-like access to JsonValue fields
@@ -85,7 +99,9 @@ pub struct ClaimsProcessor {
     provider_cache: Arc<RwLock<HashMap<String, i64>>>,
     /// Rules engine for post-bill auditing
     /// Loaded from database based on ENABLE_DATABASE_RULES env var
-    rule_engine: Arc<RwLock<RuleEngine>>,
+    /// NOTE: Uses Arc without RwLock because rules are loaded once at startup
+    /// and never modified during runtime. This eliminates lock contention.
+    rule_engine: Arc<RuleEngine>,
     /// Whether to defer rules execution to background processing
     /// PERFORMANCE: When true, rules run asynchronously after import completes
     /// This dramatically improves import throughput (10K claims/30sec target)
@@ -148,7 +164,7 @@ impl ClaimsProcessor {
             taxonomy_cache: Arc::new(RwLock::new(HashMap::new())),
             taxonomy_cache_loaded: Arc::new(RwLock::new(false)),
             provider_cache: Arc::new(RwLock::new(HashMap::new())),
-            rule_engine: Arc::new(RwLock::new(rule_engine)),
+            rule_engine: Arc::new(rule_engine),
             defer_rules,
         }
     }
@@ -340,18 +356,10 @@ impl ClaimsProcessor {
         let mut encounter_groups: StdHashMap<(String, String), Vec<RawClaim>> = StdHashMap::new();
 
         for raw_claim in raw_claims {
-            // Extract encounter key from encounter_fields
-            // Use JsonValue to handle mixed types (strings, arrays like other_insurance)
-            let encounter_fields: StdHashMap<String, JsonValue> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
-                Ok(fields) => fields,
-                Err(e) => {
-                    error!("Failed to deserialize encounter_fields for raw_claim_id {}: {}", raw_claim.raw_claim_id, e);
-                    result.failed += 1;
-                    continue;
-                }
-            };
+            // PERFORMANCE: Extract encounter key fields directly from JsonValue
+            // This avoids cloning/deserializing the entire encounter_fields object
 
-            let patient_control_number = match get_field_as_string(&encounter_fields, "patient_control_number") {
+            let patient_control_number = match get_field_from_json(&raw_claim.encounter_fields, "patient_control_number") {
                 Some(pcn) => pcn,
                 None => {
                     error!("Missing patient_control_number for raw_claim_id {}", raw_claim.raw_claim_id);
@@ -360,7 +368,7 @@ impl ClaimsProcessor {
                 }
             };
 
-            let date_of_service = match get_field_as_string(&encounter_fields, "date_of_service_from") {
+            let date_of_service = match get_field_from_json(&raw_claim.encounter_fields, "date_of_service_from") {
                 Some(dos) => dos,
                 None => {
                     error!("Missing date_of_service_from for raw_claim_id {}", raw_claim.raw_claim_id);
@@ -3321,20 +3329,11 @@ impl ClaimsProcessor {
         let mut encounter_groups: StdHashMap<(String, String), Vec<RawClaim>> = StdHashMap::new();
 
         for raw_claim in raw_claims {
-            // Extract encounter key from encounter_fields
-            // Use JsonValue to handle mixed types (strings, arrays like other_insurance)
-            let encounter_fields: StdHashMap<String, JsonValue> = match serde_json::from_value(raw_claim.encounter_fields.clone()) {
-                Ok(fields) => fields,
-                Err(e) => {
-                    failure_count += 1;
-                    let error_message = format!("Row {}: Failed to deserialize encounter_fields: {}", raw_claim.row_number, e);
-                    errors.push(error_message.clone());
-                    error!("Failed to deserialize encounter_fields for raw_claim_id {}: {}", raw_claim.raw_claim_id, e);
-                    continue;
-                }
-            };
+            // PERFORMANCE: Extract encounter key fields directly from JsonValue
+            // This avoids cloning/deserializing the entire encounter_fields object
+            // which was ~50KB per claim causing significant memory churn
 
-            let patient_control_number = match get_field_as_string(&encounter_fields, "patient_control_number") {
+            let patient_control_number = match get_field_from_json(&raw_claim.encounter_fields, "patient_control_number") {
                 Some(pcn) => pcn,
                 None => {
                     failure_count += 1;
@@ -3345,7 +3344,7 @@ impl ClaimsProcessor {
                 }
             };
 
-            let date_of_service = match get_field_as_string(&encounter_fields, "date_of_service_from") {
+            let date_of_service = match get_field_from_json(&raw_claim.encounter_fields, "date_of_service_from") {
                 Some(dos) => dos,
                 None => {
                     failure_count += 1;
@@ -3372,7 +3371,8 @@ impl ClaimsProcessor {
         // 4. CompletionManager commits batches in strict sequence order
 
         // Semaphore limits concurrent encounters to avoid DB connection exhaustion
-        let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_ENCOUNTERS));
+        let max_concurrent = get_max_concurrent_encounters();
+        let semaphore = Arc::new(Semaphore::new(max_concurrent));
 
         // Spawn parallel tasks for each encounter
         let mut handles = Vec::with_capacity(encounter_count);
@@ -3866,8 +3866,9 @@ impl ClaimsProcessor {
             return Ok(0);
         }
 
-        // Single lock acquisition for all rule executions
-        let rule_engine = self.rule_engine.read().await;
+        // PERFORMANCE OPTIMIZATION: Direct Arc access - no lock acquisition needed
+        // Rules are loaded once at startup and never modified during runtime
+        let rule_engine = &self.rule_engine;
 
         // Skip if no rules loaded
         let rule_count = rule_engine.rule_count();

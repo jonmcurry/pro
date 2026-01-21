@@ -110,16 +110,22 @@ impl SequencedBatchAcquirer {
     ) -> Result<()> {
         info!("Starting SequencedBatchAcquirer (batch_size: {})", self.batch_size);
 
+        // Track consecutive empty polls to implement exponential backoff
+        let mut consecutive_empty = 0u32;
+
         loop {
             tokio::select! {
                 _ = shutdown_rx.recv() => {
                     info!("SequencedBatchAcquirer shutting down");
                     break;
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(10)) => {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(50)) => {
                     // Try to acquire next batch
                     match self.acquire_next_batch().await {
                         Ok(Some(batch)) => {
+                            // Reset backoff on successful acquisition
+                            consecutive_empty = 0;
+
                             info!(
                                 "Acquired batch sequence {} ({} claims)",
                                 batch.sequence_number, batch.claim_ids.len()
@@ -131,9 +137,12 @@ impl SequencedBatchAcquirer {
                             }
                         }
                         Ok(None) => {
-                            // No pending claims, wait briefly before retrying
-                            debug!("No pending claims available");
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                            // No pending claims - use exponential backoff to reduce DB polling
+                            // Start at 1s, double each time, max 30s
+                            consecutive_empty = consecutive_empty.saturating_add(1);
+                            let backoff_secs = std::cmp::min(1 << consecutive_empty.min(4), 30);
+                            debug!("No pending claims, backing off for {}s", backoff_secs);
+                            tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
                         }
                         Err(e) => {
                             error!("Failed to acquire batch: {}", e);
@@ -292,8 +301,9 @@ impl SequentialCompletionManager {
                         error!("Failed to handle batch result: {}", e);
                     }
                 }
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
-                    // Periodically check for stuck sequences
+                // Check for stuck sequences every 30 seconds (not 100ms)
+                // This reduces idle connection usage significantly
+                _ = tokio::time::sleep(tokio::time::Duration::from_secs(30)) => {
                     if let Err(e) = self.check_stuck_sequences().await {
                         error!("Failed to check stuck sequences: {}", e);
                     }

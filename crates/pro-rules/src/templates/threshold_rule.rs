@@ -191,7 +191,24 @@ impl Rule for ThresholdRule {
         self.flag_issue_type
     }
 
+    /// THRESHOLD rules don't need database access - they're pure CPU evaluation
+    fn requires_db_access(&self) -> bool {
+        false
+    }
+
+    /// Synchronous execution - avoids async overhead for CPU-only rules
+    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+
     async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+        self.evaluate(ctx)
+    }
+}
+
+impl ThresholdRule {
+    /// Core evaluation logic - shared between sync and async paths
+    fn evaluate(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
         let value = match self.get_field_value(ctx) {
             Some(v) => v,
             None => return Ok(None), // Field not available, skip
@@ -248,9 +265,7 @@ impl Rule for ThresholdRule {
             Ok(None)
         }
     }
-}
 
-impl ThresholdRule {
     fn get_field_value(&self, ctx: &RuleExecutionContext) -> Option<Decimal> {
         match self.field.as_str() {
             "units" => ctx.service_unit_count,
