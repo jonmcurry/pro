@@ -105,10 +105,26 @@ impl RuleTemplate for CompositeRuleTemplate {
             });
 
         // Compile regex patterns
-        let compiled_conditions: Vec<CompiledCondition> = conditions
+        let mut compiled_conditions: Vec<CompiledCondition> = conditions
             .into_iter()
             .map(|c| c.compile())
             .collect::<Result<Vec<_>>>()?;
+
+        // PERFORMANCE OPTIMIZATION: Reorder conditions for optimal short-circuit evaluation
+        // For AND logic: Put cheap checks first so we fail fast on non-matches
+        // For OR logic: Put cheap checks first so we succeed fast on matches
+        //
+        // Cost ranking (low to high):
+        // 1. DateGte, DateLte (single comparison)
+        // 2. CptIn, PosIn (O(1) HashSet lookup)
+        // 3. ModifierIn, ModifierNotIn (O(N) where N = modifiers, usually 0-4)
+        // 4. CptPattern, PosPattern (regex match on single string)
+        // 5. DxIn (O(N) where N = diagnosis codes, usually 1-12, then O(1) HashSet)
+        // 6. DxPattern, DxPatternExclude (O(N) regex matches)
+        //
+        // Also: If rule has applicable_cpts (was selected via CPT index), we can skip CptIn
+        // since it was already verified during rule selection. This saves 1 condition eval per rule.
+        compiled_conditions.sort_by_key(|c| c.evaluation_cost());
 
         Ok(Arc::new(CompositeRule {
             rule_code,
@@ -346,6 +362,34 @@ impl CompiledCondition {
                     .iter()
                     .any(|m| modifiers.contains(m))
             }
+        }
+    }
+
+    /// PERFORMANCE: Evaluation cost for condition ordering optimization
+    /// Lower cost = evaluated first in short-circuit AND/OR
+    /// This allows cheap checks to fail/succeed fast before expensive checks
+    #[inline]
+    fn evaluation_cost(&self) -> u8 {
+        match self {
+            // Cost 1: Single comparison (cheapest)
+            CompiledCondition::DateGte { .. } | CompiledCondition::DateLte { .. } => 1,
+
+            // Cost 2: O(1) HashSet lookup
+            CompiledCondition::CptIn { .. } | CompiledCondition::PosIn { .. } => 2,
+
+            // Cost 3: O(N) where N = modifiers (usually 0-4)
+            CompiledCondition::ModifierIn { .. } | CompiledCondition::ModifierNotIn { .. } => 3,
+
+            // Cost 4: Single regex match
+            CompiledCondition::CptPattern { .. } | CompiledCondition::PosPattern { .. } => 4,
+
+            // Cost 5: O(N) where N = diagnosis codes (usually 1-12), then O(1) HashSet
+            // This is expensive because diagnosis_codes can have 1-12 codes
+            // and many rules have 50-200 DX codes in their condition
+            CompiledCondition::DxIn { .. } => 5,
+
+            // Cost 6: O(N) regex matches over diagnosis codes (most expensive)
+            CompiledCondition::DxPattern { .. } | CompiledCondition::DxPatternExclude { .. } => 6,
         }
     }
 

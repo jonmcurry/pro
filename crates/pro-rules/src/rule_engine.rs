@@ -150,6 +150,18 @@ impl RuleExecutionContext {
         self.modifiers_upper = self.procedure_modifiers.iter().map(|s| s.to_uppercase()).collect();
     }
 
+    /// PERFORMANCE: Finalize with pre-computed uppercase diagnosis codes
+    /// Use this when diagnosis codes are shared across multiple service lines in an encounter
+    /// This avoids computing uppercase N times for N service lines
+    #[inline]
+    pub fn finalize_with_shared_dx(&mut self, diagnosis_codes_upper: &[String]) {
+        self.procedure_code_upper = self.procedure_code.as_ref().map(|s| s.to_uppercase());
+        // Use pre-computed uppercase diagnosis codes (shared across service lines)
+        self.diagnosis_codes_upper = diagnosis_codes_upper.to_vec();
+        self.place_of_service_upper = self.place_of_service_code.as_ref().map(|s| s.to_uppercase());
+        self.modifiers_upper = self.procedure_modifiers.iter().map(|s| s.to_uppercase()).collect();
+    }
+
     pub fn to_flag_context(&self) -> FlagContext {
         FlagContext {
             encounter_id: self.encounter_id,
@@ -716,15 +728,14 @@ impl RuleEngine {
         // Fallback: mixed sync/async execution for rules needing DB access
         let mut results = Vec::new();
 
-        // Get procedure code (uppercase for index lookup)
-        let procedure_code = ctx.procedure_code.as_ref()
-            .map(|s| s.to_uppercase());
+        // PERFORMANCE: Use pre-computed uppercase from context (already computed in finalize())
+        let procedure_code = ctx.procedure_code_upper.as_ref();
 
         // Collect rule indices to execute
         let mut rule_indices: Vec<usize> = Vec::new();
 
         // Add rules for this specific CPT code
-        if let Some(cpt) = &procedure_code {
+        if let Some(cpt) = procedure_code {
             if let Some(indices) = self.cpt_rule_index.get(cpt) {
                 rule_indices.extend(indices.iter().copied());
             }
@@ -801,9 +812,9 @@ impl RuleEngine {
         // Pre-allocate results (most rules won't trigger, but avoid reallocations)
         let mut results = Vec::with_capacity(16);
 
-        // Get procedure code (uppercase for index lookup)
-        let procedure_code = ctx.procedure_code.as_ref()
-            .map(|s| s.to_uppercase());
+        // PERFORMANCE: Use pre-computed uppercase from context (already computed in finalize())
+        // Avoids 30,000 allocations per 10K claim batch
+        let procedure_code = ctx.procedure_code_upper.as_ref();
 
         // Collect rule indices to execute
         // PERFORMANCE: Use SmallVec if available, otherwise pre-allocate
@@ -811,7 +822,7 @@ impl RuleEngine {
         let mut rule_indices: Vec<usize> = Vec::with_capacity(estimated_rules);
 
         // Add rules for this specific CPT code
-        if let Some(cpt) = &procedure_code {
+        if let Some(cpt) = procedure_code {
             if let Some(indices) = self.cpt_rule_index.get(cpt) {
                 rule_indices.extend(indices.iter().copied());
             }

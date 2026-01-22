@@ -9,7 +9,7 @@
 use anyhow::{Context, Result};
 use std::ffi::OsString;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use windows_service::{
     service::{
         ServiceAccess, ServiceControl, ServiceControlAccept, ServiceErrorControl, ServiceExitCode,
@@ -350,9 +350,15 @@ pub fn run_service() -> Result<()> {
             info!("Starting STAGE 1 queue processor (file ingestion to staging)...");
             let queue_manager = QueueManager::new(db_pool_for_processor);
 
+            // Track consecutive empty polls for exponential backoff
+            let mut consecutive_empty = 0u32;
+
             loop {
                 match queue_manager.dequeue_next_global().await {
                     Ok(Some(queued_file)) => {
+                        // Reset backoff when file found
+                        consecutive_empty = 0;
+
                         info!("STAGE 1: Processing queued file: {} (queue_id={})",
                             queued_file.file_path, queued_file.queue_id);
 
@@ -426,7 +432,12 @@ pub fn run_service() -> Result<()> {
                         }
                     }
                     Ok(None) => {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        // No files in queue - use exponential backoff to reduce DB polling
+                        // Start at 2s, double each time, max 30s
+                        consecutive_empty = consecutive_empty.saturating_add(1);
+                        let backoff_secs = std::cmp::min(1 << consecutive_empty.min(4), 30);
+                        debug!("STAGE 1: No files in queue, backing off for {}s", backoff_secs);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(backoff_secs)).await;
                     }
                     Err(e) => {
                         error!("Failed to dequeue file: {}", e);

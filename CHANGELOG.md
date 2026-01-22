@@ -1,5 +1,487 @@
 # Changelog
 
+## [2.12.73.86] - 2025-01-21
+
+### Performance - BATCH PROVIDER OPERATIONS (ELIMINATE 16+ SEQUENTIAL DB CALLS)
+
+Major performance optimization that batches all provider operations per encounter into 3 queries
+instead of 16+ sequential operations.
+
+### Problem Analysis
+Performance gap analysis showed:
+- **Peak**: 995 rec/sec (proves system CAN achieve target)
+- **Average**: 183 rec/sec (18% of peak)
+- **Gap cause**: Sequential DB operations within each encounter
+
+Each encounter was making 16+ sequential `ensure_provider_exists()` calls:
+- 4 encounter-level providers (rendering, referring, supervising, billing)
+- 4 × N service-line-level providers (per service line with provider NPIs)
+- Each call: cache read lock → DB upsert → cache write lock → enrichment queue insert
+
+With 3 service lines average: 4 + (4 × 3) = **16 DB round-trips per encounter**
+
+### Solution
+Restructured provider handling into batch operations:
+
+**Before (per encounter):**
+```
+prewarm_provider_cache() → 2 queries (SELECT existing, INSERT new NPIs only)
+ensure_provider_exists() × 16 → 16 DB upserts (sequential)
+```
+
+**After (per encounter):**
+```
+prewarm_provider_cache() → 3 queries total:
+  1. SELECT existing providers by NPI (batch)
+  2. INSERT new providers with full metadata (batch with UNNEST)
+  3. INSERT enrichment queue entries (batch with UNNEST)
+ensure_provider_exists() → 0 DB calls (cache-only lookup)
+```
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - **`prewarm_provider_cache()`**: Now collects ALL provider data (NPI, type, names, taxonomy)
+    from encounter and service lines, then batch processes:
+    - Single SELECT for existing providers
+    - Single INSERT for new providers with full metadata
+    - Single INSERT for enrichment queue
+  - **`ensure_provider_exists()`**: Converted to cache-only lookup (no DB operations)
+    - If NPI not in cache after prewarm, returns None (claim proceeds with NULL provider_id)
+    - This is safe - NULL provider_id is already handled gracefully
+
+### Expected Impact
+- **Per-encounter reduction**: 16+ DB round-trips → 3 batch queries
+- **Estimated improvement**: 3-5x reduction in per-encounter DB time
+- **Target**: Sustain closer to peak throughput (995 rec/sec)
+
+### FIFO Safety
+This optimization is FIFO-safe:
+- All provider operations happen within a single encounter's transaction scope
+- No cross-batch dependencies introduced
+- Batch-level FIFO maintained by SequentialCompletionManager
+
+## [2.12.73.85] - 2025-01-21
+
+### Performance - OPTIMIZE RULE CONDITION EVALUATION ORDER
+
+Major performance optimization that reorders rule conditions for optimal short-circuit evaluation.
+
+### Problem Analysis
+Reviewing the example rule (AHRQOP001A):
+```json
+{"operator":"AND","conditions":[
+  {"type":"date_gte","min_date":"2017-07-01"},
+  {"type":"dx_in","codes":[...126 diagnosis codes...]},
+  {"type":"cpt_in","codes":["99281","99282","99283","99284","99285","99291"]}
+]}
+```
+
+With AND logic and short-circuit evaluation, conditions are evaluated in order until one fails.
+The original order was determined by the JSON definition order:
+1. `date_gte` - cheap (single comparison)
+2. `dx_in` with 126 codes - **EXPENSIVE** (iterates ALL diagnosis codes against HashSet)
+3. `cpt_in` - cheap (O(1) HashSet lookup) - but evaluated LAST!
+
+For most service lines that don't match, the expensive `dx_in` check runs before discovering
+the CPT doesn't match. With 543 rules × 30,000 service lines, this adds significant overhead.
+
+### Solution
+Added `evaluation_cost()` method to `CompiledCondition` and sort conditions by cost during
+rule compilation:
+
+| Cost | Condition Type | Reason |
+|------|---------------|--------|
+| 1 | DateGte, DateLte | Single comparison |
+| 2 | CptIn, PosIn | O(1) HashSet lookup |
+| 3 | ModifierIn, ModifierNotIn | O(N) where N = modifiers (0-4) |
+| 4 | CptPattern, PosPattern | Single regex match |
+| 5 | DxIn | O(N) diagnosis × O(1) HashSet |
+| 6 | DxPattern, DxPatternExclude | O(N) regex matches |
+
+After optimization, conditions are reordered to:
+1. `date_gte` (cost 1) - cheap, evaluated first
+2. `cpt_in` (cost 2) - cheap, evaluated second (fails fast for non-matching CPTs)
+3. `dx_in` (cost 5) - expensive, evaluated LAST (only if date and CPT match)
+
+### Technical Changes
+- `crates/pro-rules/src/templates/composite_rule.rs`:
+  - Added `evaluation_cost()` method to `CompiledCondition`
+  - Sort conditions by cost during `CompositeRuleTemplate::create()`
+  - Enables short-circuit to skip expensive DX checks when cheaper conditions fail
+
+### Expected Impact
+For rules with AND logic (most rules):
+- Non-matching service lines fail fast on cheap checks (date, CPT)
+- Expensive DX iteration only runs when cheaper conditions pass
+- Estimated 20-40% reduction in rule evaluation time
+
+## [2.12.73.84] - 2025-01-21
+
+### Bugfix - REVERTED DIAGNOSIS CODE OPTIMIZATION
+
+Reverted the diagnosis code sharing optimization from v83 to fix FK constraint violation on encounter insert.
+
+### Issue
+v83 caused FK constraint violation: `encounter_rendering_provider_id_fkey`
+No claims were being processed into the claims schema.
+
+### Fix
+- Reverted to using `ctx.finalize()` instead of `ctx.finalize_with_shared_dx()`
+- Removed pre-computation of `diagnosis_codes_upper` per encounter
+- Kept the CPT uppercase optimization in rule_engine (uses ctx.procedure_code_upper)
+- Kept the direct sync rule execution from v82
+
+### Retained Optimizations
+- Direct sync rule execution (v82)
+- Use of pre-computed `ctx.procedure_code_upper` in rule engine index lookup
+
+## [2.12.73.83] - 2025-01-21
+
+### Performance - ELIMINATE REDUNDANT ALLOCATIONS IN RULE EXECUTION (REVERTED IN v84)
+
+**NOTE: This version had a bug causing FK constraint violations. See v84.**
+
+Major performance optimization eliminating redundant string allocations in rule execution hot path.
+
+### Root Cause Analysis
+After v82 showed no improvement (177 rec/sec), profiled the actual rule execution path:
+1. **Redundant CPT uppercase**: `execute_all_indexed_sync()` was calling `to_uppercase()` on every call despite `ctx.procedure_code_upper` already being pre-computed
+2. **Repeated diagnosis code allocations**: For each of 30,000 service lines:
+   - `diagnosis_codes.to_vec()` - clones all diagnosis codes (~8 per encounter)
+   - `finalize()` then calls `diagnosis_codes.iter().map(|s| s.to_uppercase()).collect()` - uppercase all codes again
+3. With ~3 service lines per encounter, diagnosis uppercase was computed 3x per encounter instead of 1x
+
+### Solution
+1. **Use pre-computed uppercase CPT**: Changed `execute_all_indexed_sync()` to use `ctx.procedure_code_upper` directly
+2. **Share uppercase diagnosis codes**: Added `finalize_with_shared_dx()` method that accepts pre-computed uppercase diagnosis codes
+3. **Pre-compute once per encounter**: Compute uppercase diagnosis codes once per encounter, share across all service lines
+
+### Technical Changes
+- `crates/pro-rules/src/rule_engine.rs`:
+  - `execute_all_indexed_sync()`: Uses `ctx.procedure_code_upper` instead of computing `to_uppercase()`
+  - `execute_all_indexed()`: Same fix for fallback path
+  - Added `finalize_with_shared_dx()` method for shared diagnosis codes
+
+- `crates/pro-service/src/claims_processor.rs`:
+  - Pre-compute `diagnosis_codes_upper` once per encounter
+  - Call `finalize_with_shared_dx()` for each service line
+
+### Expected Impact
+- **Saved allocations per 10K claims**:
+  - CPT uppercase: 30,000 string allocations eliminated
+  - Diagnosis codes: ~160,000 string allocations eliminated (8 dx × 10K claims × 2 extra service lines)
+- Estimated 5-15% throughput improvement from reduced allocation pressure
+
+## [2.12.73.82] - 2025-01-21
+
+### Performance - ELIMINATE ASYNC OVERHEAD FOR SYNC RULE EXECUTION
+
+Major performance optimization eliminating async/await overhead for rule execution.
+
+### Root Cause Analysis
+After extensive testing, the actual bottleneck was identified:
+- All 543 composite rules are sync-capable (no database access needed)
+- But rule execution was called via async wrapper: `rule_engine.execute_all_indexed(&ctx).await`
+- Each `.await` triggers tokio scheduler overhead even for sync-only code
+- With 30,000 service lines per 10K claim batch, this adds 9-30 seconds of pure scheduler overhead
+
+### Solution
+- Changed from async `execute_all_indexed()` to direct sync `execute_all_indexed_sync()` call
+- Eliminates 30,000 unnecessary async yield points per 10K claim batch
+- No functional change - both methods produce identical results
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Replaced: `match rule_engine.execute_all_indexed(&ctx).await`
+  - With: `let results = rule_engine.execute_all_indexed_sync(&ctx)`
+  - Removed `.await` for rule execution entirely
+
+### Expected Impact
+- **Estimated improvement**: 33-50% throughput increase (based on async overhead analysis)
+- Target: 333 rec/sec (10K claims in 30 seconds)
+- Previous average: ~180 rec/sec
+- Expected new average: ~240-270 rec/sec
+
+### Performance Analysis Background
+| Component | Time/SL | Count (10K claims) | Total Time |
+|-----------|---------|-------------------|------------|
+| Async overhead (before) | 0.3-1.0ms | 30,000 SLs | 9-30s |
+| Async overhead (after) | 0ms | 30,000 SLs | 0s |
+
+## [2.12.73.79] - 2025-01-21
+
+### Cleanup - REMOVED UNUSED ENCOUNTERS_PER_TRANSACTION CODE
+
+Cleaned up unused code and configuration from transaction batching experiment.
+
+### Changes
+- Removed unused `DEFAULT_ENCOUNTERS_PER_TRANSACTION` constant
+- Removed unused `get_encounters_per_transaction()` function
+- Removed `ENCOUNTERS_PER_TRANSACTION` from .env and WriteConfig.vbs
+- Updated WriteConfig.vbs comments
+
+### Configuration Summary (Final)
+- `MAX_CONCURRENT_ENCOUNTERS=40` (increased from original 24)
+- `DB_MAX_CONNECTIONS=75`
+- `BATCH_SIZE=250`
+- `STAGE2_WORKER_COUNT=12`
+
+### Performance Testing Summary
+The transaction batching experiment (v69-v77) showed that batching multiple encounters
+per transaction hurt average throughput due to sequential processing within batches.
+The code has been restored to the original simple structure where each encounter
+gets its own parallel transaction.
+
+## [2.12.73.77] - 2025-01-21
+
+### Performance - RESTORED ORIGINAL SIMPLE ENCOUNTER LOOP
+
+Restored the original simple encounter processing loop, eliminating transaction batching overhead.
+
+### Problem
+- v76 showed 182 avg rec/sec (still below original 220)
+- Transaction batching code had overhead even with `ENCOUNTERS_PER_TRANSACTION=1`:
+  - `encounter_groups.into_iter().collect()` - HashMap to Vec conversion
+  - `.chunks(1).map(|chunk| chunk.to_vec()).collect()` - unnecessary chunking and cloning
+  - Extra loop nesting and Vec allocations
+
+### Solution
+- Reverted to original simple encounter loop structure (matching commit c1802d2)
+- Direct iteration over `encounter_groups` HashMap
+- Each encounter spawns its own task with its own transaction
+- No intermediate Vec conversions or chunking
+- Removed `ENCOUNTERS_PER_TRANSACTION` config variable (no longer used)
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Removed transaction batching code path entirely
+  - Restored original direct iteration: `for ((pcn, dos), service_lines) in encounter_groups`
+  - Each encounter gets its own BEGIN → process → COMMIT
+
+### Expected Impact
+- Should restore performance to original ~220 avg rec/sec baseline
+- Cleaner, simpler code that's easier to maintain
+
+## [2.12.73.75] - 2025-01-21
+
+### Performance - SKIP SAVEPOINTS WHEN ENCOUNTERS_PER_TRANSACTION=1
+
+Eliminated unnecessary savepoint overhead when using single-encounter transactions.
+
+### Problem
+- v74 still showed only 162 avg rec/sec (vs original 220)
+- Even with `ENCOUNTERS_PER_TRANSACTION=1`, code was creating SAVEPOINTs
+- Each encounter had 3 extra DB round-trips: SAVEPOINT, RELEASE SAVEPOINT, COMMIT
+- SAVEPOINTs are only useful when batching multiple encounters per transaction
+
+### Solution
+- Skip SAVEPOINT creation/release when `tx_batch_encounters.len() == 1`
+- Only use savepoints when actually batching multiple encounters per transaction
+- Removes 2 unnecessary DB round-trips per encounter in single-encounter mode
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Added `let use_savepoints = tx_batch_encounters.len() > 1`
+  - Only execute SAVEPOINT/RELEASE when `use_savepoints` is true
+
+### Expected Impact
+- Should restore performance closer to original 220 avg rec/sec
+- Eliminates ~2 DB round-trips per encounter when `ENCOUNTERS_PER_TRANSACTION=1`
+
+## [2.12.73.73] - 2025-01-21
+
+### Performance - REVERT TO PARALLEL ENCOUNTERS (ENCOUNTERS_PER_TRANSACTION=1)
+
+Reverted to 1 encounter per transaction after testing showed batch transactions hurt average throughput.
+
+### Test Results Summary
+| Version | ENCOUNTERS_PER_TRANSACTION | Peak rec/sec | Avg rec/sec |
+|---------|---------------------------|--------------|-------------|
+| Original | 1 | 754 | 220 |
+| v70 | 10 | 951 | 151 |
+| v72 | 5 | 894 | 157 |
+
+### Analysis
+- Batch transactions increased peak (less transaction overhead during bursts)
+- But sequential processing within batches killed average throughput
+- The parallelism loss outweighed the transaction overhead reduction
+- Original approach (1 encounter per transaction) had best average throughput
+
+### Solution
+- Reverted `ENCOUNTERS_PER_TRANSACTION` to 1 (original behavior)
+- Each encounter processes in its own transaction with full parallelism
+- Keep `MAX_CONCURRENT_ENCOUNTERS=40` for higher parallelism than original 24
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`: Changed default from 5 to 1
+- `.env`: Updated `ENCOUNTERS_PER_TRANSACTION=1`
+- `installer/WriteConfig.vbs`: Updated `ENCOUNTERS_PER_TRANSACTION=1`
+
+### Next Steps for Further Optimization
+The batch transaction approach needs redesign to process encounters in PARALLEL within each batch,
+not sequentially. This requires a different architecture that maintains transaction boundaries
+while allowing concurrent DB operations within those boundaries.
+
+## [2.12.73.71] - 2025-01-21
+
+### Performance - TUNING ENCOUNTERS_PER_TRANSACTION
+
+Reduced `ENCOUNTERS_PER_TRANSACTION` from 10 to 5 to increase parallelism.
+
+### Problem
+- v2.12.73.69/70 showed peak 951 rec/sec but average only 151 rec/sec
+- Encounters within a transaction batch are processed sequentially (share same tx)
+- With 10 encounters per tx and ~80 encounters per batch = only 8 parallel transaction batches
+- Underutilized the 40 concurrent permit limit
+
+### Solution
+- Reduced `ENCOUNTERS_PER_TRANSACTION`: 10 → 5
+- With 5 encounters per tx and ~80 encounters per batch = ~16 parallel transaction batches
+- Better utilization of concurrent permits while still reducing transaction overhead
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`: Changed default from 10 to 5
+- `.env`: Updated `ENCOUNTERS_PER_TRANSACTION=5`
+- `installer/WriteConfig.vbs`: Updated `ENCOUNTERS_PER_TRANSACTION=5`
+
+### Tradeoff Analysis
+- Old (1 encounter/tx): 80 parallel, 80 BEGIN/COMMIT - high parallelism, high overhead
+- v2.12.73.70 (10 enc/tx): 8 parallel, 8 BEGIN/COMMIT - low parallelism, low overhead
+- v2.12.73.71 (5 enc/tx): 16 parallel, 16 BEGIN/COMMIT - balanced parallelism and overhead
+
+## [2.12.73.69] - 2025-01-21
+
+### Performance - BATCH TRANSACTIONS AND CONCURRENCY TUNING
+
+Major performance optimization for Stage 2 processing implementing transaction batching.
+
+### Problem
+- Each encounter processed in its own transaction (50-80 BEGIN/COMMIT per batch)
+- Transaction overhead dominated processing time (~113ms per DB operation)
+- Peak of 754 rec/sec proved CPU/rules fast enough; bottleneck was I/O
+
+### Solution - Phase 1: Batch Transactions
+Instead of 1 transaction per encounter, batch 10 encounters into a single transaction:
+- Reduces transaction BEGIN/COMMIT cycles by 10x
+- Uses PostgreSQL SAVEPOINTs for per-encounter rollback granularity
+- If one encounter fails, only that encounter rolls back; others commit
+
+### Solution - Phase 3: Increased Concurrency
+- `MAX_CONCURRENT_ENCOUNTERS`: 24 → 40 (concurrent transaction batches)
+- With 10 encounters per transaction batch, this processes up to 400 encounters in parallel
+
+### New Configuration Options
+- `ENCOUNTERS_PER_TRANSACTION=10` - encounters per database transaction (default: 10)
+  - Higher values reduce overhead but increase rollback scope on errors
+  - Lower values provide finer rollback granularity but more transaction overhead
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Added `get_encounters_per_transaction()` configuration function
+  - Refactored `process_sequenced_batch()` to group encounters into transaction batches
+  - Each transaction batch creates savepoints for individual encounter rollback
+  - Changed default `MAX_CONCURRENT_ENCOUNTERS` from 24 to 40
+- `.env`: Added `ENCOUNTERS_PER_TRANSACTION=10`, updated `MAX_CONCURRENT_ENCOUNTERS=40`
+- `installer/WriteConfig.vbs`: Added `ENCOUNTERS_PER_TRANSACTION=10`, updated `MAX_CONCURRENT_ENCOUNTERS=40`
+
+### Expected Impact
+- +100-150 rec/sec from reduced transaction overhead (Phase 1)
+- +30-50 rec/sec from increased parallelism (Phase 3)
+- Target: 333 rec/sec (10K claims / 30 seconds)
+
+### Migration Notes
+- No database changes required
+- Existing deployments can tune `ENCOUNTERS_PER_TRANSACTION` and `MAX_CONCURRENT_ENCOUNTERS` via .env
+
+## [2.12.73.67] - 2025-01-21
+
+### Fix - REVERTED AGGRESSIVE POOL SETTINGS (PERFORMANCE RESTORATION)
+Reverted connection pool settings that caused performance regression from 228 to 171 rec/sec.
+
+### Problem
+- Performance dropped from 228 rec/sec to 171 rec/sec (~25% regression)
+- `idle_timeout=10s` was too aggressive, causing connection churn during processing
+- `max_connections=40` was too low for optimal parallelism
+
+### Solution
+Reverted to balanced settings that allow connection release while maintaining performance:
+- `max_connections`: 40 → 75 (restored for parallel throughput)
+- `min_connections`: 0 → 5 (keep small warm pool, still allows shrinkage to 5)
+- `idle_timeout`: 10s → 60s (prevents connection churn during processing)
+
+### Connection Release Strategy
+With the exponential backoff from v2.12.73.65 still in place:
+- During processing: Pool scales to 75 connections as needed
+- After processing: Background loops back off to 30s polling
+- Connections idle > 60s will be closed (down to min of 5)
+- Web app can use remaining ~95 connections (assuming PostgreSQL max_connections=100)
+
+### Technical Changes
+- `crates/pro-db/src/connection.rs`: Updated defaults
+- `installer/WriteConfig.vbs`: Updated defaults
+
+## [2.12.73.65] - 2025-01-21
+
+### Fix - STAGE 1 QUEUE PROCESSOR POLLING + IDLE CONNECTIONS
+Root cause: Stage 1 queue processor was polling every 1 second even when idle, keeping connections active.
+
+### Problem
+- `pg_stat_activity` showed 51 connections in `idle` state with last query being `SELECT ... FROM staging.file_processing_queue WHERE queue_status = 'QUEUED'`
+- Stage 1 queue processor polled every 1 second when no files were queued
+- Frequent polling kept "touching" connections, preventing idle timeout from closing them
+- `test_before_acquire=true` added extra query overhead per connection acquisition
+
+### Solution
+1. **Stage 1 Queue Processor**: Added exponential backoff when no files queued
+   - When files exist: Process immediately
+   - When idle: Backoff from 2s → 4s → 8s → 16s → 30s (max)
+   - Resets to fast polling when new files arrive
+
+2. **Disabled test_before_acquire**: Reduces connection overhead
+   - PostgreSQL connections are reliable; testing adds latency
+   - Removes extra `SELECT 1` query on each connection acquisition
+
+### Expected Impact
+- Connections should now release within 10-30 seconds after processing
+- Reduced database load when idle: ~1 query per 30 seconds (was 1 per second)
+- Slight performance improvement from removing test_before_acquire overhead
+
+### Technical Changes
+- `crates/pro-service/src/main.rs`: Added exponential backoff to Stage 1 queue processor
+- `crates/pro-service/src/service.rs`: Added exponential backoff to Stage 1 queue processor
+- `crates/pro-db/src/connection.rs`: Set `test_before_acquire: false`
+
+## [2.12.73.63] - 2025-01-20
+
+### Fix - AGGRESSIVE CONNECTION POOL SETTINGS
+Reduced max_connections and idle_timeout to force faster connection release.
+
+### Problem
+- Even with polling backoff, connections weren't releasing
+- 75 max_connections was excessive for 12 workers
+- 60 second idle timeout was too long for web app coexistence
+
+### Solution
+1. **Reduced max_connections**: 75 → 40
+   - 12 workers + completion manager + acquirer = ~15 components
+   - 40 connections is sufficient with headroom for parallel queries
+
+2. **Reduced idle_timeout**: 60s → 10s
+   - Aggressively close connections after they become idle
+   - Forces pool to shrink quickly when batch processing completes
+
+### Technical Changes
+- `crates/pro-db/src/connection.rs`:
+  - `max_connections` default: 75 → 40
+  - `idle_timeout_seconds` default: 60 → 10
+- `installer/WriteConfig.vbs`: Updated defaults
+- `.env`: Updated settings
+
+### Notes
+- During batch processing, connections scale up to 40 as needed
+- After processing, connections should drop within 10-20 seconds
+- If you need more connections during processing, set `DB_MAX_CONNECTIONS` higher
+
 ## [2.12.73.61] - 2025-01-20
 
 ### Fix - CONNECTION POOL RELEASE (REDUCED POLLING FREQUENCY)

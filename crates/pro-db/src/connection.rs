@@ -36,6 +36,7 @@ impl Default for DbConfig {
                 .trim()
                 .to_string(),
             // Connection pool sizing - balance between throughput and resource usage
+            // 75 connections supports 12 workers with MAX_CONCURRENT_ENCOUNTERS=24
             max_connections: std::env::var("DB_MAX_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
@@ -49,17 +50,21 @@ impl Default for DbConfig {
                 .unwrap_or(0),  // Default: 0 (allow full shrinkage after batch processing)
             connection_timeout_seconds: 30,
             // Idle timeout - how long to keep unused connections open
-            // Lower values release connections faster, higher values reduce reconnection overhead
+            // Balance between releasing connections and avoiding reconnection overhead
+            // 60s allows connections to stay warm during batch processing
+            // but still releases them reasonably quickly after processing completes
             idle_timeout_seconds: std::env::var("DB_IDLE_TIMEOUT")
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(60),  // Default: 60 seconds (reduced from 600 to release connections faster)
+                .unwrap_or(60),  // Default: 60 seconds (balance between performance and release)
             max_lifetime_seconds: 1800,
 
             // PHASE 5: Performance defaults
             statement_cache_capacity: 100,  // Cache up to 100 prepared statements per connection
             statement_timeout_seconds: 30,   // 30 second timeout for slow queries
-            test_before_acquire: true,       // Validate connections before use
+            // PERFORMANCE: Disabled test_before_acquire to reduce connection overhead
+            // PostgreSQL connections are reliable; testing adds latency per query
+            test_before_acquire: false,
         }
     }
 }

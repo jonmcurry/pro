@@ -21,7 +21,7 @@ use tracing::{debug, error, info, warn};
 /// Default maximum concurrent encounters to process in parallel within a batch
 /// Configurable via MAX_CONCURRENT_ENCOUNTERS env var
 /// This balances throughput vs DB connection pool pressure
-const DEFAULT_MAX_CONCURRENT_ENCOUNTERS: usize = 24;
+const DEFAULT_MAX_CONCURRENT_ENCOUNTERS: usize = 40;
 
 /// Get the configured max concurrent encounters from env or use default
 fn get_max_concurrent_encounters() -> usize {
@@ -3363,7 +3363,7 @@ impl ClaimsProcessor {
         debug!("Worker {} grouped {} raw claims into {} encounters",
             worker_id, claim_ids.len(), encounter_count);
 
-        // PERFORMANCE OPTIMIZATION: Process encounters in PARALLEL within this batch
+        // PERFORMANCE OPTIMIZATION: Process encounters in PARALLEL within a batch
         // This is FIFO-safe because:
         // 1. FIFO is enforced at BATCH level by SequentialCompletionManager
         // 2. Within a batch, encounters are already in arbitrary order (HashMap)
@@ -3585,70 +3585,162 @@ impl ClaimsProcessor {
     ///
     /// Collects all unique NPIs from encounter + service lines and queries existing
     /// providers in a single batch query. This pre-populates the cache so that
-    /// subsequent ensure_provider_exists() calls are cache hits instead of DB queries.
+    /// Pre-warm provider cache and CREATE all providers for this encounter
     ///
-    /// For new providers (not in DB), ensure_provider_exists() will still create them,
-    /// but this dramatically reduces DB round-trips for existing providers.
+    /// PERFORMANCE OPTIMIZATION v2.12.73.86:
+    /// This function now handles ALL provider creation for an encounter in batch.
+    /// - Collects provider data (NPI, type, names, taxonomy) from encounter and service lines
+    /// - Batch queries existing providers (1 query)
+    /// - Batch inserts new providers with metadata (1 query)
+    /// - Batch queues providers for enrichment (1 query)
+    ///
+    /// After this call, ensure_provider_exists() becomes a pure cache lookup.
+    /// This eliminates 16+ sequential DB operations per encounter.
     async fn prewarm_provider_cache(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         encounter_fields: &EncounterFieldsWrapper,
         service_lines: &[RawClaim],
     ) -> Result<()> {
-        // Collect all unique NPIs from encounter and service lines
-        let mut npis: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-        // Encounter-level provider NPIs
-        if let Some(npi) = encounter_fields.get("rendering_provider_npi").filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit())) {
-            npis.insert(npi);
-        }
-        if let Some(npi) = encounter_fields.get("referring_provider_npi").filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit())) {
-            npis.insert(npi);
-        }
-        if let Some(npi) = encounter_fields.get("supervising_provider_npi").filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit())) {
-            npis.insert(npi);
-        }
-        if let Some(npi) = encounter_fields.get("billing_provider_npi").filter(|s| s.len() == 10 && s.chars().all(|c| c.is_ascii_digit())) {
-            npis.insert(npi);
+        // Struct to hold provider metadata for batch insert
+        struct ProviderData {
+            npi: String,
+            provider_type: String,
+            last_name: String,
+            first_name: String,
+            taxonomy_code: Option<String>,
         }
 
-        // Service line level provider NPIs
+        // Collect all providers with their metadata
+        let mut providers: HashMap<String, ProviderData> = HashMap::new();
+
+        // Helper to add provider with metadata (only if NPI is valid)
+        let mut add_provider = |npi: Option<String>, ptype: &str, last: Option<String>, first: Option<String>, taxonomy: Option<String>| {
+            if let Some(npi) = npi {
+                if npi.len() == 10 && npi.chars().all(|c| c.is_ascii_digit()) {
+                    providers.entry(npi.clone()).or_insert(ProviderData {
+                        npi,
+                        provider_type: ptype.to_string(),
+                        last_name: last.unwrap_or_else(|| "Unknown".to_string()),
+                        first_name: first.unwrap_or_default(),
+                        taxonomy_code: taxonomy,
+                    });
+                }
+            }
+        };
+
+        // Encounter-level providers with metadata
+        add_provider(
+            encounter_fields.get("rendering_provider_npi"),
+            "Rendering",
+            encounter_fields.get("rendering_provider_last_name"),
+            encounter_fields.get("rendering_provider_first_name"),
+            encounter_fields.get("rendering_provider_taxonomy"),
+        );
+        add_provider(
+            encounter_fields.get("referring_provider_npi"),
+            "Referring",
+            encounter_fields.get("referring_provider_last_name"),
+            encounter_fields.get("referring_provider_first_name"),
+            encounter_fields.get("referring_provider_taxonomy"),
+        );
+        add_provider(
+            encounter_fields.get("supervising_provider_npi"),
+            "Supervising",
+            encounter_fields.get("supervising_provider_last_name"),
+            encounter_fields.get("supervising_provider_first_name"),
+            encounter_fields.get("supervising_provider_taxonomy"),
+        );
+        // Billing provider - name might be in "billing_provider_name" format
+        let billing_name = encounter_fields.get("billing_provider_name");
+        let (billing_last, billing_first) = if let Some(ref name) = billing_name {
+            if name.contains(',') {
+                let parts: Vec<&str> = name.splitn(2, ',').collect();
+                (Some(parts[0].trim().to_string()), parts.get(1).map(|s| s.trim().to_string()))
+            } else {
+                (Some(name.clone()), None)
+            }
+        } else {
+            (None, None)
+        };
+        add_provider(
+            encounter_fields.get("billing_provider_npi"),
+            "Billing",
+            billing_last,
+            billing_first,
+            None,
+        );
+
+        // Service line level provider NPIs with metadata
         for raw_claim in service_lines {
             if let Some(slf) = &raw_claim.service_line_fields {
                 if let Ok(fields) = serde_json::from_value::<HashMap<String, String>>(slf.clone()) {
                     // Check all service line prefixes (service_line_1_, service_line_2_, etc.)
                     for prefix_num in 1..=12 {
                         let prefix = format!("service_line_{}_", prefix_num);
-                        for provider_type in &["rendering_provider_npi", "ordering_provider_npi", "supervising_provider_npi", "referring_provider_npi"] {
-                            if let Some(npi) = fields.get(&format!("{}{}", prefix, provider_type)) {
-                                if npi.len() == 10 && npi.chars().all(|c| c.is_ascii_digit()) {
-                                    npis.insert(npi.clone());
-                                }
-                            }
-                        }
+
+                        // Rendering provider
+                        add_provider(
+                            fields.get(&format!("{}rendering_provider_npi", prefix)).cloned(),
+                            "Rendering",
+                            fields.get(&format!("{}rendering_provider_last_name", prefix)).cloned(),
+                            fields.get(&format!("{}rendering_provider_first_name", prefix)).cloned(),
+                            None,
+                        );
+                        // Ordering provider
+                        add_provider(
+                            fields.get(&format!("{}ordering_provider_npi", prefix)).cloned(),
+                            "Ordering",
+                            fields.get(&format!("{}ordering_provider_last_name", prefix)).cloned(),
+                            fields.get(&format!("{}ordering_provider_first_name", prefix)).cloned(),
+                            None,
+                        );
+                        // Supervising provider
+                        add_provider(
+                            fields.get(&format!("{}supervising_provider_npi", prefix)).cloned(),
+                            "Supervising",
+                            fields.get(&format!("{}supervising_provider_last_name", prefix)).cloned(),
+                            fields.get(&format!("{}supervising_provider_first_name", prefix)).cloned(),
+                            None,
+                        );
+                        // Referring provider
+                        add_provider(
+                            fields.get(&format!("{}referring_provider_npi", prefix)).cloned(),
+                            "Referring",
+                            fields.get(&format!("{}referring_provider_last_name", prefix)).cloned(),
+                            fields.get(&format!("{}referring_provider_first_name", prefix)).cloned(),
+                            None,
+                        );
                     }
                 }
             }
         }
 
-        if npis.is_empty() {
+        if providers.is_empty() {
             return Ok(());
         }
 
         // Filter out NPIs already in cache
-        let npis_to_query: Vec<String> = {
+        let providers_to_process: Vec<ProviderData> = {
             let cache = self.provider_cache.read().await;
-            npis.into_iter().filter(|npi| !cache.contains_key(npi)).collect()
+            providers.into_iter()
+                .filter(|(npi, _)| !cache.contains_key(npi))
+                .map(|(_, data)| data)
+                .collect()
         };
 
-        if npis_to_query.is_empty() {
-            debug!("Provider cache prewarm: all NPIs already cached");
+        if providers_to_process.is_empty() {
+            debug!("Provider cache prewarm: all {} NPIs already cached", providers_to_process.len());
             return Ok(());
         }
 
-        debug!("Provider cache prewarm: querying {} NPIs", npis_to_query.len());
+        let npis_to_query: Vec<&str> = providers_to_process.iter()
+            .map(|p| p.npi.as_str())
+            .collect();
 
-        // Batch query existing providers
+        debug!("Provider cache prewarm: processing {} NPIs", npis_to_query.len());
+
+        // Batch query existing providers (1 query)
         let existing_providers: Vec<(String, i64)> = sqlx::query_as(
             r#"
             SELECT npi, provider_id
@@ -3661,69 +3753,128 @@ impl ClaimsProcessor {
         .await
         .unwrap_or_default();
 
-        // Populate cache with existing providers
+        // Track which NPIs already exist
         let existing_npis: std::collections::HashSet<String> = existing_providers.iter()
             .map(|(npi, _)| npi.clone())
             .collect();
 
+        // Cache existing providers
         if !existing_providers.is_empty() {
             let mut cache = self.provider_cache.write().await;
-            for (npi, provider_id) in existing_providers {
-                cache.insert(npi, provider_id);
+            for (npi, provider_id) in &existing_providers {
+                cache.insert(npi.clone(), *provider_id);
             }
-            debug!("Provider cache prewarm: cached {} existing providers", cache.len());
+            debug!("Provider cache prewarm: cached {} existing providers", existing_providers.len());
         }
 
-        // PERFORMANCE OPTIMIZATION: Batch INSERT new providers that don't exist yet
-        // This avoids N sequential INSERT operations later in ensure_provider_exists()
-        let new_npis: Vec<&String> = npis_to_query.iter()
-            .filter(|npi| !existing_npis.contains(*npi))
+        // Collect new providers that need to be inserted
+        let new_providers: Vec<&ProviderData> = providers_to_process.iter()
+            .filter(|p| !existing_npis.contains(&p.npi))
             .collect();
 
-        if !new_npis.is_empty() {
-            debug!("Provider cache prewarm: batch inserting {} new providers", new_npis.len());
+        if new_providers.is_empty() {
+            return Ok(());
+        }
 
-            // Batch insert with UNNEST - all new providers in a single query
-            // Uses ON CONFLICT DO UPDATE to handle race conditions safely
-            let new_providers: Vec<(String, i64)> = sqlx::query_as(
+        debug!("Provider cache prewarm: batch inserting {} new providers", new_providers.len());
+
+        // Lookup specialties for providers with taxonomy codes
+        // This is a cache-only operation (no DB)
+        let mut specialties: Vec<Option<String>> = Vec::with_capacity(new_providers.len());
+        for provider in &new_providers {
+            if let Some(ref tax_code) = provider.taxonomy_code {
+                let (_, spec) = self.lookup_taxonomy(tax_code).await;
+                specialties.push(spec);
+            } else {
+                specialties.push(None);
+            }
+        }
+
+        // Prepare batch insert arrays
+        let npis: Vec<&str> = new_providers.iter().map(|p| p.npi.as_str()).collect();
+        let types: Vec<&str> = new_providers.iter().map(|p| p.provider_type.as_str()).collect();
+        let last_names: Vec<&str> = new_providers.iter().map(|p| p.last_name.as_str()).collect();
+        let first_names: Vec<&str> = new_providers.iter().map(|p| p.first_name.as_str()).collect();
+        let taxonomies: Vec<Option<&str>> = new_providers.iter()
+            .map(|p| p.taxonomy_code.as_deref())
+            .collect();
+        let specialty_refs: Vec<Option<&str>> = specialties.iter()
+            .map(|s| s.as_deref())
+            .collect();
+
+        // Batch INSERT with full metadata (1 query for all new providers)
+        let inserted_providers: Vec<(String, i64)> = sqlx::query_as(
+            r#"
+            INSERT INTO claims.provider (
+                npi, provider_type, last_name, first_name, taxonomy_code, specialty,
+                is_active, created_at, updated_at
+            )
+            SELECT
+                unnest($1::text[]),
+                unnest($2::text[]),
+                unnest($3::text[]),
+                unnest($4::text[]),
+                unnest($5::text[]),
+                unnest($6::text[]),
+                true,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            ON CONFLICT (npi) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+            RETURNING npi, provider_id
+            "#
+        )
+        .bind(&npis)
+        .bind(&types)
+        .bind(&last_names)
+        .bind(&first_names)
+        .bind(&taxonomies)
+        .bind(&specialty_refs)
+        .fetch_all(&mut **tx)
+        .await
+        .unwrap_or_default();
+
+        // Cache newly inserted providers
+        if !inserted_providers.is_empty() {
+            let provider_ids: Vec<i64> = inserted_providers.iter().map(|(_, id)| *id).collect();
+            let provider_npis: Vec<&str> = inserted_providers.iter().map(|(npi, _)| npi.as_str()).collect();
+
+            // Update cache
+            {
+                let mut cache = self.provider_cache.write().await;
+                for (npi, provider_id) in &inserted_providers {
+                    cache.insert(npi.clone(), *provider_id);
+                }
+            }
+            debug!("Provider cache prewarm: inserted and cached {} new providers", inserted_providers.len());
+
+            // Batch enqueue for enrichment (1 query for all new providers)
+            let _ = sqlx::query(
                 r#"
-                INSERT INTO claims.provider (
-                    npi, provider_type, last_name, first_name, is_active, created_at, updated_at
-                )
-                SELECT unnest($1::text[]), 'Unknown', 'Unknown', '', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-                ON CONFLICT (npi) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                RETURNING npi, provider_id
+                INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+                SELECT unnest($1::bigint[]), unnest($2::text[]), 5
+                ON CONFLICT (provider_id) DO NOTHING
                 "#
             )
-            .bind(&new_npis)
-            .fetch_all(&mut **tx)
-            .await
-            .unwrap_or_default();
-
-            // Cache the newly inserted providers
-            if !new_providers.is_empty() {
-                let mut cache = self.provider_cache.write().await;
-                for (npi, provider_id) in new_providers {
-                    cache.insert(npi, provider_id);
-                }
-                debug!("Provider cache prewarm: inserted and cached {} new providers", new_npis.len());
-            }
+            .bind(&provider_ids)
+            .bind(&provider_npis)
+            .execute(&mut **tx)
+            .await;
         }
 
         Ok(())
     }
 
-    /// Ensure a provider exists in claims.provider table, creating if necessary
-    /// Returns the provider_id (either existing or newly created)
+    /// Get provider_id from cache (CACHE-ONLY - no DB operations)
+    /// Returns the provider_id if found in cache, None otherwise
     ///
-    /// IMPORTANT: This function is designed to be fault-tolerant and deadlock-free.
-    /// - Uses atomic INSERT ... ON CONFLICT DO UPDATE to avoid race conditions
-    /// - Savepoints removed for performance (upsert rarely fails with ON CONFLICT)
-    /// - Returns Ok(None) on any error - claim proceeds with NULL provider_id
+    /// PERFORMANCE OPTIMIZATION v2.12.73.86:
+    /// This function is now CACHE-ONLY. All provider creation happens in
+    /// prewarm_provider_cache() which batch-inserts all providers for an encounter
+    /// in a single query. This eliminates 16+ sequential DB operations per encounter.
     ///
-    /// PERFORMANCE: Uses in-memory provider cache to avoid redundant DB upserts.
-    /// Same provider NPI appearing multiple times (billing provider across claims,
-    /// rendering provider on service lines) will only hit DB once.
+    /// If a provider NPI is not in cache, it means prewarm_provider_cache() didn't
+    /// find/create it, and the encounter proceeds with NULL provider_id (supported).
+    #[allow(unused_variables)]
     async fn ensure_provider_exists(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -3742,108 +3893,21 @@ impl ClaimsProcessor {
 
         // Validate NPI format (10 digits)
         if npi.len() != 10 || !npi.chars().all(|c| c.is_ascii_digit()) {
-            warn!("Invalid NPI format: {} (expected 10 digits)", npi);
+            debug!("Invalid NPI format: {} (expected 10 digits)", npi);
             return Ok(None);
         }
 
-        // PERFORMANCE: Check provider cache first to avoid redundant DB upserts
-        // This dramatically reduces DB calls when same provider appears across many claims
-        {
-            let cache = self.provider_cache.read().await;
-            if let Some(&provider_id) = cache.get(npi) {
-                debug!("Provider cache hit: NPI={}, provider_id={}", npi, provider_id);
-                return Ok(Some(provider_id));
-            }
+        // PERFORMANCE: Cache-only lookup - no DB operations
+        // All providers were pre-created by prewarm_provider_cache()
+        let cache = self.provider_cache.read().await;
+        if let Some(&provider_id) = cache.get(npi) {
+            return Ok(Some(provider_id));
         }
 
-        // Prepare values
-        let last_name_value = last_name.unwrap_or("Unknown");
-        let first_name_value = first_name.unwrap_or("");
-
-        // Lookup specialty from taxonomy code using cache (no DB query needed)
-        let (validated_taxonomy_code, specialty) = if let Some(tax_code) = taxonomy_code {
-            let (code, spec) = self.lookup_taxonomy(tax_code).await;
-            if code.is_none() && !tax_code.is_empty() {
-                warn!("Taxonomy code '{}' not found in cache for provider NPI={}", tax_code, npi);
-            }
-            (code.map(|_| tax_code), spec)
-        } else {
-            (None, None)
-        };
-
-        // Log if taxonomy lookup succeeded
-        if let Some(ref spec) = specialty {
-            debug!("Mapped taxonomy {} to specialty: {}", validated_taxonomy_code.unwrap_or(""), spec);
-        }
-
-        // Use atomic INSERT ... ON CONFLICT DO UPDATE to avoid deadlocks
-        // The DO UPDATE sets updated_at to ensure we always get the RETURNING value
-        // This single query handles both insert and select atomically
-        let upsert_result = sqlx::query_scalar::<_, i64>(
-            r#"
-            INSERT INTO claims.provider (
-                npi,
-                provider_type,
-                last_name,
-                first_name,
-                middle_name,
-                taxonomy_code,
-                specialty,
-                organization_id,
-                is_active,
-                created_at,
-                updated_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (npi) DO UPDATE SET
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING provider_id
-            "#
-        )
-        .bind(npi)
-        .bind(provider_type)
-        .bind(last_name_value)
-        .bind(first_name_value)
-        .bind(middle_name)
-        .bind(validated_taxonomy_code)
-        .bind(specialty.as_deref())
-        .bind(organization_id)
-        .fetch_one(&mut **tx)
-        .await;
-
-        match upsert_result {
-            Ok(provider_id) => {
-                debug!("Provider upserted: NPI={}, provider_id={}", npi, provider_id);
-
-                // PERFORMANCE: Cache the provider_id to avoid redundant DB upserts
-                {
-                    let mut cache = self.provider_cache.write().await;
-                    cache.insert(npi.to_string(), provider_id);
-                }
-
-                // Enqueue provider for background NPI enrichment (fire-and-forget)
-                let _ = sqlx::query(
-                    r#"
-                    INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
-                    VALUES ($1, $2, $3)
-                    ON CONFLICT (provider_id) DO NOTHING
-                    "#
-                )
-                .bind(provider_id)
-                .bind(npi)
-                .bind(5)
-                .execute(&mut **tx)
-                .await;
-
-                Ok(Some(provider_id))
-            }
-            Err(e) => {
-                // Upsert failed - log error and return None
-                // The caller handles NULL provider_id gracefully
-                error!("Failed to upsert provider {}: {:?}", npi, e);
-                Ok(None)
-            }
-        }
+        // Provider not in cache - this shouldn't happen if prewarm_provider_cache worked
+        // Return None and log at debug level (not warn - this is expected for invalid NPIs)
+        debug!("Provider NPI {} not found in cache after prewarm", npi);
+        Ok(None)
     }
 
     /// Execute rules for service lines and persist flags (OPTIMIZED)
@@ -3911,7 +3975,13 @@ impl ClaimsProcessor {
             // Analysis: 492/537 rules (91.6%) have cpt_in conditions and are indexable
             // Only 45 universal rules (no cpt_in) run on every service line
             // Expected: ~80% reduction in rule evaluations (1,611 -> ~315 per claim)
-            match rule_engine.execute_all_indexed(&ctx).await {
+            //
+            // PERFORMANCE: Use direct sync execution to eliminate async overhead
+            // With 543 composite rules (all sync-capable), calling the async wrapper
+            // for 30,000 service lines adds 9-30 seconds of pure scheduler overhead.
+            // Direct sync call eliminates this entirely.
+            let results = rule_engine.execute_all_indexed_sync(&ctx);
+            match results {
                 Ok(results) => {
                     // PERFORMANCE: Use debug! instead of info! - this runs millions of times with 500+ rules
                     debug!(
