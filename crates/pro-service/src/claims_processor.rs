@@ -677,22 +677,10 @@ impl ClaimsProcessor {
             &payer_responsibility_code_str
         };
 
-        // Calculate total claim charge from ALL service lines
-        // PHASE 4 FIX: Use get() on JsonValue directly instead of cloning and deserializing
-        let mut total_claim_charge = rust_decimal::Decimal::ZERO;
-        for service_line in service_lines {
-            if let Some(slf_value) = &service_line.service_line_fields {
-                // Extract charge directly from JsonValue without cloning
-                if let Some(charge_str) = slf_value.get("service_line_1_line_item_charge_amount")
-                    .or_else(|| slf_value.get("line_item_charge_amount"))
-                    .and_then(|v| v.as_str())
-                {
-                    if let Ok(charge) = charge_str.parse::<rust_decimal::Decimal>() {
-                        total_claim_charge += charge;
-                    }
-                }
-            }
-        }
+        // Use total_claim_charge_amount from CLM02 segment (authoritative value from 837 file)
+        let total_claim_charge = encounter_fields.get("total_claim_charge_amount")
+            .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
+            .unwrap_or(rust_decimal::Decimal::ZERO);
 
         // Parse dates
         let dos_from = chrono::NaiveDate::parse_from_str(&date_of_service_from, "%Y-%m-%d")
@@ -1978,9 +1966,8 @@ impl ClaimsProcessor {
         let service_line_fields: Option<HashMap<String, String>> = raw_claim.service_line_fields.as_ref()
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-        // Calculate total claim charge from service lines
-        let total_claim_charge = service_line_fields.as_ref()
-            .and_then(|slf| slf.get("line_item_charge_amount"))
+        // Use total_claim_charge_amount from CLM02 segment (authoritative value from 837 file)
+        let total_claim_charge = encounter_fields.get("total_claim_charge_amount")
             .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
             .unwrap_or(rust_decimal::Decimal::ZERO);
 

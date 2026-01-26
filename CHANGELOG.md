@@ -1,5 +1,51 @@
 # Changelog
 
+## [2.12.74.0] - 2025-01-26
+
+### Bug Fix - TOTAL_CLAIM_CHARGE_AMOUNT NOT POPULATED FROM CLM02
+
+Fixed issue where `total_claim_charge_amount` column was empty in `claims.encounter` table
+despite the value being present in CLM02 segment of 837 files.
+
+### Root Cause
+The `claims_processor.rs` was calculating `total_claim_charge_amount` by summing service line
+charges instead of using the authoritative CLM02 value. Additionally, there was a field naming
+mismatch:
+- Importer stored: `service_line_1_charge_amount`
+- Processor looked for: `service_line_1_line_item_charge_amount`
+
+This caused the sum to always be zero when processing EDI files.
+
+### Solution
+Changed `claims_processor.rs` to read `total_claim_charge_amount` directly from
+`encounter_fields` (which contains the CLM02 value) instead of calculating from service lines.
+
+### Technical Changes
+- `crates/pro-service/src/claims_processor.rs`:
+  - Line ~680: Changed from service line summation to direct CLM02 value lookup
+  - Line ~1970: Same fix for secondary processing path
+
+### Before
+```rust
+// Calculated from service lines (broken due to field naming mismatch)
+let mut total_claim_charge = rust_decimal::Decimal::ZERO;
+for service_line in service_lines {
+    if let Some(charge_str) = slf_value.get("service_line_1_line_item_charge_amount")...
+}
+```
+
+### After
+```rust
+// Use CLM02 value directly (authoritative value from 837 file)
+let total_claim_charge = encounter_fields.get("total_claim_charge_amount")
+    .and_then(|s| s.parse::<rust_decimal::Decimal>().ok())
+    .unwrap_or(rust_decimal::Decimal::ZERO);
+```
+
+### Impact
+- Production 837 files with CLM segments like `CLM*99999999999*264.66***11:B:1*Y*A*Y*Y~`
+  will now correctly populate `total_claim_charge_amount` with `264.66`
+
 ## [2.12.73.86] - 2025-01-21
 
 ### Performance - BATCH PROVIDER OPERATIONS (ELIMINATE 16+ SEQUENTIAL DB CALLS)
