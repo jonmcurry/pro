@@ -361,6 +361,16 @@ async fn run_console_mode() -> Result<()> {
             async move {
                 info!("Enqueuing file for FIFO processing: {}", file_path.display());
 
+                // This product only supports 837 Professional. Skip 837 Institutional
+                // files by returning Ok(()) so the watcher moves them to the processed directory.
+                if claims_importer::ClaimsImporter::is_837_institutional(&file_path) {
+                    warn!(
+                        "Skipping 837 Institutional file (only 837 Professional is supported): {}",
+                        file_path.display()
+                    );
+                    return Ok(());
+                }
+
                 // Enqueue file instead of processing directly
                 let queue_id = importer.enqueue_file(&file_path).await?;
                 info!("File enqueued successfully: queue_id={}", queue_id);

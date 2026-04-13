@@ -318,6 +318,16 @@ pub fn run_service() -> Result<()> {
                 async move {
                     info!("File detected: {} - enqueueing for processing", file_path.display());
 
+                    // This product only supports 837 Professional. Skip 837 Institutional
+                    // files by returning Ok(()) so the watcher moves them to the processed directory.
+                    if crate::claims_importer::ClaimsImporter::is_837_institutional(&file_path) {
+                        warn!(
+                            "Skipping 837 Institutional file (only 837 Professional is supported): {}",
+                            file_path.display()
+                        );
+                        return Ok(());
+                    }
+
                     // Enqueue file for two-stage processing
                     // NOTE: Return Err("SKIP_MOVE") to prevent file_watcher from moving the file.
                     // The file must stay in place for Stage 1 processor to read it.

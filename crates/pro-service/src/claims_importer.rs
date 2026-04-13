@@ -41,6 +41,33 @@ impl ClaimsImporter {
         self.import_file_with_queue(file_path, None).await
     }
 
+    /// Detect whether an EDI file is 837 Institutional (005010X223...).
+    /// This product only supports 837 Professional (005010X222...); institutional
+    /// files are silently skipped and moved to the processed directory by the caller.
+    /// Returns false for CSV files, files that can't be read, or files without the marker.
+    pub fn is_837_institutional(file_path: &Path) -> bool {
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .unwrap_or_default();
+        if ext != "edi" && ext != "837p" {
+            return false;
+        }
+
+        use std::io::Read;
+        let Ok(mut f) = std::fs::File::open(file_path) else {
+            return false;
+        };
+        let mut buf = [0u8; 2048];
+        let n = match f.read(&mut buf) {
+            Ok(n) => n,
+            Err(_) => return false,
+        };
+        let header = String::from_utf8_lossy(&buf[..n]);
+        header.contains("005010X223")
+    }
+
     /// Enqueue a file for processing (adds to staging.file_processing_queue)
     pub async fn enqueue_file(&self, file_path: &Path) -> Result<i64> {
         let file_path_str = file_path.display().to_string();
