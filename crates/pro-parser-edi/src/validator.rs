@@ -402,6 +402,7 @@ mod tests {
             EdiSegment {
                 segment_id: "ISA".to_string(),
                 elements: vec![],
+                ..Default::default()
             },
         ];
 

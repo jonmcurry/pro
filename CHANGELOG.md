@@ -1,5 +1,71 @@
 # Changelog
 
+## [2.12.75.0] - 2026-05-13
+
+### Bug Fix - EDI COMPONENT ELEMENT SEPARATOR NOT HONORED FROM ISA16
+
+Fixed an EDI 837P parsing bug where composite elements were always split on `:`
+regardless of the component element separator declared in ISA segment position 104
+(ISA16). Production files declaring a different separator (e.g. `>`) had service
+units, procedure codes, modifiers, and diagnosis pointers silently lost.
+
+### Root Cause
+`EdiParser::extract_delimiters` correctly read the component separator from ISA
+position 104 and stored it on `EdiEnvelope.component_element_separator`, but every
+composite-parsing call site in `crates/pro-parser-edi/src/segments.rs` was hard-coded
+to `composite.split(':')`. The declared separator was never plumbed down to the
+segment parsers. A file with `ISA*...*P*>~` and `SV1*HC>99213>25*...` would parse
+the entire `HC>99213>25` string as the qualifier, leaving procedure code and
+modifiers empty.
+
+### User-reported Symptom
+"prod file shows P*>~ and the service units/line items are not being processed
+correctly."
+
+### Solution
+Carry the component separator on each `EdiSegment` so composite parsers cannot
+forget it:
+- Added `component_separator: char` field to `EdiSegment` (default `':'`).
+- Added `EdiSegment::split_composite(index)` helper that splits using the segment's
+  own declared separator.
+- `EdiParser::split_segments` now propagates `self.component_separator` onto every
+  segment it builds.
+- Replaced every hard-coded `composite.split(':')` in segments.rs (CLM05, CLM10,
+  SV1 procedure composite, SV1 diagnosis pointers, HI diagnosis, SVD procedure
+  composite) with the new helper.
+
+### Technical Changes
+- `crates/pro-parser-edi/src/types.rs`: added `component_separator` field +
+  `split_composite` helper + `Default` impl for test ergonomics.
+- `crates/pro-parser-edi/src/parser.rs`: propagated separator in `split_segments`;
+  added regression test using `>` separator; fixed pre-existing broken
+  `test_split_segments` whose ISA was too short (47 chars) for `extract_delimiters`
+  to read position 104.
+- `crates/pro-parser-edi/src/segments.rs`: six composite-split sites now use
+  `segment.split_composite(idx)`. Also corrected a pre-existing latent bug in
+  `SvdSegment::parse` where `procedure_modifier_1` read index 3 (should be index 2)
+  and index 3 was duplicated; now reads 2, 3, 4, 5 matching SV1.
+- `crates/pro-parser-edi/src/loops.rs`, `validator.rs`: updated 2 test
+  `EdiSegment { ... }` struct literals with `..Default::default()`.
+
+### Before
+```rust
+let composite = segment.get_or_empty(0);
+let parts: Vec<&str> = composite.split(':').collect(); // hard-coded
+```
+
+### After
+```rust
+let parts = segment.split_composite(0); // uses the separator declared in ISA16
+```
+
+### Impact
+- Production 837 files declaring `>` (or any non-colon character) as the component
+  element separator now parse SV1 procedure codes, modifiers, diagnosis pointers,
+  CLM05/CLM10 composites, HI diagnosis codes, and SVD adjudication composites
+  correctly.
+- Files using the default `:` separator are unaffected (behavior identical).
+
 ## [2.12.74.0] - 2025-01-26
 
 ### Bug Fix - TOTAL_CLAIM_CHARGE_AMOUNT NOT POPULATED FROM CLM02

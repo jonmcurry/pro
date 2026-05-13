@@ -125,6 +125,7 @@ impl EdiParser {
             segments.push(EdiSegment {
                 segment_id,
                 elements,
+                component_separator: self.component_separator,
             });
         }
 
@@ -549,14 +550,49 @@ mod tests {
 
     #[test]
     fn test_split_segments() {
-        let edi = "ISA*00*TEST~GS*HC*SENDER*RECEIVER~ST*837*0001~";
+        // extract_delimiters needs a full-length ISA (chars 0..106) to read the
+        // element separator at index 3, component separator at 104, and segment
+        // terminator at 105.
+        let isa = "ISA*00*          *00*          *ZZ*SUBMITTERID    *ZZ*RECEIVERID     *240115*1430*^*00501*000000001*0*P*:~";
+        let edi = format!("{}GS*HC*SENDER*RECEIVER~ST*837*0001~", isa);
         let mut parser = EdiParser::new();
-        parser.extract_delimiters(edi).unwrap();
-        let segments = parser.split_segments(edi).unwrap();
+        parser.extract_delimiters(&edi).unwrap();
+        let segments = parser.split_segments(&edi).unwrap();
 
         assert_eq!(segments.len(), 3);
         assert_eq!(segments[0].segment_id, "ISA");
         assert_eq!(segments[1].segment_id, "GS");
         assert_eq!(segments[2].segment_id, "ST");
+    }
+
+    /// Regression test: a production 837 file may declare any non-conflicting character
+    /// as the component element separator in ISA16 (e.g. `>` instead of `:`). Composite
+    /// elements like SV1's procedure code (HC>99213>25) must split on the declared
+    /// separator — not a hard-coded `:`. If this regresses, SV1 procedure codes, modifiers,
+    /// and diagnosis pointers silently come back empty.
+    #[test]
+    fn test_non_colon_component_separator_propagates_to_segments() {
+        // ISA with '>' at position 104 (the component element separator slot)
+        let isa = "ISA*00*          *00*          *ZZ*SUBMITTERID    *ZZ*RECEIVERID     *240115*1430*^*00501*000000001*0*P*>~";
+        let edi = format!("{}SV1*HC>99213>25*125.00*UN*1***1>2~", isa);
+
+        let mut parser = EdiParser::new();
+        parser.extract_delimiters(&edi).unwrap();
+        assert_eq!(parser.component_separator, '>');
+
+        let segments = parser.split_segments(&edi).unwrap();
+        let sv1 = segments.iter().find(|s| s.segment_id == "SV1").unwrap();
+        assert_eq!(sv1.component_separator, '>',
+            "parser must propagate the declared component separator onto every segment");
+
+        // Composite split using the segment's own separator
+        let parts = sv1.split_composite(0);
+        assert_eq!(parts, vec!["HC", "99213", "25"]);
+
+        let sv1_parsed = crate::segments::Sv1Segment::parse(sv1).unwrap();
+        assert_eq!(sv1_parsed.product_service_id_qualifier, "HC");
+        assert_eq!(sv1_parsed.procedure_code, "99213");
+        assert_eq!(sv1_parsed.procedure_modifier_1, Some("25".to_string()));
+        assert_eq!(sv1_parsed.diagnosis_code_pointer, vec![1i16, 2i16]);
     }
 }

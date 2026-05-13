@@ -289,14 +289,13 @@ impl ClmSegment {
         // - CLM05-1: Place of Service Code (e.g., "11")
         // - CLM05-2: Facility Code Qualifier (e.g., "B")
         // - CLM05-3: Claim Frequency Code (e.g., "1")
-        let clm05 = segment.get_optional(4);
+        let clm05_parts = segment.split_composite(4);
         let (place_of_service_code, facility_code_qualifier, claim_frequency_code) =
-            if let Some(composite) = &clm05 {
-                let parts: Vec<&str> = composite.split(':').collect();
+            if !clm05_parts.is_empty() {
                 (
-                    parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                    parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                    parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    clm05_parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    clm05_parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    clm05_parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 )
             } else {
                 (None, None, None)
@@ -307,13 +306,12 @@ impl ClmSegment {
         // - CLM10-2: Related Causes Code 2 (secondary)
         // - CLM10-3: Related Causes Code 3 (tertiary)
         // - CLM10-4: State or Province Code (where accident occurred)
-        let clm10 = segment.get_optional(9);
+        let clm10_parts = segment.split_composite(9);
         let (related_causes_code, accident_state) =
-            if let Some(composite) = &clm10 {
-                let parts: Vec<&str> = composite.split(':').collect();
+            if !clm10_parts.is_empty() {
                 (
-                    parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                    parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    clm10_parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                    clm10_parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 )
             } else {
                 (None, None)
@@ -400,8 +398,7 @@ impl Sv1Segment {
         }
 
         // Element 01 is composite: qualifier:code:modifier1:modifier2:modifier3:modifier4
-        let composite = segment.get_or_empty(0);
-        let parts: Vec<&str> = composite.split(':').collect();
+        let parts = segment.split_composite(0);
 
         let product_service_id_qualifier = parts.get(0).unwrap_or(&"").to_string();
         let procedure_code = parts.get(1).unwrap_or(&"").to_string();
@@ -416,13 +413,11 @@ impl Sv1Segment {
         let place_of_service_code = segment.get_optional(4);
 
         // Element 07 is composite diagnosis code pointers
-        let diagnosis_code_pointer = if let Some(pointers) = segment.get_optional(6) {
-            pointers.split(':')
-                .filter_map(|p| p.parse::<i16>().ok())
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let pointer_parts = segment.split_composite(6);
+        let diagnosis_code_pointer: Vec<i16> = pointer_parts
+            .iter()
+            .filter_map(|p| p.parse::<i16>().ok())
+            .collect();
 
         Ok(Self {
             product_service_id_qualifier,
@@ -456,8 +451,8 @@ impl HiSegment {
 
         // HI segment can have up to 12 diagnosis codes
         for i in 0..12 {
-            if let Some(composite) = segment.get_optional(i) {
-                let parts: Vec<&str> = composite.split(':').collect();
+            if segment.get_optional(i).is_some() {
+                let parts = segment.split_composite(i);
                 if parts.len() >= 2 {
                     let qualifier = parts[0].to_string();
                     let code = parts[1].to_string();
@@ -819,13 +814,12 @@ impl SvdSegment {
         }
 
         // Element 2 (index 2) is composite: qualifier:code:mod1:mod2:mod3:mod4
-        let composite = segment.get_optional(2);
-        let (qualifier, code, mod1, mod2, mod3, mod4) = if let Some(comp) = &composite {
-            let parts: Vec<&str> = comp.split(':').collect();
+        let parts = segment.split_composite(2);
+        let (qualifier, code, mod1, mod2, mod3, mod4) = if !parts.is_empty() {
             (
                 parts.get(0).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(1).filter(|s| !s.is_empty()).map(|s| s.to_string()),
-                parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
+                parts.get(2).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(3).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(4).filter(|s| !s.is_empty()).map(|s| s.to_string()),
                 parts.get(5).filter(|s| !s.is_empty()).map(|s| s.to_string()),
@@ -964,6 +958,7 @@ mod tests {
                 "MI".to_string(),
                 "123456789".to_string(),
             ],
+            ..Default::default()
         };
 
         let nm1 = Nm1Segment::parse(&segment).unwrap();
@@ -992,6 +987,7 @@ mod tests {
                 "Y".to_string(),           // CLM08 - Benefits Assignment
                 "I".to_string(),           // CLM09 - Release of Information
             ],
+            ..Default::default()
         };
 
         let clm = ClmSegment::parse(&segment).unwrap();
@@ -1034,6 +1030,7 @@ mod tests {
                 "".to_string(),                // CLM19
                 "5".to_string(),               // CLM20 - Delay reason code
             ],
+            ..Default::default()
         };
 
         let clm = ClmSegment::parse(&segment).unwrap();

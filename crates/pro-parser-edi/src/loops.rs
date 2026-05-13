@@ -1316,6 +1316,7 @@ mod tests {
                     "46".to_string(),
                     "12345".to_string(),
                 ],
+                ..Default::default()
             },
         ];
 

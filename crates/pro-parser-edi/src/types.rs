@@ -461,6 +461,19 @@ pub struct LineAdjudication {
 pub struct EdiSegment {
     pub segment_id: String,
     pub elements: Vec<String>,
+    /// Component element separator from ISA16 — used to split composite elements
+    /// (e.g. SV1*HC:99213:25 vs SV1*HC>99213>25). Defaults to ':'.
+    pub component_separator: char,
+}
+
+impl Default for EdiSegment {
+    fn default() -> Self {
+        Self {
+            segment_id: String::new(),
+            elements: Vec::new(),
+            component_separator: ':',
+        }
+    }
 }
 
 impl EdiSegment {
@@ -478,5 +491,14 @@ impl EdiSegment {
     pub fn get_optional(&self, index: usize) -> Option<String> {
         self.get(index)
             .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) })
+    }
+
+    /// Split a composite element at `index` using this segment's component separator.
+    /// Returns an empty Vec if the element is absent or empty.
+    pub fn split_composite(&self, index: usize) -> Vec<&str> {
+        match self.get(index) {
+            Some(s) if !s.is_empty() => s.split(self.component_separator).collect(),
+            _ => Vec::new(),
+        }
     }
 }
