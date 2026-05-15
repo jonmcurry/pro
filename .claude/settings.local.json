@@ -251,7 +251,8 @@
       "Bash(more:*)",
       "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.ps1\")",
       "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.py\")",
-      "Bash(./build-simple.bat)"
+      "Bash(./build-simple.bat)",
+      "Bash(git stash *)"
     ],
     "deny": [],
     "ask": []
