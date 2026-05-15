@@ -400,5 +400,10 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             name: "service_line_flag_performance_tuning",
             sql: include_str!("../../../migrations/074_service_line_flag_performance_tuning.sql"),
         },
+        EmbeddedMigration {
+            version: "075",
+            name: "tune_postgresql_for_hardware",
+            sql: include_str!("../../../migrations/075_tune_postgresql_for_hardware.sql"),
+        },
     ]
 }

@@ -467,7 +467,9 @@ pub fn run_service() -> Result<()> {
         let worker_count = std::env::var("STAGE2_WORKER_COUNT")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(12); // Default: 12 workers (optimal based on testing)
+            .unwrap_or(4); // Default sized for 8 vCPU box co-located with Postgres.
+                            // workers * MAX_CONCURRENT_ENCOUNTERS must stay under DB_MAX_CONNECTIONS
+                            // and ~2x CPU count to avoid pool timeouts / scheduler thrashing.
 
         let batch_size = std::env::var("BATCH_SIZE")
             .ok()

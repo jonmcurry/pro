@@ -35,19 +35,24 @@ impl Default for DbConfig {
                 .unwrap_or_else(|_| "postgresql://localhost/professional_smart".to_string())
                 .trim()
                 .to_string(),
-            // Connection pool sizing - balance between throughput and resource usage
-            // 75 connections supports 12 workers with MAX_CONCURRENT_ENCOUNTERS=24
+            // Connection pool sizing - sized for the target hardware profile:
+            //   8 vCPU box co-located with Postgres, STAGE2_WORKER_COUNT=4,
+            //   MAX_CONCURRENT_ENCOUNTERS=4 -> peak demand ~16 encounter tx
+            //   + batch prewarm + status updates -> 24 covers it with headroom.
+            // On larger hardware, set DB_MAX_CONNECTIONS env var; also raise
+            // Postgres `max_connections` accordingly.
             max_connections: std::env::var("DB_MAX_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(75),  // Default: 75 for high parallel throughput
-            // PERFORMANCE: min_connections=0 allows pool to fully shrink when idle
-            // This releases connections back to PostgreSQL for web app usage
-            // Connections are created on-demand when processing starts
+                .unwrap_or(24),
+            // Keep one warm connection per worker so first-batch latency is low.
+            // 0 was the prior default to release connections to the web app, but
+            // the cold-start cost (TLS handshake, statement cache warmup) is
+            // noticeable on a small pool.
             min_connections: std::env::var("DB_MIN_CONNECTIONS")
                 .ok()
                 .and_then(|s| s.parse::<u32>().ok())
-                .unwrap_or(0),  // Default: 0 (allow full shrinkage after batch processing)
+                .unwrap_or(4),
             connection_timeout_seconds: 30,
             // Idle timeout - how long to keep unused connections open
             // Balance between releasing connections and avoiding reconnection overhead

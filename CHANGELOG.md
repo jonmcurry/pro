@@ -1,5 +1,98 @@
 # Changelog
 
+## [2.14.0.0] - 2026-05-15
+
+### Feature - HARDWARE TUNING FOR 8 VCPU + PROVIDER FK RACE FIX
+
+Two related changes shipped together: a tuning pass sizing the system for the
+target deployment profile (8 vCPU box co-located with Postgres, 64 GB RAM), and
+a Stage 2 bug fix that eliminates an FK race seen between concurrent encounter
+transactions.
+
+### Hardware tuning
+
+Defaults were previously sized for a much larger machine and created severe
+connection-pool pressure on the target hardware:
+
+| Setting | Before | After | Rationale |
+|---|---|---|---|
+| `STAGE2_WORKER_COUNT` | 12 | 4 | Match vCPU count to avoid scheduler thrashing |
+| `MAX_CONCURRENT_ENCOUNTERS` | 40 | 4 | Keep `workers * encounters` under the pool size |
+| `DB_MAX_CONNECTIONS` | 75 | 24 | `workers * encounters (16)` + headroom for prewarm/status |
+| `DB_MIN_CONNECTIONS` | 0 | 4 | One warm connection per worker; avoids first-batch latency |
+
+**Invariant:** `STAGE2_WORKER_COUNT * MAX_CONCURRENT_ENCOUNTERS < DB_MAX_CONNECTIONS`,
+and `DB_MAX_CONNECTIONS` must stay under Postgres `max_connections` minus the
+web app's reservation. Operators on larger hardware should raise all four
+together via env vars.
+
+### New migration: 075_tune_postgresql_for_hardware
+
+Configures Postgres for the 8 vCPU / 64 GB profile via `ALTER SYSTEM SET`:
+
+- `shared_buffers = 16GB` (25% of RAM, community sweet spot)
+- `effective_cache_size = 40GB` (planner hint for OS page cache)
+- `maintenance_work_mem = 1GB`
+- `max_connections = 50` (app pool 24 + web + admin + headroom)
+- `max_worker_processes = 8`, `max_parallel_workers = 4` (cap to avoid
+  starving the ingestion pipeline)
+- `wal_buffers = 16MB`, `checkpoint_completion_target = 0.9`
+- `random_page_cost = 1.1` (SSD)
+
+Memory and connection settings require a Postgres restart to take effect.
+
+### Bug fix - Provider FK race between concurrent encounter transactions
+
+Symptom: under parallel Stage 2 processing, encounter inserts intermittently
+failed with `service_line_*_provider_id_fkey` errors when two concurrent
+encounter transactions both tried to upsert the same provider — one would
+commit, the other would see the row before the FK target was visible in its
+snapshot.
+
+Fix: added `prewarm_provider_cache_for_batch` in `claims_processor.rs` that
+collects every provider NPI referenced anywhere in the batch (encounter-level
+and service-line-level) and commits them all in a single dedicated transaction
+BEFORE spawning the per-encounter parallel tasks. This guarantees FK targets
+are visible to every concurrent encounter transaction.
+
+Per-encounter `prewarm_provider_cache` is preserved as a fallback so a missing
+provider doesn't abort the encounter, but the batch-level prewarm is what
+prevents the race.
+
+### Other reliability fixes
+
+- **service_unit_count clamping**: the DB constraint requires
+  `0 < service_unit_count <= 9999.9`. Out-of-range or unparseable values from
+  EDI files now clamp to the boundary (and warn) instead of failing the row.
+- **Better error messages**: encounter processing failures now log the full
+  anyhow chain (`{:#}` formatter), surfacing the underlying Postgres error
+  alongside the top-level context instead of just the outer description.
+
+### Technical Changes
+
+- `migrations/075_tune_postgresql_for_hardware.sql` (new): `ALTER SYSTEM SET`
+  for the tuning above, plus `pg_reload_conf()` for reload-capable settings.
+- `crates/pro-upgrade-manager/src/embedded_migrations.rs`: registered migration 075.
+- `crates/pro-db/src/connection.rs`: new defaults for `DB_MAX_CONNECTIONS` (24)
+  and `DB_MIN_CONNECTIONS` (4); updated comments documenting the sizing math.
+- `crates/pro-service/src/service.rs`: `STAGE2_WORKER_COUNT` default 12 -> 4.
+- `crates/pro-service/src/claims_processor.rs`:
+  - `MAX_CONCURRENT_ENCOUNTERS` default 40 -> 4
+  - New `ProviderData` struct
+  - New `prewarm_provider_cache_for_batch` + helpers
+    (`collect_providers_from_encounter`, `collect_providers_from_service_lines`,
+    `upsert_providers_in_own_tx`)
+  - `service_unit_count` clamping
+  - Switched error logging to `{:#}` formatter for full anyhow chains
+- `.env.example`, `installer/env.template`, `installer/WriteConfig.vbs`:
+  documented invariant and new defaults; clarified the upgrade path for larger
+  hardware.
+
+### Version bump rationale (Rule 11)
+
+Y bump (`2.13.0.0` -> `2.14.0.0`): new migration (075) plus a real bug fix.
+Migrations count as features under the project's versioning rule.
+
 ## [2.13.0.0] - 2026-05-15
 
 ### Feature - PARALLEL STAGE 1 INGESTION WITH FIFO GUARANTEE
