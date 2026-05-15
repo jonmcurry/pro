@@ -182,6 +182,72 @@ impl QueueManager {
         Ok(result.map(|row| row.into()))
     }
 
+    /// Atomically claim up to `limit` queued files in strict FIFO order
+    /// (priority ASC, queued_at ASC, queue_id ASC).
+    ///
+    /// Returns the rows still in their original ordering so callers can preserve
+    /// FIFO semantics when dispatching to parallel workers. Files claimed by
+    /// other concurrent callers are skipped (`SKIP LOCKED`).
+    ///
+    /// This method only READs and locks rows — callers are responsible for
+    /// transitioning each returned file to `PROCESSING` via [`mark_processing`].
+    pub async fn dequeue_next_n(&self, limit: usize) -> Result<Vec<QueuedFile>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
+        let rows = sqlx::query_as::<_, QueuedFileRow>(
+            r#"
+            SELECT
+                queue_id,
+                facility_id,
+                import_batch_id,
+                file_path,
+                file_hash,
+                file_format,
+                organization_id,
+                queued_at,
+                priority
+            FROM staging.file_processing_queue
+            WHERE queue_status = 'QUEUED'
+            ORDER BY priority ASC, queued_at ASC, queue_id ASC
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+            "#,
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to dequeue next N files")?;
+
+        Ok(rows.into_iter().map(QueuedFile::from).collect())
+    }
+
+    /// Reset queue entries stuck in PROCESSING back to QUEUED on service startup.
+    ///
+    /// Stuck rows indicate a previous service crash mid-ingest. Resetting them lets
+    /// the new run pick them up again. Returns the number of rows reset.
+    ///
+    /// This is loud by design (per CLAUDE.md Rule 3): the caller logs the count at
+    /// INFO level so operators see exactly how many files are being reprocessed.
+    pub async fn reset_stuck_processing(&self) -> Result<usize> {
+        let rows_affected = sqlx::query(
+            r#"
+            UPDATE staging.file_processing_queue
+            SET queue_status = 'QUEUED',
+                processing_started_at = NULL,
+                updated_by = 'STARTUP_RECOVERY'
+            WHERE queue_status = 'PROCESSING'
+            "#,
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to reset stuck PROCESSING queue entries")?
+        .rows_affected();
+
+        Ok(rows_affected as usize)
+    }
+
     /// Mark a file as processing
     pub async fn mark_processing(&self, queue_id: i64) -> Result<()> {
         sqlx::query(

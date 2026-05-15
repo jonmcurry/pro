@@ -1,5 +1,95 @@
 # Changelog
 
+## [2.13.0.0] - 2026-05-15
+
+### Feature - PARALLEL STAGE 1 INGESTION WITH FIFO GUARANTEE
+
+Stage 1 (EDI file -> `staging.raw_claims`) now supports parallel parsing while
+preserving strict FIFO order of claims in staging. Production runs of 6,000+ 837P
+files were bottlenecked by the prior single-threaded ingest loop; near the tail of
+a run, after Stage 2's backlog drained, throughput dropped to one file at a time
+because only one thread was doing any work.
+
+### Architecture
+
+Splits Stage 1 into two phases coordinated by a reorder buffer:
+
+1. **Parse phase (N parallel workers)** — read file from disk, parse 837P to
+   in-memory `Transaction837p`. CPU/IO bound. Runs on tokio's blocking pool so
+   the sync EDI parser does not stall async workers.
+2. **Commit phase (single serial committer)** — receives parsed results in
+   arbitrary order, holds them in a HashMap-backed reorder buffer keyed by
+   `queue_id`, and applies them to `staging.raw_claims` in strict `queue_id`
+   ascending order.
+
+```text
+   Dispatcher (1)  -->  parse channel  -->  Parser worker x N  -->  commit channel  -->  Committer (1)
+   (dequeue_next_n,                                                                       (reorder buffer +
+    mark PROCESSING)                                                                       FIFO commit)
+```
+
+**FIFO invariant:** every claim from `queue_id = N` lands in `staging.raw_claims`
+with a lower `raw_claim_id` than any claim from `queue_id = N+1`. Stage 2's
+existing `SequencedBatchAcquirer` preserves order downstream.
+
+### Configuration
+
+Behavior is unchanged by default. Two new environment variables enable the
+parallel pipeline:
+
+| Var | Default | Purpose |
+|---|---|---|
+| `STAGE1_PARSE_WORKERS` | `1` | Set `>1` to enable parallel pipeline. `1` keeps legacy serial loop. Recommended `4-8`. |
+| `STAGE1_REORDER_BUFFER_MAX` | `4 * parse_workers` | Max parsed-but-not-yet-committed files held in RAM. Provides back-pressure. |
+
+Setting `STAGE1_PARSE_WORKERS=1` (the default) is byte-identical to the prior
+serial behavior. The parallel pipeline is opt-in.
+
+### Recovery sweep
+
+On every service start, queue entries left in `PROCESSING` by a prior crash are
+reset to `QUEUED` (loud at WARN level, per CLAUDE.md Rule 3). This is safe
+because Stage 1 commits are idempotent at the `staging.raw_claims` row level.
+
+### Technical Changes
+
+- `crates/pro-parser-edi`: no change.
+- `crates/pro-worker/src/queue_manager.rs`:
+  - Added `dequeue_next_n(limit)` — atomically claims up to N queued rows with
+    `FOR UPDATE SKIP LOCKED` in priority/queued_at/queue_id order.
+  - Added `reset_stuck_processing()` — startup recovery sweep for stuck rows.
+- `crates/pro-service/src/claims_importer.rs`:
+  - Added `parse_edi_file_blocking(file_path)` — pure parse, no DB, wraps the
+    sync `EdiParser::parse_file` in `tokio::task::spawn_blocking`.
+  - Added `commit_parsed_edi_to_staging(file_path, queue_id, transaction,
+    parse_start, parse_end)` — DB-bound transform + INSERT.
+  - `ingest_edi_to_staging` is now a thin wrapper that calls both, so the
+    single-worker path is byte-identical to v2.12.75.0.
+- `crates/pro-service/src/stage1_pipeline.rs` (new ~660 lines):
+  - `Stage1Config`, `Stage1Pipeline`, `Stage1Handles` API.
+  - Dispatcher / parser worker / committer task functions.
+  - `resolve_next_expected_queue_id` for startup recovery of the FIFO counter
+    (queries `MIN(queue_id) WHERE queue_status IN ('QUEUED','PROCESSING','RETRY')`).
+  - Two unit tests for reorder buffer correctness (drain in order; advance past
+    failures).
+- `crates/pro-service/src/main.rs`:
+  - Reads `STAGE1_PARSE_WORKERS` (default `1`).
+  - Runs `reset_stuck_processing` on startup before either path.
+  - `> 1`: spawns `Stage1Pipeline`. `== 1`: spawns legacy serial loop. Behavior
+    fully preserved for the default config.
+
+### Impact
+
+- Default deployments (no env vars set) get the loud startup recovery sweep and
+  no other changes - zero risk to ingestion correctness.
+- Operators with large file backlogs can opt in with `STAGE1_PARSE_WORKERS=4`
+  (or higher) to parse files concurrently while keeping FIFO ordering in
+  `staging.raw_claims`.
+- The "files left -> one at a time" tail-drain behavior persists when remaining
+  work is less than one parse worker, but peak and steady-state throughput
+  during a large backlog improve roughly linearly in `STAGE1_PARSE_WORKERS`
+  until the DB pool saturates.
+
 ## [2.12.75.0] - 2026-05-13
 
 ### Bug Fix - EDI COMPONENT ELEMENT SEPARATOR NOT HONORED FROM ISA16

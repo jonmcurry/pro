@@ -25,6 +25,7 @@ mod file_watcher;
 mod claims_importer;  // Stage 1: File -> staging.raw_claims
 mod claims_processor; // Stage 2: staging.raw_claims -> encounters/errors
 mod batch_sequencer;  // Sequential completion for strict FIFO ordering
+mod stage1_pipeline;  // Parallel Stage 1 (parse-parallel, commit-serial, FIFO-preserving)
 
 // Extracted modules from god object refactoring
 mod builders;        // Entity builders (encounter, service line, diagnosis, provider)
@@ -386,12 +387,56 @@ async fn run_console_mode() -> Result<()> {
         }
     });
 
-    // Spawn queue processor to process enqueued files (STAGE 1: File Ingestion)
-    let importer_for_processor = importer.clone();
-    let db_pool_for_processor = db_pool.clone();
-    let processed_dir_for_processor = processed_dir.clone();
-    let error_dir_for_processor = error_dir.clone();
-    let processor_handle = tokio::spawn(async move {
+    // STAGE 1 startup: reset any queue entries left in PROCESSING by a prior crash.
+    // This is loud per CLAUDE.md Rule 3 — operators see exactly how many files
+    // are being recovered.
+    {
+        use pro_worker::queue_manager::QueueManager;
+        let qm = QueueManager::new(db_pool.clone());
+        match qm.reset_stuck_processing().await {
+            Ok(0) => info!("STAGE 1 recovery: no stuck PROCESSING entries to reset"),
+            Ok(n) => warn!("STAGE 1 recovery: reset {} stuck PROCESSING queue entries to QUEUED", n),
+            Err(e) => error!("STAGE 1 recovery: failed to reset stuck PROCESSING entries: {}", e),
+        }
+    }
+
+    // STAGE 1 dispatch mode: serial (default, parse_workers=1) or parallel parse + FIFO commit.
+    let stage1_parse_workers = std::env::var("STAGE1_PARSE_WORKERS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(1);
+
+    let processor_handle = if stage1_parse_workers > 1 {
+        // Parallel parse + serial FIFO commit
+        let config = stage1_pipeline::Stage1Config::from_env(stage1_parse_workers);
+        info!(
+            "Starting STAGE 1 parallel pipeline (parse_workers={}, reorder_buffer_max={})",
+            config.parse_workers, config.reorder_buffer_max
+        );
+        let pipeline = stage1_pipeline::Stage1Pipeline {
+            config,
+            pool: db_pool.clone(),
+            importer: std::sync::Arc::new(importer.clone()),
+            processed_dir: processed_dir.clone(),
+            error_dir: error_dir.clone(),
+        };
+        let handles = pipeline.spawn();
+        // Wrap all pipeline tasks in one supervisor handle so the existing
+        // shutdown path (`processor_handle.abort()`) still works as before.
+        tokio::spawn(async move {
+            let _ = handles.dispatcher.await;
+            for w in handles.workers {
+                let _ = w.await;
+            }
+            let _ = handles.committer.await;
+        })
+    } else {
+        // Legacy single-threaded serial loop (zero-risk fallback)
+        let importer_for_processor = importer.clone();
+        let db_pool_for_processor = db_pool.clone();
+        let processed_dir_for_processor = processed_dir.clone();
+        let error_dir_for_processor = error_dir.clone();
+        tokio::spawn(async move {
         use pro_worker::queue_manager::QueueManager;
 
         info!("Starting STAGE 1 queue processor (file ingestion to staging)...");
@@ -495,7 +540,8 @@ async fn run_console_mode() -> Result<()> {
                 }
             }
         }
-    });
+        })
+    };
 
     // ========================================================================
     // STAGE 2: Multi-Worker Sequential Completion (Strict FIFO Ordering)
@@ -507,7 +553,9 @@ async fn run_console_mode() -> Result<()> {
     let worker_count = std::env::var("STAGE2_WORKER_COUNT")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(12); // Default: 12 workers (optimal based on testing)
+        .unwrap_or(4); // Default sized for 8 vCPU box co-located with Postgres.
+                        // workers * MAX_CONCURRENT_ENCOUNTERS must stay under DB_MAX_CONNECTIONS
+                        // and ~2x CPU count to avoid pool timeouts / scheduler thrashing.
 
     let batch_size = std::env::var("BATCH_SIZE")
         .ok()

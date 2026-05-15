@@ -666,17 +666,76 @@ impl ClaimsImporter {
 
     /// STAGE 1: Ingest EDI 837p file to staging.raw_claims (two-stage pipeline)
     /// Similar to CSV ingestion but uses EDI parser
+    /// Parse an EDI 837P file to an in-memory `Transaction837p` without touching the database.
+    ///
+    /// This is the CPU/IO half of EDI Stage 1 ingestion. It is safe to call concurrently
+    /// from multiple async tasks: the sync parser is moved onto the tokio blocking pool
+    /// via `spawn_blocking`, so it does not stall the async runtime.
+    ///
+    /// Pair this with [`commit_parsed_edi_to_staging`] to form a full ingest. Callers
+    /// that want strict serial behavior should still use [`ingest_edi_to_staging`].
+    pub async fn parse_edi_file_blocking(
+        &self,
+        file_path: std::path::PathBuf,
+    ) -> Result<(pro_parser_edi::Transaction837p, chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)> {
+        let file_path_str = file_path.display().to_string();
+        info!("Parsing EDI 837p file (blocking): {}", file_path_str);
+
+        let parse_start = chrono::Utc::now();
+        let path_for_blocking = file_path_str.clone();
+
+        let parse_result = tokio::task::spawn_blocking(move || {
+            use pro_parser_edi::EdiParser;
+            let mut parser = EdiParser::new();
+            parser.parse_file(&path_for_blocking)
+        })
+        .await
+        .context("EDI parse task panicked")?;
+
+        let transaction = parse_result.map_err(|e| {
+            error!("Failed to parse EDI 837p file {}: {}", file_path_str, e);
+            anyhow::anyhow!("Failed to parse EDI 837p file: {}", e)
+        })?;
+
+        let parse_end = chrono::Utc::now();
+        info!("Successfully parsed EDI 837p file: {} ({} claims)", file_path_str, transaction.claims.len());
+
+        Ok((transaction, parse_start, parse_end))
+    }
+
+    /// Single-threaded EDI ingest: parse + commit in one call. Preserved as a thin wrapper
+    /// around [`parse_edi_file_blocking`] + [`commit_parsed_edi_to_staging`]. Used by the
+    /// legacy serial Stage 1 loop (`STAGE1_PARSE_WORKERS=1`).
     pub async fn ingest_edi_to_staging(&self, file_path: &Path, queue_id: Option<i64>) -> Result<IngestResult> {
+        let queue_id = queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?;
+        let (transaction, parse_start, parse_end) = self
+            .parse_edi_file_blocking(file_path.to_path_buf())
+            .await?;
+        self.commit_parsed_edi_to_staging(file_path, queue_id, transaction, parse_start, parse_end)
+            .await
+    }
+
+    /// Commit a pre-parsed EDI transaction to `staging.raw_claims`.
+    ///
+    /// This is the DB-bound half of EDI Stage 1. It performs the queue->batch_id lookup,
+    /// builds the per-claim JSONB rows, and INSERTs them into staging in a single DB
+    /// transaction. Must be called in FIFO order of `queue_id` to preserve claim-level
+    /// FIFO compliance — see [`stage1_pipeline`] for the ordering machinery.
+    pub async fn commit_parsed_edi_to_staging(
+        &self,
+        file_path: &Path,
+        queue_id: i64,
+        transaction: pro_parser_edi::Transaction837p,
+        parse_start: chrono::DateTime<chrono::Utc>,
+        parse_end: chrono::DateTime<chrono::Utc>,
+    ) -> Result<IngestResult> {
         let file_path_str = file_path.display().to_string();
         let filename = file_path.file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown")
             .to_string();
 
-        info!("====== STAGE 1: Starting EDI file ingestion to staging: {} ======", file_path_str);
-
-        // Validate queue_id once at the start - required for EDI ingestion
-        let queue_id = queue_id.ok_or_else(|| anyhow::anyhow!("queue_id required for EDI ingestion"))?;
+        info!("====== STAGE 1: Committing parsed EDI to staging: {} ======", file_path_str);
 
         // Get batch_id from queue (it was created during enqueue_file)
         let batch_id: i64 = sqlx::query_scalar(
@@ -686,24 +745,6 @@ impl ClaimsImporter {
         .fetch_one(&self.pool)
         .await
         .context("Failed to get batch_id from queue")?;
-
-        info!("Parsing EDI 837p file...");
-        let parse_start = chrono::Utc::now();
-
-        use pro_parser_edi::EdiParser;
-        let mut parser = EdiParser::new();
-
-        let transaction = match parser.parse_file(&file_path_str) {
-            Ok(txn) => {
-                info!("Successfully parsed EDI 837p file: {} claims", txn.claims.len());
-                txn
-            }
-            Err(e) => {
-                error!("Failed to parse EDI 837p file: {}", e);
-                return Err(anyhow::anyhow!("Failed to parse EDI 837p file: {}", e));
-            }
-        };
-        let parse_end = chrono::Utc::now();
 
         info!("Parsed {} claims from EDI file", transaction.claims.len());
         info!("Submitter info: org_name={:?}, id_qualifier={:?}, id_code={:?}",
@@ -1494,8 +1535,8 @@ impl ClaimsImporter {
                     }
                 }
                 Err(e) => {
-                    let error_message = format!("Row {}: {}", parsed_row.row_number, e);
-                    error!("Failed to import row {}: {}", parsed_row.row_number, e);
+                    let error_message = format!("Row {}: {:#}", parsed_row.row_number, e);
+                    error!("Failed to import row {}: {:#}", parsed_row.row_number, e);
                     result.failed += 1;
                     result.errors.push(error_message.clone());
 
