@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-073
+-- Description: Complete schema baseline generated from migrations 001-075
 -- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
@@ -10899,3 +10899,68 @@ BEGIN
     RETURN v_recovered;
 END;
 $$ LANGUAGE plpgsql;
+
+-- ============================================================================
+-- Source: 075_tune_postgresql_for_hardware.sql
+-- ============================================================================
+-- Tune PostgreSQL for the target deployment profile (8 vCPU server, 64GB RAM,
+-- Postgres co-located with the data processing service). Writes settings via
+-- ALTER SYSTEM SET (lands in postgresql.auto.conf) and pg_reload_conf()s the
+-- reload-capable ones. Restart-required settings (shared_buffers,
+-- max_connections, max_worker_processes, wal_buffers) take effect on the next
+-- PostgreSQL service restart.
+
+-- Memory
+ALTER SYSTEM SET shared_buffers = '16GB';
+ALTER SYSTEM SET effective_cache_size = '40GB';
+ALTER SYSTEM SET maintenance_work_mem = '1GB';
+
+-- Connections (must align with DB_MAX_CONNECTIONS in the app env)
+ALTER SYSTEM SET max_connections = '50';
+
+-- Parallel query
+ALTER SYSTEM SET max_worker_processes = '8';
+ALTER SYSTEM SET max_parallel_workers = '4';
+ALTER SYSTEM SET max_parallel_workers_per_gather = '2';
+
+-- WAL / checkpoint
+ALTER SYSTEM SET wal_buffers = '16MB';
+ALTER SYSTEM SET checkpoint_completion_target = '0.9';
+
+-- Planner cost (SSD)
+ALTER SYSTEM SET random_page_cost = '1.1';
+
+SELECT pg_reload_conf();
+
+DO $$
+DECLARE
+    v_shared_buffers text;
+    v_effective_cache text;
+    v_max_conn text;
+    v_work_mem text;
+    v_pending_restart bool;
+BEGIN
+    SELECT current_setting('shared_buffers') INTO v_shared_buffers;
+    SELECT current_setting('effective_cache_size') INTO v_effective_cache;
+    SELECT current_setting('max_connections') INTO v_max_conn;
+    SELECT current_setting('work_mem') INTO v_work_mem;
+
+    SELECT EXISTS (
+        SELECT 1
+        FROM pg_settings
+        WHERE pending_restart = true
+          AND name IN ('shared_buffers', 'max_connections', 'max_worker_processes', 'wal_buffers')
+    ) INTO v_pending_restart;
+
+    RAISE NOTICE 'PostgreSQL tuning applied:';
+    RAISE NOTICE '  shared_buffers      = % (effective on next restart if pending)', v_shared_buffers;
+    RAISE NOTICE '  effective_cache_size = %', v_effective_cache;
+    RAISE NOTICE '  max_connections     = % (effective on next restart if pending)', v_max_conn;
+    RAISE NOTICE '  work_mem            = %', v_work_mem;
+
+    IF v_pending_restart THEN
+        RAISE NOTICE '';
+        RAISE NOTICE 'NOTE: Some settings require a PostgreSQL restart to take effect.';
+        RAISE NOTICE '      Restart the postgresql-x64-* Windows service when convenient.';
+    END IF;
+END $$;

@@ -29,7 +29,7 @@ pub const BASELINE: EmbeddedMigration = EmbeddedMigration {
 
 /// Version at which the baseline was created
 /// All migrations up to and including this number are covered by the baseline
-pub const BASELINE_COVERS_THROUGH: u32 = 74;
+pub const BASELINE_COVERS_THROUGH: u32 = 75;
 
 /// Get the baseline migration
 pub fn get_baseline() -> &'static EmbeddedMigration {

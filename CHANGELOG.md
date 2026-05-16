@@ -1,5 +1,67 @@
 # Changelog
 
+## [2.14.1.0] - 2026-05-16
+
+### Bug fix - Provider prewarm batch INSERT rejected by `fk_provider_taxonomy`
+
+Symptom (reported after 2.14.0.0 deployed to prod): every encounter in the
+batch was failing with
+
+```
+failed to batch insert providers during prewarm:
+  error returned from database:
+  insert or update on table "provider" violates foreign key constraint
+  "fk_provider_taxonomy"
+```
+
+Root cause: `fk_provider_taxonomy` (migration 044) requires
+`claims.provider.taxonomy_code` to reference a row in
+`claims.provider_taxonomy(taxonomy_code)`. Source 837p / CSV files carry codes
+that are not in the NUCC reference set. The prewarm was binding those raw
+codes straight into the provider INSERT, and because the prewarm uses a single
+batch INSERT, one bad code rejected every provider in the batch - which then
+cascaded into `service_line_*_provider_id_fkey` failures on every encounter
+that referenced any of those providers.
+
+Fix: `upsert_providers_in_own_tx` now uses the existing `lookup_taxonomy()`
+validator, which checks against `claims.provider_taxonomy` (loaded into an
+in-memory cache at startup). The earlier code destructured the tuple as
+`(_, spec)` - capturing only the specialty and throwing the validated code
+away. Now both elements are captured: invalid codes become `NULL`, the row
+inserts cleanly, and NPI enrichment populates the correct taxonomy later from
+the NPPI registry.
+
+Not a silent fallback (Rule 3): `lookup_taxonomy()` already emits
+`warn!("Taxonomy code '{}' not found in cache", ...)` for every unknown code.
+If the warning volume is too noisy in practice, it can be deduplicated to log
+each unknown code once per process lifetime.
+
+### Baseline cleanup
+
+The 2.14.0.0 ship was missing the baseline append for migration 075 (Rule 15).
+Folded in now:
+
+- `migrations/000_baseline_v2.12.sql`: appended migration 075 SQL; header
+  updated from "001-073" to "001-075".
+- `crates/pro-upgrade-manager/src/embedded_migrations.rs`: bumped
+  `BASELINE_COVERS_THROUGH` from 74 to 75 so fresh installs do not re-run
+  migration 075 after the baseline has already applied it.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_processor.rs::upsert_providers_in_own_tx`:
+  capture `validated_taxonomies` from `lookup_taxonomy()`; bind those instead
+  of raw `new_providers.taxonomy_code`.
+- `migrations/000_baseline_v2.12.sql`: appended migration 075; updated header.
+- `crates/pro-upgrade-manager/src/embedded_migrations.rs`: bumped
+  `BASELINE_COVERS_THROUGH`.
+
+### Version bump rationale (Rule 11)
+
+Z bump (`2.14.0.0` -> `2.14.1.0`): bug fix only. No new migration, no new
+feature. Baseline catch-up does not change behavior - the SQL it contains was
+already shipping in 2.14.0.0 as a separate file.
+
 ## [2.14.0.0] - 2026-05-15
 
 ### Feature - HARDWARE TUNING FOR 8 VCPU + PROVIDER FK RACE FIX

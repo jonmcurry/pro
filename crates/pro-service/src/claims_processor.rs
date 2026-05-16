@@ -3839,12 +3839,22 @@ impl ClaimsProcessor {
 
         let mut inserted_providers: Vec<(String, i64)> = Vec::new();
         if !new_providers.is_empty() {
+            // Validate taxonomy codes against claims.provider_taxonomy via the
+            // in-memory cache. Source files (837p / CSV) often carry codes that
+            // aren't in the NUCC reference set; binding an unknown code would
+            // trip `fk_provider_taxonomy`, fail the batch INSERT, and lose
+            // every other provider in the same batch. NULL out unknown codes
+            // here so the row inserts cleanly; the NPI enrichment worker can
+            // populate the correct taxonomy later from the NPPI registry.
+            let mut validated_taxonomies: Vec<Option<String>> = Vec::with_capacity(new_providers.len());
             let mut specialties: Vec<Option<String>> = Vec::with_capacity(new_providers.len());
             for provider in &new_providers {
                 if let Some(ref tax_code) = provider.taxonomy_code {
-                    let (_, spec) = self.lookup_taxonomy(tax_code).await;
+                    let (validated_code, spec) = self.lookup_taxonomy(tax_code).await;
+                    validated_taxonomies.push(validated_code);
                     specialties.push(spec);
                 } else {
+                    validated_taxonomies.push(None);
                     specialties.push(None);
                 }
             }
@@ -3853,8 +3863,8 @@ impl ClaimsProcessor {
             let types: Vec<&str> = new_providers.iter().map(|p| p.provider_type.as_str()).collect();
             let last_names: Vec<&str> = new_providers.iter().map(|p| p.last_name.as_str()).collect();
             let first_names: Vec<&str> = new_providers.iter().map(|p| p.first_name.as_str()).collect();
-            let taxonomies: Vec<Option<&str>> = new_providers.iter()
-                .map(|p| p.taxonomy_code.as_deref())
+            let taxonomies: Vec<Option<&str>> = validated_taxonomies.iter()
+                .map(|s| s.as_deref())
                 .collect();
             let specialty_refs: Vec<Option<&str>> = specialties.iter()
                 .map(|s| s.as_deref())
