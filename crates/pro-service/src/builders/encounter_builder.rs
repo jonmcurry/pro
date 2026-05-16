@@ -70,10 +70,11 @@ impl EncounterBuilder {
             .cloned()
             .unwrap_or_else(|| facility_code.clone());
 
-        let payer_responsibility_code = encounter_fields
-            .get("payer_responsibility_code")
-            .cloned()
-            .unwrap_or_else(|| "P".to_string());
+        // Coerce SBR01 payer responsibility to P/S (encounter table constraint).
+        // See builders::normalize_payer_responsibility_code for the mapping.
+        let payer_responsibility_code = super::normalize_payer_responsibility_code(
+            encounter_fields.get("payer_responsibility_code").map(|s| s.as_str()).unwrap_or("")
+        ).to_string();
 
         let payer_id = encounter_fields.get("payer_id").cloned();
         let payer_name = encounter_fields.get("payer_name").cloned();

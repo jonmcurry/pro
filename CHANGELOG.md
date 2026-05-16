@@ -1,5 +1,61 @@
 # Changelog
 
+## [2.14.2.0] - 2026-05-16
+
+### Bug fix - Encounter insert rejected by `chk_payer_responsibility`
+
+Symptom (reported after 2.14.1.0 deployed to prod):
+
+```
+failed to insert encounter:
+  error returned from database:
+  new row for relation "encounter" violates check constraint "chk_payer_responsibility"
+```
+
+Root cause: `chk_payer_responsibility` on `claims.encounter`
+(migration 004) restricts `payer_responsibility_code` to `'P'` or `'S'`. The
+837p parser extracts the value from SBR01, which per the X12 standard can
+also be `T` (tertiary) and other codes (`A`/`B`/`C`/...). The bind site was
+only truncating to one character without validating the value, so anything
+other than `P`/`S` tripped the constraint.
+
+The encounter table's narrow constraint is intentional - the primary
+obligation for a single claim submission is typically `P` or `S`. Full COB
+(including tertiary payers) is preserved separately in `claims.encounter_payer`,
+whose own constraint allows `P`/`S`/`T`. Relaxing the encounter constraint
+would erode that design distinction; normalizing the bind is the right answer.
+
+Fix: added `builders::normalize_payer_responsibility_code` and called it from
+both live bind sites in `claims_processor.rs`:
+
+- `P` / `p` -> `P`
+- `S` / `s` -> `S`
+- `T` / `t` -> `S` (warn; tertiary maps down on the main encounter row)
+- empty / unrecognized (including `A`/`B`/`C`/`01`/...) -> `P` (warn)
+
+Every coercion away from the source value emits a `warn!` naming the raw
+code, so data-quality drift stays visible in the logs (Rule 3 - no silent
+fallback).
+
+Also fixes a latent multi-byte UTF-8 panic in the prior `&s[..1]` form
+(byte-indexed slice on a `&str` containing multi-byte chars). The helper uses
+`chars().next()` instead.
+
+### Technical Changes
+
+- `crates/pro-service/src/builders/mod.rs` (new helper): `pub fn
+  normalize_payer_responsibility_code(raw: &str) -> &'static str` with 4 unit
+  tests covering known values, padding/case, unknown defaults, multi-byte.
+- `crates/pro-service/src/claims_processor.rs` (~L689 and ~L1977): replaced
+  truncate-only bind logic with calls to the helper.
+- `crates/pro-service/src/builders/encounter_builder.rs` (~L73): same
+  (dead-code scaffolding kept in sync).
+
+### Version bump rationale (Rule 11)
+
+Z bump (`2.14.1.0` -> `2.14.2.0`): bug fix only. No new migration, no new
+feature.
+
 ## [2.14.1.0] - 2026-05-16
 
 ### Bug fix - Provider prewarm batch INSERT rejected by `fk_provider_taxonomy`

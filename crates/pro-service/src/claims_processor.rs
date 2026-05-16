@@ -685,14 +685,14 @@ impl ClaimsProcessor {
 
         // Optional fields
         let submitter_id = encounter_fields.get("submitter_id").unwrap_or_else(|| facility_code.clone());
-        // Truncate payer_responsibility_code to 1 char (CHAR(1) in DB, must be 'P' or 'S')
-        let payer_responsibility_code_str = encounter_fields.get("payer_responsibility_code")
-            .unwrap_or_else(|| "P".to_string());
-        let payer_responsibility_code = if payer_responsibility_code_str.len() > 1 {
-            &payer_responsibility_code_str[..1]
-        } else {
-            &payer_responsibility_code_str
-        };
+        // Coerce SBR01 payer responsibility to the P/S the encounter table accepts.
+        // X12 may carry T/A/B/C/...; the chk_payer_responsibility constraint only
+        // allows P or S. Tertiary and beyond are preserved in encounter_payer.
+        let payer_responsibility_code_owned = encounter_fields
+            .get("payer_responsibility_code")
+            .unwrap_or_default();
+        let payer_responsibility_code =
+            crate::builders::normalize_payer_responsibility_code(&payer_responsibility_code_owned);
 
         // Use total_claim_charge_amount from CLM02 segment (authoritative value from 837 file)
         let total_claim_charge = encounter_fields.get("total_claim_charge_amount")
@@ -1973,11 +1973,12 @@ impl ClaimsProcessor {
         // Optional fields with defaults
         let submitter_id = encounter_fields.get("submitter_id")
             .unwrap_or(facility_code);
-        // Truncate payer_responsibility_code to 1 char (CHAR(1) in DB, must be 'P' or 'S')
-        let payer_responsibility_code = encounter_fields.get("payer_responsibility_code")
-            .map(|s| s.as_str())
-            .map(|s| if s.len() > 1 { &s[..1] } else { s })
-            .unwrap_or("P");
+        // Coerce SBR01 payer responsibility to the P/S the encounter table accepts.
+        // X12 may carry T/A/B/C/...; the chk_payer_responsibility constraint only
+        // allows P or S. Tertiary and beyond are preserved in encounter_payer.
+        let payer_responsibility_code = crate::builders::normalize_payer_responsibility_code(
+            encounter_fields.get("payer_responsibility_code").map(|s| s.as_str()).unwrap_or("")
+        );
 
         // Parse service line fields if present
         let service_line_fields: Option<HashMap<String, String>> = raw_claim.service_line_fields.as_ref()

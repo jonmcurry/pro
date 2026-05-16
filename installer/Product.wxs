@@ -6,7 +6,7 @@
   <Product Id="*"
            Name="Professional SMART"
            Language="1033"
-           Version="2.14.1.0"
+           Version="2.14.2.0"
            Manufacturer="Professional SMART Team"
            UpgradeCode="9A9E9B9C-9E9F-9A9B-9C9D-9E9F9A9B9C9E">
 
@@ -606,7 +606,7 @@
                      Key="SOFTWARE\ProfessionalSMART"
                      Name="Version"
                      Type="string"
-                     Value="2.14.1.0"
+                     Value="2.14.2.0"
                      KeyPath="yes" />
     </Component>
 
