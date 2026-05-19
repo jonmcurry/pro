@@ -3873,7 +3873,7 @@ impl ClaimsProcessor {
         // PRV*PE*PXC) never gets a chance to be filled in by a later claim
         // that does carry it. Admit those rows through to the upsert so
         // ON CONFLICT can COALESCE-fill the NULL columns.
-        let providers_to_process: Vec<ProviderData> = {
+        let mut providers_to_process: Vec<ProviderData> = {
             let cache = self.provider_cache.read().await;
             providers.into_iter()
                 .filter(|(npi, data)| {
@@ -3885,6 +3885,14 @@ impl ClaimsProcessor {
         if providers_to_process.is_empty() {
             return Ok(());
         }
+
+        // Deadlock fix: sort by NPI so every concurrent provider-upsert
+        // transaction acquires ON CONFLICT row locks on claims.provider in the
+        // same canonical order. `providers` arrives as a HashMap, whose
+        // iteration order is randomized per run; without a stable order two
+        // parallel encounters that share providers can lock the same NPIs in
+        // opposite orders and deadlock ("deadlock detected" during prewarm).
+        providers_to_process.sort_by(|a, b| a.npi.cmp(&b.npi));
 
         // Dedicated short-lived transaction - independent of any encounter tx.
         let mut tx = self.pool.begin().await
@@ -3987,9 +3995,13 @@ impl ClaimsProcessor {
         // Enqueue only GENUINELY NEW providers (those not already in DB) for
         // NPI enrichment. Existing providers are either already enriched or
         // already queued; re-enqueueing them is unnecessary work.
-        let new_for_enrichment: Vec<&(String, i64)> = upserted_providers.iter()
+        let mut new_for_enrichment: Vec<&(String, i64)> = upserted_providers.iter()
             .filter(|(npi, _)| !existing_npis.contains(npi))
             .collect();
+        // Sort by provider_id for the same reason as the provider upsert above:
+        // a consistent lock order on provider_enrichment_queue across concurrent
+        // prewarm transactions avoids ON CONFLICT deadlocks.
+        new_for_enrichment.sort_by_key(|(_, id)| *id);
         if !new_for_enrichment.is_empty() {
             let provider_ids: Vec<i64> = new_for_enrichment.iter().map(|(_, id)| *id).collect();
             let provider_npis: Vec<&str> = new_for_enrichment.iter().map(|(npi, _)| npi.as_str()).collect();

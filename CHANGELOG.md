@@ -1,5 +1,33 @@
 # Changelog
 
+## [2.16.1.0] - 2026-05-19
+
+### Bug fix - Deadlock during provider prewarm
+
+Reported in prod: a raw_claim failed with `failed to batch upsert providers
+during prewarm: error returned from database: deadlock detected`.
+
+`upsert_providers_in_own_tx` receives providers as a `HashMap`, whose
+iteration order is randomized per run. The batch `INSERT INTO claims.provider
+... ON CONFLICT (npi)` therefore locked provider rows in a different order
+every call. When parallel encounter tasks shared providers, two concurrent
+provider-upsert transactions could lock the same NPIs in opposite orders and
+deadlock; PostgreSQL aborted one, failing the encounter.
+
+Fix - `upsert_providers_in_own_tx` now sorts `providers_to_process` by NPI
+before building the `unnest` arrays, so every concurrent transaction acquires
+`claims.provider` row locks in the same canonical order. The
+`provider_enrichment_queue` insert is likewise sorted by `provider_id`. No
+schema change.
+
+The single raw_claim already stuck in `staging.raw_claims` is not retried
+automatically - re-process it once this build is deployed.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_processor.rs`: `upsert_providers_in_own_tx`
+  sorts providers by NPI and enrichment-queue rows by provider_id.
+
 ## [2.16.0.0] - 2026-05-19
 
 ### Bug fix 1 - Service units clamped to 9999.9
