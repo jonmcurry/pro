@@ -143,8 +143,9 @@ pub mod performance {
     /// Maximum claim charge amount per 837p spec
     pub const MAX_CLAIM_CHARGE: f64 = 99999.99;
 
-    /// Maximum service units per line
-    pub const MAX_SERVICE_UNITS: f64 = 9999.9;
+    /// Maximum service units per line - bounded only by the
+    /// NUMERIC(15,1) column type (X12 837P SV104 imposes no cap).
+    pub const MAX_SERVICE_UNITS: f64 = 99_999_999_999_999.9;
 
     /// Maximum diagnoses per encounter
     pub const MAX_DIAGNOSES: usize = 12;

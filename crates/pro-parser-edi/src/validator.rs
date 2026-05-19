@@ -322,9 +322,11 @@ fn validate_service_line(service_line: &crate::types::ServiceLine) -> Result<()>
     // Validate service units
     validate_positive(service_line.service_unit_count, "Service unit count")?;
 
-    if service_line.service_unit_count > rust_decimal::Decimal::new(99999, 1) {
+    // Upper bound is the NUMERIC(15,1) column capacity (99999999999999.9);
+    // the X12 837P SV104 quantity element itself imposes no cap.
+    if service_line.service_unit_count > rust_decimal::Decimal::new(999_999_999_999_999, 1) {
         return Err(Error::Validation(format!(
-            "Service unit count exceeds maximum: {}",
+            "Service unit count exceeds NUMERIC(15,1) column capacity: {}",
             service_line.service_unit_count
         )));
     }

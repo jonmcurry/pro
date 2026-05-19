@@ -422,6 +422,12 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
     let mut in_patient_loop = false;
     let mut primary_payer_captured = false; // Track if we've captured the primary payer
 
+    // SBR tracking: true once the subscriber-level SBR (Loop 2000B) has been
+    // seen. SBR02 (subscriber_relationship_code) is blank when the patient is
+    // a dependent in a separate Loop 2000C, so it cannot be used to tell the
+    // first SBR apart from the COB SBR (Loop 2320).
+    let mut subscriber_sbr_seen = false;
+
     // Line adjudication tracking (Loop 2430)
     let mut current_line_adjudication: Option<LineAdjudication> = None;
 
@@ -724,8 +730,9 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
                 // Check if this is a second SBR (indicates COB Loop 2320)
                 // First SBR is the subscriber loop (Loop 2000B) - the payer being BILLED
                 // SBR01 indicates P=Primary, S=Secondary, T=Tertiary
-                if claim.subscriber_relationship_code.is_empty() {
+                if !subscriber_sbr_seen {
                     // First SBR - subscriber loop (payer being billed)
+                    subscriber_sbr_seen = true;
                     claim.payer_responsibility_code = sbr.payer_responsibility_sequence.clone();
                     claim.subscriber_relationship_code = sbr.individual_relationship_code;
                     claim.claim_filing_indicator_code = sbr.claim_filing_indicator_code.clone();

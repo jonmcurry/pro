@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-076
+-- Description: Complete schema baseline generated from migrations 001-077
 -- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
@@ -529,7 +529,7 @@ CREATE TABLE claims.service_line (
     procedure_description TEXT,
     line_item_charge_amount NUMERIC(18,2) NOT NULL,
     unit_basis_measurement_code VARCHAR(2) DEFAULT 'UN', -- UN for units, MJ for minutes
-    service_unit_count NUMERIC(15,1) NOT NULL CHECK (service_unit_count > 0 AND service_unit_count <= 9999.9),
+    service_unit_count NUMERIC(15,1) NOT NULL CONSTRAINT chk_service_unit_count_positive CHECK (service_unit_count > 0),
 
     -- Place of service
     place_of_service_code VARCHAR(2),
@@ -11041,4 +11041,30 @@ BEGIN
 
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     RAISE NOTICE 'Provider enrichment queue: enqueued % provider row(s) still missing taxonomy/specialty', v_updated;
+END $$;
+
+
+-- ============================================================================
+-- Source: 077_widen_service_unit_count.sql
+-- ============================================================================
+
+-- Widen the CHECK constraint on claims.service_line.service_unit_count.
+-- The column is NUMERIC(15,1); the prior inline 9999.9 ceiling clamped
+-- legitimate large HCPCS/drug unit counts. The CREATE TABLE above already
+-- defines the widened constraint; this block keeps the baseline a faithful
+-- concatenation and is idempotent.
+
+DO $$
+BEGIN
+    ALTER TABLE claims.service_line
+        DROP CONSTRAINT IF EXISTS service_line_service_unit_count_check;
+
+    ALTER TABLE claims.service_line
+        DROP CONSTRAINT IF EXISTS chk_service_unit_count_positive;
+
+    ALTER TABLE claims.service_line
+        ADD CONSTRAINT chk_service_unit_count_positive
+        CHECK (service_unit_count > 0);
+
+    RAISE NOTICE 'service_unit_count CHECK widened: 9999.9 ceiling removed, NUMERIC(15,1) is now the only upper bound';
 END $$;

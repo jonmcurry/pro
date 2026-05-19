@@ -29,7 +29,7 @@ pub const BASELINE: EmbeddedMigration = EmbeddedMigration {
 
 /// Version at which the baseline was created
 /// All migrations up to and including this number are covered by the baseline
-pub const BASELINE_COVERS_THROUGH: u32 = 76;
+pub const BASELINE_COVERS_THROUGH: u32 = 77;
 
 /// Get the baseline migration
 pub fn get_baseline() -> &'static EmbeddedMigration {
@@ -409,6 +409,11 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             version: "076",
             name: "backfill_provider_taxonomy",
             sql: include_str!("../../../migrations/076_backfill_provider_taxonomy.sql"),
+        },
+        EmbeddedMigration {
+            version: "077",
+            name: "widen_service_unit_count",
+            sql: include_str!("../../../migrations/077_widen_service_unit_count.sql"),
         },
     ]
 }

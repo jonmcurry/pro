@@ -2639,19 +2639,15 @@ impl ClaimsProcessor {
         // Parse decimal values
         let charge_amount = line_item_charge_amount.parse::<rust_decimal::Decimal>()
             .context("Invalid charge amount")?;
-        // DB constraint: service_unit_count > 0 AND service_unit_count <= 9999.9
-        // Clamp out-of-range / unparseable values to keep the row insertable.
+        // DB constraint: service_unit_count > 0 (NUMERIC(15,1) bounds the top end).
+        // Non-positive / unparseable values are coerced to 1 to keep the row
+        // insertable; large legitimate values (e.g. HCPCS/drug units) pass through.
         let unit_count = {
             let parsed = service_unit_count.parse::<rust_decimal::Decimal>()
                 .unwrap_or(rust_decimal::Decimal::ONE);
-            // 9999.9 as Decimal (mantissa 99999, scale 1)
-            let max_units = rust_decimal::Decimal::new(99_999, 1);
             if parsed <= rust_decimal::Decimal::ZERO {
                 warn!("service_unit_count {} <= 0, defaulting to 1 (procedure {})", parsed, procedure_code);
                 rust_decimal::Decimal::ONE
-            } else if parsed > max_units {
-                warn!("service_unit_count {} > 9999.9, clamping (procedure {})", parsed, procedure_code);
-                max_units
             } else {
                 parsed
             }

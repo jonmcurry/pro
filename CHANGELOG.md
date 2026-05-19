@@ -1,5 +1,72 @@
 # Changelog
 
+## [2.16.0.0] - 2026-05-19
+
+### Bug fix 1 - Service units clamped to 9999.9
+
+Reported in prod: a service line imported with 22,500 units stored `9999.9`
+in `claims.service_line.service_unit_count`.
+
+The column is `NUMERIC(15,1)`, but an artificial `9999.9` ceiling existed in
+five places. `claims_processor.rs` clamped any larger parsed value down to
+`9999.9` before insert, silently corrupting the billed quantity. The X12 837P
+SV104 quantity element imposes no such cap, and HCPCS/drug (J-code) unit
+counts legitimately exceed 9999.9.
+
+Fix - the cap is removed everywhere; `NUMERIC(15,1)` (max 99999999999999.9) is
+now the only upper bound:
+
+- `migrations/077_widen_service_unit_count.sql` (new): drops the
+  `service_unit_count <= 9999.9` CHECK, replaces it with
+  `chk_service_unit_count_positive CHECK (service_unit_count > 0)`.
+- `crates/pro-service/src/claims_processor.rs`: removed the upper-clamp branch
+  in `build_service_line_rule_context`. The `<= 0 -> 1` coercion is kept.
+- `crates/pro-common/src/constants.rs`: `MAX_SERVICE_UNITS` raised to the
+  column capacity.
+- `crates/pro-parser-csv/src/mapping.rs`: CSV `Units` `Range` max raised to
+  the column capacity.
+- `crates/pro-parser-edi/src/validator.rs`: EDI service-line validation
+  threshold raised to the column capacity; it now rejects only values that
+  genuinely overflow `NUMERIC(15,1)`, with a clear message.
+
+Existing rows already clamped to `9999.9` are not backfilled - the true value
+survives in `staging.raw_claims`, so re-importing the affected file repairs
+them.
+
+### Bug fix 2 - Primary payer dropped for dependent-patient claims
+
+Reported in prod: `encounter_view.primary_payer_*` blank while
+`secondary_payer_*` had data.
+
+`parse_claim_info` in `crates/pro-parser-edi/src/loops.rs` decided whether an
+`SBR` segment was the subscriber/billing payer (Loop 2000B) or a COB payer
+(Loop 2320) by testing `claim.subscriber_relationship_code.is_empty()`. That
+field is SBR02, which is legitimately blank in Loop 2000B whenever the patient
+is a dependent carried in a separate Loop 2000C. With SBR02 blank, the COB
+Loop 2320 `SBR` was misdetected as a second "first SBR": it overwrote
+`payer_responsibility_code` and the COB payer was never appended to
+`other_insurance`. The encounter then received a single `encounter_payer` row
+and `encounter_view` showed a blank primary. The test fixture did not catch
+this because its patient is the subscriber (`SBR*P*18*...`).
+
+Fix - `parse_claim_info` now tracks a dedicated `subscriber_sbr_seen` boolean
+for first-SBR detection instead of relying on the SBR02 emptiness test.
+
+Mis-imported encounters are not backfilled; re-importing the affected file
+repairs the `payer_responsibility_code` and COB rows.
+
+### Technical Changes
+
+- `crates/pro-parser-edi/src/loops.rs`: added `subscriber_sbr_seen` flag.
+- `crates/pro-service/src/claims_processor.rs`: removed service-unit clamp.
+- `crates/pro-common/src/constants.rs`, `crates/pro-parser-csv/src/mapping.rs`,
+  `crates/pro-parser-edi/src/validator.rs`: raised service-unit caps.
+- `migrations/077_widen_service_unit_count.sql` (new).
+- `crates/pro-upgrade-manager/src/embedded_migrations.rs`: registered 077;
+  bumped `BASELINE_COVERS_THROUGH` to 77.
+- `migrations/000_baseline_v2.12.sql`: widened the inline `service_unit_count`
+  constraint; appended 077; header bumped to 001-077.
+
 ## [2.15.0.0] - 2026-05-19
 
 ### Bug fix - Rendering provider specialty/taxonomy missing on many provider rows

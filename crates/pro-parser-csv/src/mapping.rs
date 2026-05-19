@@ -208,7 +208,7 @@ impl PredefinedMappings {
             FieldMapping::new("Units".to_string(), "service_unit_count".to_string(), "service_line".to_string(), DataType::Decimal)
                 .required()
                 .with_default("1".to_string())
-                .with_validation(ValidationRule::Range { min: 0.0, max: 9999.9 })
+                .with_validation(ValidationRule::Range { min: 0.0, max: 99_999_999_999_999.9 })
         );
 
         mapping.add_mapping(
