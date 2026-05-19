@@ -1,5 +1,77 @@
 # Changelog
 
+## [2.14.3.0] - 2026-05-16
+
+### Bug fix - Encounter DOS range loaded only first service line's dates
+
+Symptom (observed in prod after 2.14.2.0): claims with multiple
+`DTP*472*RD8` segments at the service-line level showed only the FIRST
+service line's date range on `claims.encounter`. End dates from any later
+service lines were invisible at the encounter level - they only existed on
+the individual `claims.service_line` rows.
+
+Root cause: the post-parse fallback in `loops.rs` (the only place that
+populated encounter dates from service lines) just copied `service_lines[0]`
+into `claim.date_of_service_from` / `..._to`. No MIN/MAX, no span. Three
+related defects with the same shape:
+
+1. **Per-line `DTP*472`** (the common 837P pattern): only line 1's dates
+   reached the encounter; line 2..N's dates were silently dropped.
+2. **Multiple claim-level `DTP*472*RD8`**: each one OVERWROTE the previous
+   value, so the last-claim-level-DTP wins regardless of which was correct.
+3. **Mixed `D8` + `RD8` lines**: D8 single-date lines have
+   `service_date_to == None`. Even with a naive MIN/MAX they would have
+   under-counted the upper bound.
+
+This is a Rule 3 violation: data was loaded but wrong, with no log
+indicating why.
+
+### Fix (Option A - line-derived span)
+
+Replaced the first-line fallback with an unconditional MIN/MAX computation
+over `claim.service_lines`:
+
+```text
+date_of_service_from = MIN(line.service_date_from)
+date_of_service_to   = MAX(line.service_date_to.unwrap_or(line.service_date_from))
+```
+
+Properties:
+
+* Single-date (`D8`) lines participate correctly via the `unwrap_or` fallback.
+* `chk_dos_range` (`date_of_service_to >= date_of_service_from`) is satisfied
+  by construction.
+* Any claim-level `DTP*472` is overridden by the line-derived span. A
+  `debug!` log fires when the override changes a previously-set value, so
+  the discrepancy is auditable (Rule 3).
+* Safety net: the parser validator already rejects service lines whose
+  `service_date_from` is the `DEFAULT_DATE` sentinel, so MIN/MAX over
+  `service_lines` never sees a garbage value.
+
+Rejected alternative (Option B - "defensive widen" that included the
+claim-level DTP value as another sample point) for two reasons: 837P doesn't
+have a separate "statement period" concept, and widening based on a
+submitter-asserted range that disagrees with the actual line dates risks
+over-trusting bad data.
+
+### Technical Changes
+
+- `crates/pro-parser-edi/src/loops.rs` (`compute_encounter_dos_span`):
+  new `pub(crate)` helper computing MIN/MAX in a single pass. Extracted so
+  the logic is unit-testable without constructing a full 837P transaction.
+- `crates/pro-parser-edi/src/loops.rs` (post-loop block, was L1138-1143):
+  replaced first-line fallback with a call to the helper; emits a `debug!`
+  when overriding a non-default claim-level DTP value.
+- `crates/pro-parser-edi/src/loops.rs` (tests): 5 new unit tests covering
+  empty, single D8, single RD8, multiple RD8, and mixed D8/RD8 cases. The
+  `d8_line_with_later_from_extends_to_via_from` test is a direct regression
+  guard for the original bug.
+
+### Version bump rationale (Rule 11)
+
+Z bump (`2.14.2.0` -> `2.14.3.0`): parser correctness fix only. No schema
+change, no new migration.
+
 ## [2.14.2.0] - 2026-05-16
 
 ### Bug fix - Encounter insert rejected by `chk_payer_responsibility`

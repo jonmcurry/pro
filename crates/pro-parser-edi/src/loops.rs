@@ -3,6 +3,7 @@
 use crate::segments::*;
 use crate::types::*;
 use pro_common::{Result, DEFAULT_DATE};
+use tracing::debug;
 
 /// Helper function to write debug output to file
 /// Falls back to using tracing::info! if file write fails
@@ -11,6 +12,35 @@ use pro_common::{Result, DEFAULT_DATE};
 fn debug_log(message: &str) {
     // Debug logging disabled for production performance
     // This function is a no-op but kept for code compatibility
+}
+
+/// Compute the encounter-level date-of-service span across all service lines.
+///
+/// Returns `Some((from, to))` where `from` is the earliest `service_date_from`
+/// and `to` is the latest `service_date_to` (falling back to `service_date_from`
+/// for single-date `D8` lines).
+///
+/// Returns `None` when `lines` is empty.
+///
+/// The parser validator rejects service lines without a real `service_date_from`,
+/// so callers can rely on the result reflecting actual billed service dates.
+pub(crate) fn compute_encounter_dos_span(
+    lines: &[ServiceLine],
+) -> Option<(chrono::NaiveDate, chrono::NaiveDate)> {
+    let mut iter = lines.iter();
+    let first = iter.next()?;
+    let mut span_from = first.service_date_from;
+    let mut span_to = first.service_date_to.unwrap_or(first.service_date_from);
+    for line in iter {
+        if line.service_date_from < span_from {
+            span_from = line.service_date_from;
+        }
+        let line_to = line.service_date_to.unwrap_or(line.service_date_from);
+        if line_to > span_to {
+            span_to = line_to;
+        }
+    }
+    Some((span_from, span_to))
 }
 
 /// Parse Loop 1000A - Submitter Name
@@ -1135,11 +1165,36 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         claim.other_insurance.push(other_ins);
     }
 
-    // If claim-level dates are still default (1900-01-01), copy from first service line
-    // This handles cases where DTP*472 appears only at service line level
-    if claim.date_of_service_from == *DEFAULT_DATE && !claim.service_lines.is_empty() {
-        claim.date_of_service_from = claim.service_lines[0].service_date_from;
-        claim.date_of_service_to = claim.service_lines[0].service_date_to;
+    // Compute the encounter's date_of_service span from its service lines.
+    //
+    // For 837P, each SV1 (Loop 2400) carries its own DTP*472. The encounter's
+    // DOS range should be the full span of services billed under it:
+    //   from = MIN(line.service_date_from)
+    //   to   = MAX(line.service_date_to OR service_date_from when D8/single-date)
+    //
+    // This overrides any claim-level DTP*472 that happened to be present.
+    // Claim-level DTPs are common as duplicates of the service-line dates and
+    // do not represent a separate statement period for professional claims.
+    // The validator at validator.rs:333 already rejects service lines without
+    // a real service_date_from, so MIN/MAX over service_lines is always safe.
+    //
+    // CLAUDE.md Rule 3 (no silent fallbacks): debug!-log when this overrides
+    // a previously-set claim-level DTP value so the change is auditable.
+    if let Some((span_from, span_to)) = compute_encounter_dos_span(&claim.service_lines) {
+        let prior_from = claim.date_of_service_from;
+        let prior_to = claim.date_of_service_to;
+        if prior_from != *DEFAULT_DATE
+            && (prior_from != span_from || prior_to != Some(span_to))
+        {
+            debug!(
+                "Encounter DOS span derived from service lines overrides \
+                 claim-level DTP*472: claim-DTP from={} to={:?} -> span from={} to={}",
+                prior_from, prior_to, span_from, span_to
+            );
+        }
+
+        claim.date_of_service_from = span_from;
+        claim.date_of_service_to = Some(span_to);
     }
 
     // If claim-level rendering provider is not set but first service line has one, copy it up
@@ -1323,5 +1378,124 @@ mod tests {
         let submitter = parse_submitter(&segments).unwrap();
         assert_eq!(submitter.entity_identifier_code, "41");
         assert_eq!(submitter.submitter_organization_name, Some("SUBMITTER ORG".to_string()));
+    }
+
+    mod encounter_dos_span {
+        use super::*;
+        use chrono::NaiveDate;
+
+        /// Minimal service-line factory for date-range tests.
+        fn line(from: NaiveDate, to: Option<NaiveDate>) -> ServiceLine {
+            ServiceLine {
+                line_number: 1,
+                product_service_id_qualifier: String::new(),
+                procedure_code: String::new(),
+                procedure_modifier_1: None,
+                procedure_modifier_2: None,
+                procedure_modifier_3: None,
+                procedure_modifier_4: None,
+                line_item_charge_amount: rust_decimal::Decimal::ZERO,
+                unit_basis_measurement_code: String::new(),
+                service_unit_count: rust_decimal::Decimal::ZERO,
+                service_date_from: from,
+                service_date_to: to,
+                place_of_service_code: None,
+                emergency_indicator: None,
+                epsdt_indicator: None,
+                family_planning_indicator: None,
+                diagnosis_code_pointer_1: None,
+                diagnosis_code_pointer_2: None,
+                diagnosis_code_pointer_3: None,
+                diagnosis_code_pointer_4: None,
+                rendering_provider_npi: None,
+                rendering_provider_last_name: None,
+                rendering_provider_first_name: None,
+                supervising_provider_npi: None,
+                ordering_provider_npi: None,
+                ordering_provider_last_name: None,
+                ordering_provider_first_name: None,
+                referring_provider_npi: None,
+                referring_provider_last_name: None,
+                referring_provider_first_name: None,
+                ndc_code: None,
+                ndc_unit_count: None,
+                ndc_measurement_unit: None,
+                prior_authorization_number: None,
+                referral_number: None,
+                line_note: None,
+                revenue_code: None,
+                other_payer_line_paid_amount: None,
+                line_adjudications: Vec::new(),
+                allowed_amount: None,
+                saving_amount: None,
+            }
+        }
+
+        fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+            NaiveDate::from_ymd_opt(y, m, d).unwrap()
+        }
+
+        #[test]
+        fn empty_returns_none() {
+            assert_eq!(compute_encounter_dos_span(&[]), None);
+        }
+
+        #[test]
+        fn single_d8_line_uses_from_for_both() {
+            let lines = vec![line(date(2025, 1, 15), None)];
+            assert_eq!(
+                compute_encounter_dos_span(&lines),
+                Some((date(2025, 1, 15), date(2025, 1, 15)))
+            );
+        }
+
+        #[test]
+        fn single_rd8_line_uses_range() {
+            let lines = vec![line(date(2025, 1, 1), Some(date(2025, 1, 5)))];
+            assert_eq!(
+                compute_encounter_dos_span(&lines),
+                Some((date(2025, 1, 1), date(2025, 1, 5)))
+            );
+        }
+
+        #[test]
+        fn multiple_rd8_lines_span_min_max() {
+            let lines = vec![
+                line(date(2025, 1, 10), Some(date(2025, 1, 12))),
+                line(date(2025, 1, 1), Some(date(2025, 1, 3))),
+                line(date(2025, 1, 20), Some(date(2025, 1, 25))),
+            ];
+            assert_eq!(
+                compute_encounter_dos_span(&lines),
+                Some((date(2025, 1, 1), date(2025, 1, 25)))
+            );
+        }
+
+        #[test]
+        fn mixed_d8_and_rd8_d8_can_be_the_max() {
+            // RD8 1/1-1/5, D8 1/15. The D8 line must participate as both min and max.
+            let lines = vec![
+                line(date(2025, 1, 1), Some(date(2025, 1, 5))),
+                line(date(2025, 1, 15), None),
+            ];
+            assert_eq!(
+                compute_encounter_dos_span(&lines),
+                Some((date(2025, 1, 1), date(2025, 1, 15)))
+            );
+        }
+
+        #[test]
+        fn d8_line_with_later_from_extends_to_via_from() {
+            // Regression guard for the prior bug: D8 line after an RD8 line
+            // must contribute its single date to BOTH the min/max calculation.
+            let lines = vec![
+                line(date(2025, 3, 1), Some(date(2025, 3, 10))),
+                line(date(2025, 3, 20), None),
+            ];
+            assert_eq!(
+                compute_encounter_dos_span(&lines),
+                Some((date(2025, 3, 1), date(2025, 3, 20)))
+            );
+        }
     }
 }
