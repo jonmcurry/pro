@@ -252,7 +252,15 @@
       "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.ps1\")",
       "Bash(del \"c:\\\\Users\\\\jonmc\\\\dev\\\\pro\\\\scripts\\\\fix-home-dates.py\")",
       "Bash(./build-simple.bat)",
-      "Bash(git stash *)"
+      "Bash(git stash *)",
+      "Bash(git check-ignore *)",
+      "Bash(git ls-tree *)",
+      "Bash(git --no-pager ls-tree HEAD installer/)",
+      "Bash(git --no-pager log --diff-filter=A --name-only --pretty=format: -- installer/ProfessionalSMART.msi installer/version.txt)",
+      "Bash(git --no-pager ls-files installer/)",
+      "Bash(git --no-pager diff --stat HEAD)",
+      "Bash(git -C \"C:/Users/jonmc/dev/pro\" add CHANGELOG.md crates/pro-service/src/claims_processor.rs crates/pro-upgrade-manager/src/embedded_migrations.rs migrations/000_baseline_v2.12.sql installer/Product.wxs installer/ProfessionalSMART.msi installer/version.txt docs/PLAN_taxonomy_fk_fix.md)",
+      "Bash(git -C \"C:/Users/jonmc/dev/pro\" status --short)"
     ],
     "deny": [],
     "ask": []
