@@ -1,5 +1,109 @@
 # Changelog
 
+## [2.15.0.0] - 2026-05-19
+
+### Bug fix - Rendering provider specialty/taxonomy missing on many provider rows
+
+Reported in prod after 2.14.3.0: many `claims.provider` rows had
+`taxonomy_code` and/or `specialty` set to NULL, even though source 837p
+files carried valid `PRV*PE*PXC*<taxonomy>` segments. The taxonomy was being
+extracted by the parser and written into `staging.raw_claims.encounter_fields`
+correctly, but three compounding bugs in
+`claims_processor.rs::upsert_providers_in_own_tx` prevented the master
+provider records from being kept in sync.
+
+### Three bugs, all in the provider prewarm
+
+**Bug A - Existing providers never re-evaluated.** The cache filter at
+~`L3795` removed every NPI already in `self.provider_cache` before the
+upsert ran. If a provider was originally inserted with NULL taxonomy
+(because the first claim to mention them happened to omit `PRV*PE*PXC`),
+no subsequent claim with valid taxonomy could ever fill the gap. This was
+the dominant cause - existing provider rows in a mature DB were stuck with
+whatever values the first claim happened to carry.
+
+**Bug B - `ON CONFLICT` only touched `updated_at`.** Even if A were fixed
+and an existing provider reached the INSERT, the conflict clause threw
+away every new column value:
+
+```sql
+-- Was:
+ON CONFLICT (npi) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+```
+
+**Bug C - `entry().or_insert()` kept the first sample, dropped the rest.**
+The `add` closures in `collect_providers_from_encounter` /
+`collect_providers_from_service_lines` collapsed duplicate NPIs to whichever
+was inserted first. If raw_claim #1 had `rendering_provider_taxonomy = ""`
+and raw_claim #47 had the real value, #47's taxonomy was silently lost
+because `or_insert` is a no-op when the key exists. Taxonomy could be lost
+WITHIN one batch, before we ever touched the DB.
+
+### Fix
+
+1. **Bug C**: both `add` closures replaced with `entry().and_modify(...).or_insert_with(...)`.
+   A helper `merge_provider_field` fills `None`/empty optional fields with
+   non-empty new samples; never overwrites already-set values.
+   `last_name == "Unknown"` placeholder is also upgraded to a real name
+   when one appears later in the batch.
+
+2. **Bug A**: cache filter widened to admit providers with useful taxonomy
+   regardless of cache state:
+   ```rust
+   .filter(|(npi, data)| data.has_useful_taxonomy() || !cache.contains_key(npi))
+   ```
+   Providers WITHOUT new taxonomy still get cache-filtered for perf.
+
+3. **Bug B**: `ON CONFLICT` now COALESCE-fills the columns that can change:
+   ```sql
+   ON CONFLICT (npi) DO UPDATE SET
+     updated_at    = CURRENT_TIMESTAMP,
+     taxonomy_code = COALESCE(claims.provider.taxonomy_code, EXCLUDED.taxonomy_code),
+     specialty     = COALESCE(claims.provider.specialty,     EXCLUDED.specialty)
+   ```
+   Preserves NPI-enrichment results and any other already-set value; only
+   fills genuine NULLs.
+
+Restructured the upsert into a single INSERT-with-ON-CONFLICT round-trip
+(was: SELECT-then-INSERT-only-for-new). Enrichment queue still only
+enqueues genuinely new providers, identified by comparing the
+returned-from-RETURNING NPIs against the pre-batch SELECT set.
+
+### Migration 076 - one-shot backfill
+
+The code fix only repairs FORWARD - providers seen from this point on. To
+repair existing rows that got into DB under the buggy code, migration 076
+runs an idempotent UPDATE that picks a taxonomy code per provider from any
+referencing `claims.encounter.{rendering,referring,supervising}_provider_taxonomy`
+or `claims.service_line.rendering_provider_taxonomy` (most recent wins),
+joins to `claims.provider_taxonomy` to resolve `specialty_display`, and
+fills NULL columns on `claims.provider` without overwriting existing
+values. `RAISE NOTICE` reports the row count for visibility (Rule 3).
+
+Per Rule 15, migration 076 is also appended to
+`migrations/000_baseline_v2.12.sql` and `BASELINE_COVERS_THROUGH` is bumped
+from 75 to 76.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_processor.rs`:
+  - New `ProviderData::has_useful_taxonomy()` and
+    `merge_provider_field()` helpers.
+  - `collect_providers_from_encounter` and `..._from_service_lines`:
+    `entry().and_modify(...).or_insert_with(...)` merge logic.
+  - `upsert_providers_in_own_tx`: widened cache filter; single-round-trip
+    upsert with COALESCE ON CONFLICT; enrichment queue scoped to genuinely
+    new providers via post-RETURNING diff.
+- `migrations/076_backfill_provider_taxonomy.sql` (new).
+- `crates/pro-upgrade-manager/src/embedded_migrations.rs`: registered 076;
+  bumped `BASELINE_COVERS_THROUGH` to 76.
+- `migrations/000_baseline_v2.12.sql`: appended 076; header bumped to 001-076.
+
+### Version bump rationale (Rule 11)
+
+Y bump (`2.14.3.0` -> `2.15.0.0`): new migration (076). Per the project's
+versioning rule, migrations count as features.
+
 ## [2.14.3.0] - 2026-05-16
 
 ### Bug fix - Encounter DOS range loaded only first service line's dates

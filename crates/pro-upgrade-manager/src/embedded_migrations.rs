@@ -29,7 +29,7 @@ pub const BASELINE: EmbeddedMigration = EmbeddedMigration {
 
 /// Version at which the baseline was created
 /// All migrations up to and including this number are covered by the baseline
-pub const BASELINE_COVERS_THROUGH: u32 = 75;
+pub const BASELINE_COVERS_THROUGH: u32 = 76;
 
 /// Get the baseline migration
 pub fn get_baseline() -> &'static EmbeddedMigration {
@@ -404,6 +404,11 @@ pub fn get_all_migrations() -> Vec<EmbeddedMigration> {
             version: "075",
             name: "tune_postgresql_for_hardware",
             sql: include_str!("../../../migrations/075_tune_postgresql_for_hardware.sql"),
+        },
+        EmbeddedMigration {
+            version: "076",
+            name: "backfill_provider_taxonomy",
+            sql: include_str!("../../../migrations/076_backfill_provider_taxonomy.sql"),
         },
     ]
 }

@@ -102,6 +102,36 @@ struct ProviderData {
     taxonomy_code: Option<String>,
 }
 
+impl ProviderData {
+    /// Whether this entry carries a non-empty taxonomy code we can teach the DB.
+    /// Used by the upsert path to decide whether a cached provider still needs
+    /// to go through the ON CONFLICT fill (Bug A fix).
+    fn has_useful_taxonomy(&self) -> bool {
+        self.taxonomy_code
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    }
+}
+
+/// Merge a newly-collected optional field into an existing optional field.
+/// Fills the existing slot iff it's currently None/empty and the new value
+/// carries something non-empty; never overwrites an already-set value.
+fn merge_provider_field(existing: &mut Option<String>, new_value: Option<String>) {
+    let existing_is_empty = existing
+        .as_deref()
+        .map(|s| s.trim().is_empty())
+        .unwrap_or(true);
+    if !existing_is_empty {
+        return;
+    }
+    if let Some(new_val) = new_value {
+        if !new_val.trim().is_empty() {
+            *existing = Some(new_val);
+        }
+    }
+}
+
 /// Claims processor for Stage 2 of two-stage pipeline
 #[derive(Clone)]
 pub struct ClaimsProcessor {
@@ -3682,13 +3712,34 @@ impl ClaimsProcessor {
         let mut add = |npi: Option<String>, ptype: &str, last: Option<String>, first: Option<String>, taxonomy: Option<String>| {
             if let Some(npi) = npi {
                 if npi.len() == 10 && npi.chars().all(|c| c.is_ascii_digit()) {
-                    providers.entry(npi.clone()).or_insert(ProviderData {
-                        npi,
-                        provider_type: ptype.to_string(),
-                        last_name: last.unwrap_or_else(|| "Unknown".to_string()),
-                        first_name: first.unwrap_or_default(),
-                        taxonomy_code: taxonomy,
-                    });
+                    // Merge against any prior entry for this NPI rather than
+                    // dropping later samples. Fixes Bug C: if raw_claim #1 had
+                    // an empty taxonomy and raw_claim #47 had the real value,
+                    // `or_insert` was silently keeping #1's None.
+                    providers
+                        .entry(npi.clone())
+                        .and_modify(|existing| {
+                            merge_provider_field(&mut existing.taxonomy_code, taxonomy.clone());
+                            if existing.last_name == "Unknown" {
+                                if let Some(ref new_last) = last {
+                                    if !new_last.is_empty() {
+                                        existing.last_name = new_last.clone();
+                                    }
+                                }
+                            }
+                            if existing.first_name.is_empty() {
+                                if let Some(ref new_first) = first {
+                                    existing.first_name = new_first.clone();
+                                }
+                            }
+                        })
+                        .or_insert_with(|| ProviderData {
+                            npi,
+                            provider_type: ptype.to_string(),
+                            last_name: last.unwrap_or_else(|| "Unknown".to_string()),
+                            first_name: first.unwrap_or_default(),
+                            taxonomy_code: taxonomy,
+                        });
                 }
             }
         };
@@ -3746,13 +3797,33 @@ impl ClaimsProcessor {
         let mut add = |npi: Option<String>, ptype: &str, last: Option<String>, first: Option<String>| {
             if let Some(npi) = npi {
                 if npi.len() == 10 && npi.chars().all(|c| c.is_ascii_digit()) {
-                    providers.entry(npi.clone()).or_insert(ProviderData {
-                        npi,
-                        provider_type: ptype.to_string(),
-                        last_name: last.unwrap_or_else(|| "Unknown".to_string()),
-                        first_name: first.unwrap_or_default(),
-                        taxonomy_code: None,
-                    });
+                    // Merge against any prior entry rather than dropping later
+                    // samples (Bug C). Service-line collection has no taxonomy
+                    // to contribute, but it may still upgrade an "Unknown"
+                    // placeholder name to the real one.
+                    providers
+                        .entry(npi.clone())
+                        .and_modify(|existing| {
+                            if existing.last_name == "Unknown" {
+                                if let Some(ref new_last) = last {
+                                    if !new_last.is_empty() {
+                                        existing.last_name = new_last.clone();
+                                    }
+                                }
+                            }
+                            if existing.first_name.is_empty() {
+                                if let Some(ref new_first) = first {
+                                    existing.first_name = new_first.clone();
+                                }
+                            }
+                        })
+                        .or_insert_with(|| ProviderData {
+                            npi,
+                            provider_type: ptype.to_string(),
+                            last_name: last.unwrap_or_else(|| "Unknown".to_string()),
+                            first_name: first.unwrap_or_default(),
+                            taxonomy_code: None,
+                        });
                 }
             }
         };
@@ -3798,11 +3869,20 @@ impl ClaimsProcessor {
             return Ok(());
         }
 
-        // Skip NPIs we already know about (already cached = already committed).
+        // Bug A fix: do NOT cache-filter providers carrying a useful taxonomy
+        // value. The cache only knows the (npi, provider_id) mapping; it does
+        // not know whether the stored row has a taxonomy/specialty set. If we
+        // skip cached providers blindly, an existing row that was first
+        // inserted without taxonomy (the source claim happened to omit
+        // PRV*PE*PXC) never gets a chance to be filled in by a later claim
+        // that does carry it. Admit those rows through to the upsert so
+        // ON CONFLICT can COALESCE-fill the NULL columns.
         let providers_to_process: Vec<ProviderData> = {
             let cache = self.provider_cache.read().await;
             providers.into_iter()
-                .filter(|(npi, _)| !cache.contains_key(npi))
+                .filter(|(npi, data)| {
+                    data.has_useful_taxonomy() || !cache.contains_key(npi)
+                })
                 .map(|(_, data)| data)
                 .collect()
         };
@@ -3834,89 +3914,101 @@ impl ClaimsProcessor {
             .map(|(npi, _)| npi.clone())
             .collect();
 
-        let new_providers: Vec<&ProviderData> = providers_to_process.iter()
-            .filter(|p| !existing_npis.contains(&p.npi))
+        // Validate taxonomy codes against claims.provider_taxonomy via the
+        // in-memory cache. Source files (837p / CSV) often carry codes that
+        // aren't in the NUCC reference set; binding an unknown code would
+        // trip `fk_provider_taxonomy`, fail the batch INSERT, and lose
+        // every other provider in the same batch. NULL out unknown codes
+        // here so the row inserts cleanly; the NPI enrichment worker can
+        // populate the correct taxonomy later from the NPPI registry.
+        //
+        // Validate for ALL providers in this batch (was: only new). Combined
+        // with the COALESCE-fill ON CONFLICT below (Bug B fix), this lets us
+        // backfill taxonomy/specialty onto already-existing provider rows
+        // that were originally inserted with NULL.
+        let mut validated_taxonomies: Vec<Option<String>> = Vec::with_capacity(providers_to_process.len());
+        let mut specialties: Vec<Option<String>> = Vec::with_capacity(providers_to_process.len());
+        for provider in &providers_to_process {
+            if let Some(ref tax_code) = provider.taxonomy_code {
+                let (validated_code, spec) = self.lookup_taxonomy(tax_code).await;
+                validated_taxonomies.push(validated_code);
+                specialties.push(spec);
+            } else {
+                validated_taxonomies.push(None);
+                specialties.push(None);
+            }
+        }
+
+        let npis: Vec<&str> = providers_to_process.iter().map(|p| p.npi.as_str()).collect();
+        let types: Vec<&str> = providers_to_process.iter().map(|p| p.provider_type.as_str()).collect();
+        let last_names: Vec<&str> = providers_to_process.iter().map(|p| p.last_name.as_str()).collect();
+        let first_names: Vec<&str> = providers_to_process.iter().map(|p| p.first_name.as_str()).collect();
+        let taxonomies: Vec<Option<&str>> = validated_taxonomies.iter()
+            .map(|s| s.as_deref())
+            .collect();
+        let specialty_refs: Vec<Option<&str>> = specialties.iter()
+            .map(|s| s.as_deref())
             .collect();
 
-        let mut inserted_providers: Vec<(String, i64)> = Vec::new();
-        if !new_providers.is_empty() {
-            // Validate taxonomy codes against claims.provider_taxonomy via the
-            // in-memory cache. Source files (837p / CSV) often carry codes that
-            // aren't in the NUCC reference set; binding an unknown code would
-            // trip `fk_provider_taxonomy`, fail the batch INSERT, and lose
-            // every other provider in the same batch. NULL out unknown codes
-            // here so the row inserts cleanly; the NPI enrichment worker can
-            // populate the correct taxonomy later from the NPPI registry.
-            let mut validated_taxonomies: Vec<Option<String>> = Vec::with_capacity(new_providers.len());
-            let mut specialties: Vec<Option<String>> = Vec::with_capacity(new_providers.len());
-            for provider in &new_providers {
-                if let Some(ref tax_code) = provider.taxonomy_code {
-                    let (validated_code, spec) = self.lookup_taxonomy(tax_code).await;
-                    validated_taxonomies.push(validated_code);
-                    specialties.push(spec);
-                } else {
-                    validated_taxonomies.push(None);
-                    specialties.push(None);
-                }
-            }
+        // Bug B fix: ON CONFLICT now COALESCE-fills taxonomy_code and specialty
+        // (was: only updated updated_at). Preserves any already-set value -
+        // including NPI-enrichment results from the NPPI registry - and only
+        // fills genuine NULLs. Both new and existing providers come back via
+        // RETURNING in a single round-trip.
+        let upserted_providers: Vec<(String, i64)> = sqlx::query_as(
+            r#"
+            INSERT INTO claims.provider (
+                npi, provider_type, last_name, first_name, taxonomy_code, specialty,
+                is_active, created_at, updated_at
+            )
+            SELECT
+                unnest($1::text[]),
+                unnest($2::text[]),
+                unnest($3::text[]),
+                unnest($4::text[]),
+                unnest($5::text[]),
+                unnest($6::text[]),
+                true,
+                CURRENT_TIMESTAMP,
+                CURRENT_TIMESTAMP
+            ON CONFLICT (npi) DO UPDATE SET
+                updated_at    = CURRENT_TIMESTAMP,
+                taxonomy_code = COALESCE(claims.provider.taxonomy_code, EXCLUDED.taxonomy_code),
+                specialty     = COALESCE(claims.provider.specialty,     EXCLUDED.specialty)
+            RETURNING npi, provider_id
+            "#
+        )
+        .bind(&npis)
+        .bind(&types)
+        .bind(&last_names)
+        .bind(&first_names)
+        .bind(&taxonomies)
+        .bind(&specialty_refs)
+        .fetch_all(&mut *tx)
+        .await
+        .context("Failed to batch upsert providers during prewarm")?;
 
-            let npis: Vec<&str> = new_providers.iter().map(|p| p.npi.as_str()).collect();
-            let types: Vec<&str> = new_providers.iter().map(|p| p.provider_type.as_str()).collect();
-            let last_names: Vec<&str> = new_providers.iter().map(|p| p.last_name.as_str()).collect();
-            let first_names: Vec<&str> = new_providers.iter().map(|p| p.first_name.as_str()).collect();
-            let taxonomies: Vec<Option<&str>> = validated_taxonomies.iter()
-                .map(|s| s.as_deref())
-                .collect();
-            let specialty_refs: Vec<Option<&str>> = specialties.iter()
-                .map(|s| s.as_deref())
-                .collect();
-
-            inserted_providers = sqlx::query_as(
+        // Enqueue only GENUINELY NEW providers (those not already in DB) for
+        // NPI enrichment. Existing providers are either already enriched or
+        // already queued; re-enqueueing them is unnecessary work.
+        let new_for_enrichment: Vec<&(String, i64)> = upserted_providers.iter()
+            .filter(|(npi, _)| !existing_npis.contains(npi))
+            .collect();
+        if !new_for_enrichment.is_empty() {
+            let provider_ids: Vec<i64> = new_for_enrichment.iter().map(|(_, id)| *id).collect();
+            let provider_npis: Vec<&str> = new_for_enrichment.iter().map(|(npi, _)| npi.as_str()).collect();
+            sqlx::query(
                 r#"
-                INSERT INTO claims.provider (
-                    npi, provider_type, last_name, first_name, taxonomy_code, specialty,
-                    is_active, created_at, updated_at
-                )
-                SELECT
-                    unnest($1::text[]),
-                    unnest($2::text[]),
-                    unnest($3::text[]),
-                    unnest($4::text[]),
-                    unnest($5::text[]),
-                    unnest($6::text[]),
-                    true,
-                    CURRENT_TIMESTAMP,
-                    CURRENT_TIMESTAMP
-                ON CONFLICT (npi) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
-                RETURNING npi, provider_id
+                INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+                SELECT unnest($1::bigint[]), unnest($2::text[]), 5
+                ON CONFLICT (provider_id) DO NOTHING
                 "#
             )
-            .bind(&npis)
-            .bind(&types)
-            .bind(&last_names)
-            .bind(&first_names)
-            .bind(&taxonomies)
-            .bind(&specialty_refs)
-            .fetch_all(&mut *tx)
+            .bind(&provider_ids)
+            .bind(&provider_npis)
+            .execute(&mut *tx)
             .await
-            .context("Failed to batch insert providers during prewarm")?;
-
-            if !inserted_providers.is_empty() {
-                let provider_ids: Vec<i64> = inserted_providers.iter().map(|(_, id)| *id).collect();
-                let provider_npis: Vec<&str> = inserted_providers.iter().map(|(npi, _)| npi.as_str()).collect();
-                sqlx::query(
-                    r#"
-                    INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
-                    SELECT unnest($1::bigint[]), unnest($2::text[]), 5
-                    ON CONFLICT (provider_id) DO NOTHING
-                    "#
-                )
-                .bind(&provider_ids)
-                .bind(&provider_npis)
-                .execute(&mut *tx)
-                .await
-                .context("Failed to enqueue providers for enrichment during prewarm")?;
-            }
+            .context("Failed to enqueue providers for enrichment during prewarm")?;
         }
 
         // Commit BEFORE writing to the shared cache so cache entries always reference
@@ -3924,17 +4016,30 @@ impl ClaimsProcessor {
         tx.commit().await
             .context("Failed to commit provider upsert transaction")?;
 
-        if !existing_providers.is_empty() || !inserted_providers.is_empty() {
+        if !existing_providers.is_empty() || !upserted_providers.is_empty() {
             let mut cache = self.provider_cache.write().await;
+            // SELECT-returned rows whose NPI was not in the upserted set
+            // (existed pre-batch but had no useful new taxonomy, so we
+            // cache-filtered them out of the upsert).
             for (npi, provider_id) in &existing_providers {
                 cache.insert(npi.clone(), *provider_id);
             }
-            for (npi, provider_id) in &inserted_providers {
+            // Upserted rows: covers genuinely new providers plus existing
+            // rows that had their NULL taxonomy/specialty filled in via the
+            // COALESCE ON CONFLICT (Bug B fix).
+            for (npi, provider_id) in &upserted_providers {
                 cache.insert(npi.clone(), *provider_id);
             }
+            let new_count = upserted_providers.iter()
+                .filter(|(npi, _)| !existing_npis.contains(npi))
+                .count();
             debug!(
-                "Provider prewarm: cached {} existing + {} new providers",
-                existing_providers.len(), inserted_providers.len()
+                "Provider prewarm: upserted {} rows ({} new + {} taxonomy-fill of existing); \
+                 cached {} pre-existing IDs",
+                upserted_providers.len(),
+                new_count,
+                upserted_providers.len() - new_count,
+                existing_providers.len()
             );
         }
 

@@ -1,6 +1,6 @@
 -- ============================================================================
 -- Migration: 000_baseline_v2.12
--- Description: Complete schema baseline generated from migrations 001-075
+-- Description: Complete schema baseline generated from migrations 001-076
 -- Date: 2024-12-23
 -- 
 -- This baseline contains the complete Professional SMART database schema.
@@ -10963,4 +10963,82 @@ BEGIN
         RAISE NOTICE 'NOTE: Some settings require a PostgreSQL restart to take effect.';
         RAISE NOTICE '      Restart the postgresql-x64-* Windows service when convenient.';
     END IF;
+END $$;
+
+-- ============================================================================
+-- Source: 076_backfill_provider_taxonomy.sql
+-- ============================================================================
+-- Backfill claims.provider rows whose taxonomy_code/specialty are NULL using
+-- referencing claims.encounter and claims.service_line rows. Idempotent;
+-- only fills NULL fields, never overwrites existing values. Required after
+-- 2.15.0.0 ships the upsert-COALESCE fix (Bugs A/B/C) so already-stored
+-- provider rows aren't left stuck with NULL taxonomy.
+
+DO $$
+DECLARE
+    v_updated INTEGER;
+BEGIN
+    WITH candidate_per_provider AS (
+        SELECT DISTINCT ON (provider_id)
+            provider_id,
+            taxonomy_code
+        FROM (
+            SELECT
+                rendering_provider_id   AS provider_id,
+                rendering_provider_taxonomy AS taxonomy_code,
+                created_at
+            FROM claims.encounter
+            WHERE rendering_provider_id IS NOT NULL
+              AND rendering_provider_taxonomy IS NOT NULL
+              AND rendering_provider_taxonomy <> ''
+            UNION ALL
+            SELECT
+                referring_provider_id,
+                referring_provider_taxonomy,
+                created_at
+            FROM claims.encounter
+            WHERE referring_provider_id IS NOT NULL
+              AND referring_provider_taxonomy IS NOT NULL
+              AND referring_provider_taxonomy <> ''
+            UNION ALL
+            SELECT
+                supervising_provider_id,
+                supervising_provider_taxonomy,
+                created_at
+            FROM claims.encounter
+            WHERE supervising_provider_id IS NOT NULL
+              AND supervising_provider_taxonomy IS NOT NULL
+              AND supervising_provider_taxonomy <> ''
+            UNION ALL
+            SELECT
+                rendering_provider_id,
+                rendering_provider_taxonomy,
+                created_at
+            FROM claims.service_line
+            WHERE rendering_provider_id IS NOT NULL
+              AND rendering_provider_taxonomy IS NOT NULL
+              AND rendering_provider_taxonomy <> ''
+        ) all_refs
+        ORDER BY provider_id, created_at DESC
+    )
+    UPDATE claims.provider p
+    SET taxonomy_code = COALESCE(p.taxonomy_code, cpp.taxonomy_code),
+        specialty     = COALESCE(p.specialty,     pt.specialty_display),
+        updated_at    = CURRENT_TIMESTAMP
+    FROM candidate_per_provider cpp
+    JOIN claims.provider_taxonomy pt ON pt.taxonomy_code = cpp.taxonomy_code
+    WHERE p.provider_id = cpp.provider_id
+      AND (p.taxonomy_code IS NULL OR p.specialty IS NULL);
+
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    RAISE NOTICE 'Provider taxonomy/specialty backfill: filled NULL fields on % provider row(s)', v_updated;
+
+    INSERT INTO claims.provider_enrichment_queue (provider_id, npi, priority)
+    SELECT p.provider_id, p.npi, 5
+    FROM claims.provider p
+    WHERE p.taxonomy_code IS NULL OR p.specialty IS NULL
+    ON CONFLICT (provider_id) DO NOTHING;
+
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    RAISE NOTICE 'Provider enrichment queue: enqueued % provider row(s) still missing taxonomy/specialty', v_updated;
 END $$;
