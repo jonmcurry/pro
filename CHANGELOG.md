@@ -1,5 +1,88 @@
 # Changelog
 
+## [2.17.0.1] - 2026-05-20
+
+### Observability - Warn when source 837 is missing payer identification (NM1*PR)
+
+Claim PAAA0066925021 was imported with blank `payer_id` and `payer_name` in
+`encounter_payer` because the source 837 file omitted Loop 2010BB (NM1*PR)
+entirely for that subscriber loop. The parser correctly stored what was available
+(SBR responsibility code, filing indicator) but the missing data was invisible.
+
+The EDI parser now emits a WARN-level log when a claim has an SBR segment (payer
+responsibility) but no corresponding NM1*PR (payer name/ID). This makes source
+data quality issues visible without rejecting the claim (Rule 3).
+
+### Technical Changes
+
+- `crates/pro-parser-edi/src/loops.rs`: added warn! after segment processing
+  when `subscriber_sbr_seen && !primary_payer_captured`.
+
+## [2.17.0.0] - 2026-05-20
+
+### Feature - Auto-insert unknown taxonomy codes into provider_taxonomy
+
+The `claims.provider_taxonomy` table was seeded with only 383 NUCC codes. When a
+valid taxonomy code arrived (from an 837 file or the CMS NPI Registry API) that
+was not in the table, two failures occurred:
+
+1. **claims_processor** (`lookup_taxonomy`): returned `(None, None)`, silently
+   discarding the valid code. The provider row got NULL taxonomy/specialty.
+2. **enrichment worker** (`enrich_provider`): bound the code into an UPDATE that
+   violated `fk_provider_taxonomy`, failing the entire enrichment for that provider
+   with "Failed to update provider record".
+
+Both code paths now auto-insert unknown taxonomy codes into `provider_taxonomy`
+before use, with a WARN-level log so missing codes are visible (Rule 3). The
+enrichment worker populates the row with metadata from the CMS NPI Registry
+response (provider_type, description). The claims processor inserts with minimal
+metadata (provider_type="Unknown", classification="Auto-inserted from claim data")
+since the 837 does not carry taxonomy descriptions.
+
+Taxonomy codes auto-inserted at runtime will have their metadata enriched the next
+time a provider with that code is processed by the enrichment worker.
+
+### Technical Changes
+
+- `crates/pro-npi-enrichment/src/worker.rs`: after taxonomy lookup miss, INSERT
+  the code into `provider_taxonomy` using CMS API response fields (desc,
+  enumeration_type), then use the desc as specialty_display.
+- `crates/pro-service/src/claims_processor.rs`: `lookup_taxonomy` now auto-inserts
+  unknown codes into both the database table and in-memory cache instead of
+  returning (None, None).
+
+## [2.16.2.0] - 2026-05-20
+
+### Bug fix - date_of_service_to not persisted by process_encounter_with_service_lines
+
+Reported in prod: `claims.encounter.date_of_service_to` always equaled
+`date_of_service_from`, even for multi-line claims spanning multiple dates.
+
+Root cause: `process_encounter_with_service_lines` (the primary EDI processing
+path) bound `dos_from` for both `$19` (date_of_service_from) and `$20`
+(date_of_service_to) in the encounter INSERT. The parser's
+`compute_encounter_dos_span` correctly computed
+`date_of_service_to = MAX(service_line.service_date_to)` and stored it in
+`encounter_fields["date_of_service_to"]`, but this code path never read it.
+The placeholder comment `"date_of_service_to same as from for now"` was never
+updated when the DOS span computation was added in v2.14.3.0.
+
+The alternate code path (`process_raw_claim`) already handled `dos_to`
+correctly.
+
+Fix: `process_encounter_with_service_lines` now parses `date_of_service_to`
+from encounter_fields and binds it at $20. Falls back to `dos_from` when the
+field is missing or unparseable (Rule 3 - the fallback is explicit, not silent).
+
+Existing encounters with incorrect `date_of_service_to` are not backfilled;
+re-importing the affected files repairs them.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_processor.rs`: parse `dos_to` from
+  encounter_fields after `dos_from`; bind `dos_to` at $20 instead of
+  `dos_from`.
+
 ## [2.16.1.0] - 2026-05-19
 
 ### Bug fix - Deadlock during provider prewarm

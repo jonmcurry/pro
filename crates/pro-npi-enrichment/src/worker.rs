@@ -178,9 +178,9 @@ impl EnrichmentWorker {
             .find(|t| t.primary)
             .or_else(|| provider_data.taxonomies.first());
 
-        // Lookup specialty from taxonomy code
+        // Lookup specialty from taxonomy code; auto-insert if missing
         let specialty = if let Some(taxonomy) = primary_taxonomy {
-            sqlx::query_scalar::<_, String>(
+            let existing = sqlx::query_scalar::<_, String>(
                 r#"
                 SELECT specialty_display
                 FROM claims.provider_taxonomy
@@ -190,7 +190,41 @@ impl EnrichmentWorker {
             .bind(&taxonomy.code)
             .fetch_optional(&mut *tx)
             .await
-            .context("Failed to lookup specialty from taxonomy")?
+            .context("Failed to lookup specialty from taxonomy")?;
+
+            if existing.is_none() {
+                let provider_type = match provider_data.enumeration_type.as_str() {
+                    "NPI-1" => "Individual",
+                    "NPI-2" => "Organization",
+                    _ => "Unknown",
+                };
+                let specialty_display = &taxonomy.desc;
+
+                sqlx::query(
+                    r#"
+                    INSERT INTO claims.provider_taxonomy
+                        (taxonomy_code, provider_type, classification, specialization, specialty_display, is_active)
+                    VALUES ($1, $2, $3, NULL, $4, true)
+                    ON CONFLICT (taxonomy_code) DO NOTHING
+                    "#
+                )
+                .bind(&taxonomy.code)
+                .bind(provider_type)
+                .bind(specialty_display)
+                .bind(specialty_display)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to auto-insert unknown taxonomy code")?;
+
+                warn!(
+                    "Auto-inserted taxonomy code '{}' ({}) into provider_taxonomy from NPI Registry",
+                    taxonomy.code, taxonomy.desc
+                );
+
+                Some(taxonomy.desc.clone())
+            } else {
+                existing
+            }
         } else {
             None
         };

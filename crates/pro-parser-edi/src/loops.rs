@@ -3,7 +3,7 @@
 use crate::segments::*;
 use crate::types::*;
 use pro_common::{Result, DEFAULT_DATE};
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Helper function to write debug output to file
 /// Falls back to using tracing::info! if file write fails
@@ -1251,6 +1251,13 @@ pub fn parse_claim_info(segments: &[EdiSegment]) -> Result<ParsedClaim> {
         claim.patient_state = claim.subscriber_state.clone();
         claim.patient_postal_code = claim.subscriber_postal_code.clone();
         debug_log("[CLAIM] Copied subscriber info to patient fields (patient = subscriber)");
+    }
+
+    if subscriber_sbr_seen && !primary_payer_captured {
+        warn!(
+            "Claim '{}' has SBR (payer responsibility) but no NM1*PR segment - payer_id and payer_name will be blank (source 837 missing Loop 2010BB)",
+            claim.patient_control_number
+        );
     }
 
     Ok(claim)
