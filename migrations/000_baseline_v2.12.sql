@@ -7306,6 +7306,9 @@ END $$;
 -- 8b. AHRQ Quality Indicator Rules (COMPOSITE template)
 -- ============================================================================
 
+-- Ensure encryption key is available for pgp_sym_encrypt in rule INSERTs below
+SET app.rule_encryption_key = 'ProfessionalSmartRulesKey2024';
+
 -- AHRQOP001A: Opioid Related Hospital Visits in the ED
 INSERT INTO claims.rule_definition (
     rule_code,
@@ -7336,6 +7339,15 @@ SELECT
     5000,
     true
 WHERE NOT EXISTS (SELECT 1 FROM claims.rule_definition WHERE rule_code = 'AHRQOP001A');
+
+-- Fix existing deployments where rule_parameters_encrypted is NULL due to key ordering
+UPDATE claims.rule_definition
+SET rule_parameters_encrypted = pgp_sym_encrypt(
+    '{"operator": "AND", "conditions": [{"type": "date_gte", "min_date": "2012-07-01"}, {"type": "cpt_in", "codes": ["99281", "99282", "99283", "99284", "99285", "99291"]}, {"type": "dx_pattern_exclude", "include": "^(F11|T40)", "exclude": "^F1121"}]}',
+    current_setting('app.rule_encryption_key', true)
+)
+WHERE rule_code = 'AHRQOP001A'
+  AND rule_parameters_encrypted IS NULL;
 
 -- ============================================================================
 -- 9. Function: Get Active Rules for Facility

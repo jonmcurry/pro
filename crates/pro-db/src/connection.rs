@@ -1,5 +1,6 @@
-use sqlx::postgres::{PgPool, PgPoolOptions};
-use sqlx::Error as SqlxError;
+use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::{ConnectOptions, Connection, Executor, Error as SqlxError};
+use std::str::FromStr;
 use std::time::Duration;
 
 pub type DbPool = PgPool;
@@ -76,19 +77,12 @@ impl Default for DbConfig {
 
 /// Create a database connection pool with the given configuration
 pub async fn create_pool(config: &DbConfig) -> Result<DbPool, SqlxError> {
-    // Build connection URL with performance settings
-    let mut conn_url = config.database_url.clone();
+    let connect_options = PgConnectOptions::from_str(&config.database_url)?
+        .statement_cache_capacity(config.statement_cache_capacity)
+        .application_name("pro-smart");
 
-    // Add statement_cache_size parameter for prepared statement caching
-    let separator = if conn_url.contains('?') { '&' } else { '?' };
-    conn_url.push_str(&format!(
-        "{}statement_cache_size={}&statement_timeout={}s&application_name=pro-smart",
-        separator,
-        config.statement_cache_capacity,
-        config.statement_timeout_seconds
-    ));
+    let statement_timeout_seconds = config.statement_timeout_seconds;
 
-    // Create pool with configuration
     let pool = PgPoolOptions::new()
         .max_connections(config.max_connections)
         .min_connections(config.min_connections)
@@ -96,7 +90,15 @@ pub async fn create_pool(config: &DbConfig) -> Result<DbPool, SqlxError> {
         .idle_timeout(Duration::from_secs(config.idle_timeout_seconds))
         .max_lifetime(Duration::from_secs(config.max_lifetime_seconds))
         .test_before_acquire(config.test_before_acquire)
-        .connect(&conn_url)
+        .after_connect(move |conn, _meta| {
+            Box::pin(async move {
+                conn.execute(
+                    format!("SET statement_timeout = '{}s'", statement_timeout_seconds).as_str()
+                ).await?;
+                Ok(())
+            })
+        })
+        .connect_with(connect_options)
         .await?;
 
     // PHASE 5: Warm up minimum connections with test queries

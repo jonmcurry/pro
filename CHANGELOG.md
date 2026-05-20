@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.17.0.4] - 2026-05-20
+
+### Fix - Resolve sqlx connect parameter warnings and AHRQOP001A rule loading
+
+Two warnings appeared on every service start:
+
+1. **sqlx warnings**: `statement_cache_size` and `statement_timeout` were passed
+   as URL query parameters which sqlx does not recognize. Rewrote pool creation
+   to use `PgConnectOptions` for statement cache and `after_connect` hook for
+   statement timeout.
+
+2. **Rule AHRQOP001A NULL parameters**: The baseline migration set the encryption
+   key (`SET app.rule_encryption_key`) at line 10618 but used it for rule INSERTs
+   at line 7330. Moved the SET before the first usage and added a self-healing
+   UPDATE for existing deployments where parameters are already NULL.
+
+### Technical Changes
+
+- `crates/pro-db/src/connection.rs`: replaced URL param approach with
+  `PgConnectOptions::statement_cache_capacity()`, `.application_name()`, and
+  `PgPoolOptions::after_connect()` for `SET statement_timeout`.
+- `migrations/000_baseline_v2.12.sql`: added early `SET app.rule_encryption_key`
+  before AHRQ rule INSERTs; added UPDATE to re-encrypt NULL parameters.
+
 ## [2.17.0.3] - 2026-05-20
 
 ### Fix - Change default service.log level from "info" to "warn"
