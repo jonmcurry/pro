@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.17.0.1] - 2026-05-20
+
+### Observability - Warn when source 837 is missing payer identification (NM1*PR)
+
+Claim PAAA0066925021 was imported with blank `payer_id` and `payer_name` in
+`encounter_payer` because the source 837 file omitted Loop 2010BB (NM1*PR)
+entirely for that subscriber loop. The parser correctly stored what was available
+(SBR responsibility code, filing indicator) but the missing data was invisible.
+
+The EDI parser now emits a WARN-level log when a claim has an SBR segment (payer
+responsibility) but no corresponding NM1*PR (payer name/ID). This makes source
+data quality issues visible without rejecting the claim (Rule 3).
+
+### Technical Changes
+
+- `crates/pro-parser-edi/src/loops.rs`: added warn! after segment processing
+  when `subscriber_sbr_seen && !primary_payer_captured`.
+
 ## [2.17.0.0] - 2026-05-20
 
 ### Feature - Auto-insert unknown taxonomy codes into provider_taxonomy

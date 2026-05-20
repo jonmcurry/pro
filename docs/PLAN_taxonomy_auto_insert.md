@@ -56,5 +56,5 @@ unchanged. Per Rule 15, no migration file is required.
 - [x] Modify `lookup_taxonomy` in claims_processor.rs to auto-insert and cache unknown codes
 - [x] Update CHANGELOG.md with v2.17.0.0 entry
 - [x] Update version to 2.17.0.0 (installer/version.txt, installer/Product.wxs)
-- [ ] Git commit and push
+- [x] Git commit and push
 - [ ] Rebuild installer (Windows-only, skip on Mac dev)
