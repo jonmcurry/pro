@@ -9,6 +9,20 @@ Merging the v2.16 line into v2.17 left `process_encounter_*`'s new
 owned `String` where `&str` is required (`claims_processor.rs:772`). Added
 the missing borrow so the workspace compiles. No behavior change.
 
+### Fix - NPI Registry API deserialization failure when taxonomy desc is null
+
+NPI 1760473185 (and others with taxonomy code `2085R0001X`) failed enrichment
+with "NPI Registry API call failed" because the CMS API returns `"desc": null`
+for certain taxonomy codes. The `Taxonomy.desc` field was typed as `String`
+(non-optional), causing serde JSON deserialization to fail on null values.
+
+### Technical Changes
+
+- `crates/pro-npi-enrichment/src/client.rs`: changed `Taxonomy.desc` from
+  `String` to `Option<String>` to handle null values from the CMS API.
+- `crates/pro-npi-enrichment/src/worker.rs`: updated taxonomy desc usages to
+  unwrap with fallback `"Unknown"` when description is not provided.
+
 ## [2.17.0.1] - 2026-05-20
 
 ### Observability - Warn when source 837 is missing payer identification (NM1*PR)

@@ -54,7 +54,7 @@ pub struct BasicInfo {
 pub struct Taxonomy {
     pub code: String,
     pub taxonomy_group: Option<String>,
-    pub desc: String,
+    pub desc: Option<String>,
     pub primary: bool,
     pub state: Option<String>,
     pub license: Option<String>,

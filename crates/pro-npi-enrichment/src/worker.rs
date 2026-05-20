@@ -198,7 +198,7 @@ impl EnrichmentWorker {
                     "NPI-2" => "Organization",
                     _ => "Unknown",
                 };
-                let specialty_display = &taxonomy.desc;
+                let specialty_display = taxonomy.desc.as_deref().unwrap_or("Unknown");
 
                 sqlx::query(
                     r#"
@@ -218,10 +218,10 @@ impl EnrichmentWorker {
 
                 warn!(
                     "Auto-inserted taxonomy code '{}' ({}) into provider_taxonomy from NPI Registry",
-                    taxonomy.code, taxonomy.desc
+                    taxonomy.code, specialty_display
                 );
 
-                Some(taxonomy.desc.clone())
+                Some(specialty_display.to_string())
             } else {
                 existing
             }
