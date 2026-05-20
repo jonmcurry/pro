@@ -258,7 +258,9 @@ impl ClaimsProcessor {
     }
 
     /// Lookup specialty from taxonomy code using cache
-    /// Returns (validated_taxonomy_code, specialty) or (None, None) if not found
+    /// Returns (validated_taxonomy_code, specialty) or (None, None) if not found.
+    /// Auto-inserts unknown but syntactically valid codes into provider_taxonomy
+    /// so they satisfy the FK constraint and are available for future lookups.
     async fn lookup_taxonomy(&self, taxonomy_code: &str) -> (Option<String>, Option<String>) {
         if taxonomy_code.is_empty() {
             return (None, None);
@@ -270,12 +272,46 @@ impl ClaimsProcessor {
             return (None, None);
         }
 
-        let cache = self.taxonomy_cache.read().await;
-        if let Some(specialty) = cache.get(taxonomy_code) {
-            (Some(taxonomy_code.to_string()), Some(specialty.clone()))
-        } else {
-            warn!("Taxonomy code '{}' not found in cache", taxonomy_code);
-            (None, None)
+        {
+            let cache = self.taxonomy_cache.read().await;
+            if let Some(specialty) = cache.get(taxonomy_code) {
+                return (Some(taxonomy_code.to_string()), Some(specialty.clone()));
+            }
+        }
+
+        // Taxonomy code not in cache - auto-insert into provider_taxonomy table
+        // so the FK constraint is satisfied and the code is not discarded.
+        let specialty_display = taxonomy_code.to_string();
+        let result = sqlx::query(
+            r#"
+            INSERT INTO claims.provider_taxonomy
+                (taxonomy_code, provider_type, classification, specialization, specialty_display, is_active)
+            VALUES ($1, 'Unknown', 'Auto-inserted from claim data', NULL, $2, true)
+            ON CONFLICT (taxonomy_code) DO NOTHING
+            "#
+        )
+        .bind(taxonomy_code)
+        .bind(&specialty_display)
+        .execute(&self.pool)
+        .await;
+
+        match result {
+            Ok(_) => {
+                warn!(
+                    "Auto-inserted unknown taxonomy code '{}' into provider_taxonomy from claim data",
+                    taxonomy_code
+                );
+                let mut cache = self.taxonomy_cache.write().await;
+                cache.insert(taxonomy_code.to_string(), specialty_display.clone());
+                (Some(taxonomy_code.to_string()), Some(specialty_display))
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to auto-insert taxonomy code '{}': {:?}",
+                    taxonomy_code, e
+                );
+                (None, None)
+            }
         }
     }
 
@@ -732,6 +768,9 @@ impl ClaimsProcessor {
         // Parse dates
         let dos_from = chrono::NaiveDate::parse_from_str(&date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
+        let dos_to = encounter_fields.get("date_of_service_to")
+            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .unwrap_or(dos_from);
         let subscriber_dob = subscriber_birth_date_str.as_ref()
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
 
@@ -1164,8 +1203,8 @@ impl ClaimsProcessor {
         .bind(subscriber_state)                         // $16
         .bind(subscriber_postal_code.as_deref())        // $17
         .bind(subscriber_country)                       // $18
-        .bind(dos_from)                                 // $19
-        .bind(dos_from)                                 // $20 date_of_service_to same as from for now
+        .bind(dos_from)                                 // $19 date_of_service_from
+        .bind(dos_to)                                   // $20 date_of_service_to
         .bind(total_claim_charge)                       // $21
         .bind(payer_id.as_deref())                      // $22
         .bind(payer_name.as_deref())                    // $23
