@@ -12,7 +12,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use std::path::Path;
 use tokio::sync::broadcast;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 
 /// Claims importer that processes CSV and EDI files
@@ -785,21 +785,12 @@ impl ClaimsImporter {
         for (idx, claim) in transaction.claims.iter().enumerate() {
             let row_number = (idx + 1) as i32;
 
-            // DEBUG: Log the parsed claim to see what we got from the parser
-            info!("Claim {}: subscriber_name='{}  {}', payer_name='{}', patient_control='{}', date_of_service={}",
+            trace!("Claim {}: payer='{}', dos={}, delay_reason={:?}, special_program={:?}",
                 idx + 1,
-                claim.subscriber_first_name,
-                claim.subscriber_last_name,
                 claim.payer_name,
-                claim.patient_control_number,
-                claim.date_of_service_from
-            );
-            // DEBUG: Log extended CLM fields
-            info!("Claim {} extended: delay_reason={:?}, special_program={:?}, auto_accident_state={:?}",
-                idx + 1,
+                claim.date_of_service_from,
                 claim.delay_reason_code,
-                claim.special_program_code,
-                claim.auto_accident_state
+                claim.special_program_code
             );
 
             // Transform EDI ParsedClaim to match CSV database structure:

@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.17.0.5] - 2026-05-20
+
+### Security - Remove PHI (patient names) from claims importer logs
+
+The claims importer logged subscriber first name, last name, patient control
+number, and date of service at INFO level for every claim processed. This was
+leftover debug code (annotated with `// DEBUG:` comments) that exposed Protected
+Health Information in log files, violating HIPAA minimum necessary standards.
+
+Removed the PHI-containing log statements entirely. Replaced with a single
+trace-level log that only includes non-PHI fields (payer name, date of service,
+delay reason code, special program code). Trace level is never active in
+production unless explicitly enabled for deep debugging.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_importer.rs`: removed two `info!()` statements
+  containing subscriber names and patient control number; replaced with a single
+  `trace!()` containing only non-PHI operational fields.
+
 ## [2.17.0.4] - 2026-05-20
 
 ### Fix - Resolve sqlx connect parameter warnings and AHRQOP001A rule loading
