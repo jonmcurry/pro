@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.17.0.2] - 2026-05-20
+
+### Build fix - Merge-induced type error in claims_processor
+
+Merging the v2.16 line into v2.17 left `process_encounter_*`'s new
+`date_of_service_to` parsing calling `NaiveDate::parse_from_str` with an
+owned `String` where `&str` is required (`claims_processor.rs:772`). Added
+the missing borrow so the workspace compiles. No behavior change.
+
 ## [2.17.0.1] - 2026-05-20
 
 ### Observability - Warn when source 837 is missing payer identification (NM1*PR)

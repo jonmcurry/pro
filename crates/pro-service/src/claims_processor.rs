@@ -769,7 +769,7 @@ impl ClaimsProcessor {
         let dos_from = chrono::NaiveDate::parse_from_str(&date_of_service_from, "%Y-%m-%d")
             .context("Invalid date format for date_of_service_from")?;
         let dos_to = encounter_fields.get("date_of_service_to")
-            .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+            .and_then(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok())
             .unwrap_or(dos_from);
         let subscriber_dob = subscriber_birth_date_str.as_ref()
             .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok());
