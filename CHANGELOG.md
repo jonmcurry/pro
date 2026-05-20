@@ -1,5 +1,24 @@
 # Changelog
 
+## [2.17.0.3] - 2026-05-20
+
+### Fix - Change default service.log level from "info" to "warn"
+
+The service.log file was growing over 300MB due to verbose info-level logging
+(claim processing details, batch counts, API call traces). Changed the default
+log level to "warn" so only warnings and errors are written to the file.
+
+This preserves visibility into data quality issues (missing payer identification,
+auto-inserted taxonomy codes) while eliminating the high-volume informational
+traffic. The `LOG_LEVEL` environment variable still allows overriding to any
+level when needed for troubleshooting.
+
+### Technical Changes
+
+- `crates/pro-service/src/service.rs`: default log level changed from "info" to
+  "warn" in `get_log_level()` and the `EnvFilter` fallback.
+- `.env.example`: updated default value and comments to reflect new default.
+
 ## [2.17.0.2] - 2026-05-20
 
 ### Build fix - Merge-induced type error in claims_processor

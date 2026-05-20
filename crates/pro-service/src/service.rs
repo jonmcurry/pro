@@ -891,7 +891,7 @@ fn get_log_level() -> String {
         match level.as_str() {
             "trace" | "debug" | "info" | "warn" | "error" => return level,
             _ => {
-                eprintln!("[PRE-LOG] Invalid LOG_LEVEL '{}', using 'info'. Valid values: trace, debug, info, warn, error", level);
+                eprintln!("[PRE-LOG] Invalid LOG_LEVEL '{}', using 'warn'. Valid values: trace, debug, info, warn, error", level);
             }
         }
     }
@@ -901,8 +901,8 @@ fn get_log_level() -> String {
         return rust_log;
     }
 
-    // Default to info
-    "info".to_string()
+    // Default to warn (errors + warnings visible, info/debug suppressed)
+    "warn".to_string()
 }
 
 /// Initialize logging for service mode
@@ -924,7 +924,7 @@ fn init_service_logging() -> Result<tracing_appender::non_blocking::WorkerGuard>
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_new(&log_level)
-                .unwrap_or_else(|_| "info".into()),
+                .unwrap_or_else(|_| "warn".into()),
         )
         .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
         .init();
