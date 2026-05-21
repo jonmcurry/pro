@@ -467,6 +467,7 @@ mod tests {
             "TEST_RULE".to_string(),
             "Test Rule".to_string(),
             FlagIssueType::OthDuplicateService,
+            "OTH_TEST_RULE".to_string(),
             params,
         );
 

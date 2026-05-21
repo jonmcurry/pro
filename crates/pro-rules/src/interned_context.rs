@@ -151,8 +151,8 @@ mod tests {
         // Create test service lines
         let service_lines = vec![
             ServiceLine {
-                service_line_id: // TODO: Remove - database generates IDs now,
-                encounter_id: // TODO: Remove - database generates IDs now,
+                service_line_id: 0,
+                encounter_id: 0,
                 line_number: 1,
                 product_service_id_qualifier: Some("HC".to_string()),
                 procedure_code: "99213".to_string(),
@@ -195,8 +195,8 @@ mod tests {
                 updated_by: None,
             },
             ServiceLine {
-                service_line_id: // TODO: Remove - database generates IDs now,
-                encounter_id: // TODO: Remove - database generates IDs now,
+                service_line_id: 0,
+                encounter_id: 0,
                 line_number: 2,
                 product_service_id_qualifier: Some("HC".to_string()),
                 procedure_code: "99213".to_string(), // Same code - should reuse interned string

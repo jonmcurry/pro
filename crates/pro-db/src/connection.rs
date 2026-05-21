@@ -1,5 +1,5 @@
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
-use sqlx::{ConnectOptions, Connection, Executor, Error as SqlxError};
+use sqlx::{Executor, Error as SqlxError};
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -78,7 +78,7 @@ impl Default for DbConfig {
 /// Create a database connection pool with the given configuration
 pub async fn create_pool(config: &DbConfig) -> Result<DbPool, SqlxError> {
     let connect_options = PgConnectOptions::from_str(&config.database_url)?
-        .statement_cache_capacity(config.statement_cache_capacity)
+        .statement_cache_capacity(config.statement_cache_capacity as usize)
         .application_name("pro-smart");
 
     let statement_timeout_seconds = config.statement_timeout_seconds;

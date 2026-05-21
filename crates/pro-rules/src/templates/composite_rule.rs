@@ -826,8 +826,8 @@ mod tests {
         assert!(r2.is_none(), "Should NOT trigger: F1121 matches exclude pattern");
     }
 
-    #[test]
-    fn test_indexed_execution_triggers_flags() {
+    #[tokio::test]
+    async fn test_indexed_execution_triggers_flags() {
         use crate::rule_engine::RuleEngine;
 
         let pool = sqlx::PgPool::connect_lazy("postgres://dummy").unwrap();

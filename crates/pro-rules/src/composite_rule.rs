@@ -125,8 +125,9 @@ mod tests {
     #[test]
     fn test_condition_all() {
         let rule = CompositeRule::new("test", FlagIssueType::CodUpcoding, RuleCondition::All);
-        assert!(!rule.check_condition(0));
-        assert!(rule.check_condition(0)); // No subrules added, so 0 == len
+        // No subrules: len == 0, so check_condition(0) is vacuously true
+        assert!(rule.check_condition(0));
+        assert!(!rule.check_condition(1)); // Can't trigger more than exist
     }
 
     #[test]
@@ -140,9 +141,9 @@ mod tests {
     #[test]
     fn test_condition_majority() {
         let rule = CompositeRule::new("test", FlagIssueType::CodUpcoding, RuleCondition::Majority);
-        // Assuming 5 subrules, majority is > 2
-        assert!(!rule.check_condition(2));
-        assert!(rule.check_condition(3));
+        // No subrules: len == 0, majority threshold is > 0
+        assert!(!rule.check_condition(0));
+        assert!(rule.check_condition(1));
     }
 
     #[test]

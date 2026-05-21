@@ -202,6 +202,7 @@ mod tests {
             "TEST_RULE".to_string(),
             "Test Rule".to_string(),
             FlagIssueType::ModMissingRequired,
+            "MOD_TEST_RULE".to_string(),
             params,
         );
 
@@ -214,6 +215,7 @@ mod tests {
             rule_code: "TEST".to_string(),
             rule_name: "Test".to_string(),
             flag_issue_type: FlagIssueType::ModMissingRequired,
+            issue_code: "MOD_TEST".to_string(),
             fields: vec!["test".to_string()],
             check_empty: true,
         };

@@ -1643,7 +1643,7 @@ mod tests {
         ctx.service_unit_count = Some(Decimal::new(75, 0));
         ctx.procedure_code = Some("99213".to_string());
 
-        let result = rule.execute(&ctx, &pool).await.unwrap();
+        let result = rule.execute(&mut ctx, &pool).await.unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap().flag_type, FlagIssueType::QtyUnitsExceedMaximum);
     }
@@ -1656,7 +1656,7 @@ mod tests {
         let mut ctx = RuleExecutionContext::new(1);
         ctx.service_unit_count = Some(Decimal::new(50, 0));
 
-        let result = rule.execute(&ctx, &pool).await.unwrap();
+        let result = rule.execute(&mut ctx, &pool).await.unwrap();
         assert!(result.is_none());
     }
 
@@ -1669,7 +1669,7 @@ mod tests {
         ctx.procedure_code = Some("27447".to_string());
         ctx.procedure_modifiers = vec!["LT".to_string(), "RT".to_string()];
 
-        let result = rule.execute(&ctx, &pool).await.unwrap();
+        let result = rule.execute(&mut ctx, &pool).await.unwrap();
         assert!(result.is_some());
     }
 
@@ -1681,7 +1681,7 @@ mod tests {
         let mut ctx = RuleExecutionContext::new(1);
         ctx.diagnosis_codes = vec!["E11.9".to_string(), "I10".to_string()];
 
-        let result = rule.execute(&ctx, &pool).await.unwrap();
+        let result = rule.execute(&mut ctx, &pool).await.unwrap();
         assert!(result.is_some());
         assert_eq!(result.unwrap().flag_type, FlagIssueType::DxUnspecifiedWhenSpecificAvailable);
     }
