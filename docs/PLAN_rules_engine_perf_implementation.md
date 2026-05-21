@@ -14,7 +14,7 @@ rule execution throughput during Stage 2 claim processing.
 - [x] Opt #2: Borrow diagnosis_codes (use shared uppercase dx codes, avoid to_vec per SL)
 - [x] Opt #3: Parallel service line execution with rayon (data parallelism for CPU-only rules)
 - [x] Update CHANGELOG.md (version 2.18.0.0 - performance feature)
-- [ ] Commit and push
+- [x] Commit and push
 
 ## Files Modified
 

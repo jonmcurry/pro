@@ -111,6 +111,10 @@ pub struct RuleExecutionContext {
     // deduplicating regex evaluation when 20+ rules share the same DxPattern
     pub dx_pattern_cache: Option<FxHashMap<String, bool>>,
     pub dx_pattern_exclude_cache: Option<FxHashMap<(String, String), bool>>,
+
+    // PERFORMANCE: Set to true when rule is selected via CPT index
+    // Allows skipping the redundant CptIn condition check
+    pub cpt_index_verified: bool,
 }
 
 impl RuleExecutionContext {
@@ -145,6 +149,7 @@ impl RuleExecutionContext {
             modifiers_upper: Vec::new(),
             dx_pattern_cache: None,
             dx_pattern_exclude_cache: None,
+            cpt_index_verified: false,
         }
     }
 
@@ -708,6 +713,8 @@ impl RuleEngine {
             return self.execute_all_indexed_sync(ctx);
         }
 
+        ctx.cpt_index_verified = true;
+
         let mut results = Vec::new();
         let procedure_code = ctx.procedure_code_upper.as_ref().cloned();
 
@@ -778,6 +785,9 @@ impl RuleEngine {
     #[inline]
     pub fn execute_all_indexed_sync(&self, ctx: &mut RuleExecutionContext) -> Result<Vec<RuleResult>> {
         let mut results = Vec::with_capacity(16);
+
+        // Mark context as CPT-index-verified so rules can skip redundant CptIn checks
+        ctx.cpt_index_verified = true;
 
         let procedure_code = ctx.procedure_code_upper.as_ref().cloned();
 

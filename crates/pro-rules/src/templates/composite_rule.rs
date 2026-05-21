@@ -475,10 +475,13 @@ impl CompositeRule {
     /// - AND: Stops on first false (avoids evaluating remaining conditions)
     /// - OR: Stops on first true (avoids evaluating remaining conditions)
     fn evaluate(&self, ctx: &mut RuleExecutionContext) -> Result<Option<RuleResult>> {
+        // Only skip CptIn when context confirms rule was selected via CPT index
+        let skip_cpt = ctx.cpt_index_verified && self.cpt_verified_idx.is_some();
+
         let triggered = match self.operator {
             LogicOperator::And => {
                 for (idx, condition) in self.conditions.iter().enumerate() {
-                    if self.cpt_verified_idx == Some(idx) {
+                    if skip_cpt && self.cpt_verified_idx == Some(idx) {
                         continue;
                     }
                     if !condition.evaluate(ctx) {
@@ -490,7 +493,7 @@ impl CompositeRule {
             LogicOperator::Or => {
                 let mut any_matched = false;
                 for (idx, condition) in self.conditions.iter().enumerate() {
-                    if self.cpt_verified_idx == Some(idx) {
+                    if skip_cpt && self.cpt_verified_idx == Some(idx) {
                         any_matched = true;
                         break;
                     }
@@ -590,5 +593,316 @@ mod tests {
         };
         let compiled = condition.compile();
         assert!(compiled.is_err());
+    }
+
+    #[test]
+    fn test_composite_rule_triggers_flag() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "AND",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99281", "99282", "99283", "99284", "99285"]},
+                {"type": "dx_pattern", "pattern": "^F11"},
+                {"type": "date_gte", "min_date": "2012-07-01"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "AHRQOP001A".to_string(),
+            "AHRQ Opioid-Related ED Visit".to_string(),
+            FlagIssueType::CodUpcoding,
+            "QM_AHRQOP001A".to_string(),
+            params,
+        ).unwrap();
+
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99283".to_string());
+        ctx.diagnosis_codes = vec!["F1120".to_string(), "R0600".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx.finalize();
+
+        let result = rule.execute_sync(&mut ctx).unwrap();
+        assert!(result.is_some(), "Rule should trigger for matching CPT + DX + date");
+
+        let flag = result.unwrap();
+        assert_eq!(flag.issue_code, Some("QM_AHRQOP001A".to_string()));
+    }
+
+    #[test]
+    fn test_composite_rule_no_trigger_wrong_cpt() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "AND",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99281", "99282", "99283"]},
+                {"type": "dx_pattern", "pattern": "^F11"},
+                {"type": "date_gte", "min_date": "2012-07-01"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "TEST001".to_string(),
+            "Test Rule".to_string(),
+            FlagIssueType::CodUpcoding,
+            "TEST_001".to_string(),
+            params,
+        ).unwrap();
+
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99213".to_string());
+        ctx.diagnosis_codes = vec!["F1120".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx.finalize();
+
+        let result = rule.execute_sync(&mut ctx).unwrap();
+        assert!(result.is_none(), "Rule should NOT trigger for non-matching CPT");
+    }
+
+    #[test]
+    fn test_composite_rule_no_trigger_wrong_dx() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "AND",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99283"]},
+                {"type": "dx_pattern", "pattern": "^F11"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "TEST002".to_string(),
+            "Test Rule 2".to_string(),
+            FlagIssueType::CodUpcoding,
+            "TEST_002".to_string(),
+            params,
+        ).unwrap();
+
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99283".to_string());
+        ctx.diagnosis_codes = vec!["E119".to_string(), "I10".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx.finalize();
+
+        let result = rule.execute_sync(&mut ctx).unwrap();
+        assert!(result.is_none(), "Rule should NOT trigger when DX pattern doesn't match");
+    }
+
+    #[test]
+    fn test_dx_pattern_cache_deduplication() {
+        let template = CompositeRuleTemplate;
+
+        let rule1 = template.instantiate(
+            "R1".to_string(), "Rule 1".to_string(),
+            FlagIssueType::CodUpcoding, "R1".to_string(),
+            serde_json::json!({"operator": "AND", "conditions": [
+                {"type": "cpt_in", "codes": ["99283"]},
+                {"type": "dx_pattern", "pattern": "^E11"}
+            ]}),
+        ).unwrap();
+
+        let rule2 = template.instantiate(
+            "R2".to_string(), "Rule 2".to_string(),
+            FlagIssueType::CodUpcoding, "R2".to_string(),
+            serde_json::json!({"operator": "AND", "conditions": [
+                {"type": "cpt_in", "codes": ["99283"]},
+                {"type": "dx_pattern", "pattern": "^E11"}
+            ]}),
+        ).unwrap();
+
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99283".to_string());
+        ctx.diagnosis_codes = vec!["E119".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx.finalize();
+
+        // Both rules share the same DxPattern - cache should be populated after first
+        let r1 = rule1.execute_sync(&mut ctx).unwrap();
+        assert!(r1.is_some());
+
+        // Second rule uses cached DxPattern result
+        let r2 = rule2.execute_sync(&mut ctx).unwrap();
+        assert!(r2.is_some());
+
+        // Verify cache was populated
+        assert!(ctx.dx_pattern_cache.as_ref().unwrap().contains_key("^E11"));
+    }
+
+    #[test]
+    fn test_cpt_verified_skip() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "AND",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99213", "99214"]},
+                {"type": "dx_pattern", "pattern": "^E11"},
+                {"type": "date_gte", "min_date": "2020-01-01"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "SKIP_TEST".to_string(),
+            "CptIn Skip Test".to_string(),
+            FlagIssueType::CodUpcoding,
+            "SKIP_TEST".to_string(),
+            params,
+        ).unwrap();
+
+        // Verify through execution: rule should trigger even though CptIn is skipped
+        // (the cpt_verified_idx optimization marks the CptIn condition as pre-verified)
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99213".to_string());
+        ctx.diagnosis_codes = vec!["E1165".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 3, 1).unwrap());
+        ctx.finalize();
+
+        let result = rule.execute_sync(&mut ctx).unwrap();
+        assert!(result.is_some(), "Rule should trigger with CptIn skip optimization active");
+    }
+
+    #[test]
+    fn test_or_operator_triggers() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "OR",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99999"]},
+                {"type": "dx_pattern", "pattern": "^Z00"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "OR_TEST".to_string(),
+            "OR Operator Test".to_string(),
+            FlagIssueType::CodUpcoding,
+            "OR_TEST".to_string(),
+            params,
+        ).unwrap();
+
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("12345".to_string());
+        ctx.diagnosis_codes = vec!["Z001".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+        ctx.finalize();
+
+        let result = rule.execute_sync(&mut ctx).unwrap();
+        assert!(result.is_some(), "OR rule should trigger when second condition matches");
+    }
+
+    #[test]
+    fn test_dx_pattern_exclude() {
+        let template = CompositeRuleTemplate;
+        let params = serde_json::json!({
+            "operator": "AND",
+            "conditions": [
+                {"type": "cpt_in", "codes": ["99283"]},
+                {"type": "dx_pattern_exclude", "include": "^F11", "exclude": "^F1121"}
+            ]
+        });
+
+        let rule = template.instantiate(
+            "EXCL_TEST".to_string(),
+            "DxPatternExclude Test".to_string(),
+            FlagIssueType::CodUpcoding,
+            "EXCL_TEST".to_string(),
+            params,
+        ).unwrap();
+
+        // Should trigger: has F11 but not F1121
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99283".to_string());
+        ctx.diagnosis_codes = vec!["F1120".to_string()];
+        ctx.finalize();
+
+        let r1 = rule.execute_sync(&mut ctx).unwrap();
+        assert!(r1.is_some(), "Should trigger: F1120 matches ^F11 but not ^F1121");
+
+        // Should NOT trigger: has F1121 (excluded)
+        let mut ctx2 = RuleExecutionContext::new(1);
+        ctx2.procedure_code = Some("99283".to_string());
+        ctx2.diagnosis_codes = vec!["F1121".to_string()];
+        ctx2.finalize();
+
+        let r2 = rule.execute_sync(&mut ctx2).unwrap();
+        assert!(r2.is_none(), "Should NOT trigger: F1121 matches exclude pattern");
+    }
+
+    #[test]
+    fn test_indexed_execution_triggers_flags() {
+        use crate::rule_engine::RuleEngine;
+
+        let pool = sqlx::PgPool::connect_lazy("postgres://dummy").unwrap();
+        let mut engine = RuleEngine::new(pool);
+
+        let template = CompositeRuleTemplate;
+
+        // Add two rules targeting different CPT codes
+        let rule1 = template.instantiate(
+            "RULE_A".to_string(),
+            "ED Opioid Visit".to_string(),
+            FlagIssueType::CodUpcoding,
+            "RULE_A".to_string(),
+            serde_json::json!({"operator": "AND", "conditions": [
+                {"type": "cpt_in", "codes": ["99283", "99284", "99285"]},
+                {"type": "dx_pattern", "pattern": "^F11"},
+                {"type": "date_gte", "min_date": "2012-07-01"}
+            ]}),
+        ).unwrap();
+
+        let rule2 = template.instantiate(
+            "RULE_B".to_string(),
+            "Diabetes with E/M".to_string(),
+            FlagIssueType::CodUpcoding,
+            "RULE_B".to_string(),
+            serde_json::json!({"operator": "AND", "conditions": [
+                {"type": "cpt_in", "codes": ["99213", "99214", "99215"]},
+                {"type": "dx_pattern", "pattern": "^E11"}
+            ]}),
+        ).unwrap();
+
+        engine.add_rule_arc(rule1);
+        engine.add_rule_arc(rule2);
+        engine.build_cpt_index();
+
+        // Test 1: CPT 99283 with F11 diagnosis -> should trigger RULE_A only
+        let mut ctx = RuleExecutionContext::new(1);
+        ctx.procedure_code = Some("99283".to_string());
+        ctx.diagnosis_codes = vec!["F1120".to_string(), "R0600".to_string()];
+        ctx.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx.finalize();
+
+        let results = engine.execute_all_indexed_sync(&mut ctx).unwrap();
+        assert_eq!(results.len(), 1, "Should trigger exactly 1 rule");
+        assert_eq!(results[0].issue_code, Some("RULE_A".to_string()));
+
+        // Test 2: CPT 99214 with E11 diagnosis -> should trigger RULE_B only
+        let mut ctx2 = RuleExecutionContext::new(1);
+        ctx2.procedure_code = Some("99214".to_string());
+        ctx2.diagnosis_codes = vec!["E119".to_string()];
+        ctx2.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx2.finalize();
+
+        let results2 = engine.execute_all_indexed_sync(&mut ctx2).unwrap();
+        assert_eq!(results2.len(), 1, "Should trigger exactly 1 rule");
+        assert_eq!(results2[0].issue_code, Some("RULE_B".to_string()));
+
+        // Test 3: CPT 99213 with F11 diagnosis -> should trigger RULE_B only (no E11 dx)
+        let mut ctx3 = RuleExecutionContext::new(1);
+        ctx3.procedure_code = Some("99213".to_string());
+        ctx3.diagnosis_codes = vec!["F1120".to_string()];
+        ctx3.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx3.finalize();
+
+        let results3 = engine.execute_all_indexed_sync(&mut ctx3).unwrap();
+        assert_eq!(results3.len(), 0, "Should trigger 0 rules (RULE_B needs E11, not F11)");
+
+        // Test 4: CPT 99999 (not in any rule) -> should trigger nothing
+        let mut ctx4 = RuleExecutionContext::new(1);
+        ctx4.procedure_code = Some("99999".to_string());
+        ctx4.diagnosis_codes = vec!["F1120".to_string(), "E119".to_string()];
+        ctx4.date_of_service = Some(NaiveDate::from_ymd_opt(2024, 6, 15).unwrap());
+        ctx4.finalize();
+
+        let results4 = engine.execute_all_indexed_sync(&mut ctx4).unwrap();
+        assert_eq!(results4.len(), 0, "Should trigger nothing for unindexed CPT");
     }
 }
