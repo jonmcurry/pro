@@ -787,7 +787,7 @@ impl IngestionPipeline {
             .collect();
 
         // PHASE 6: Execute encounter-level rules (no cache available in this method)
-        match self.rule_engine.execute_all(&encounter_ctx).await {
+        match self.rule_engine.execute_all(&mut encounter_ctx).await {
             Ok(rule_results) => {
                 if !rule_results.is_empty() {
                     total_flags += rule_results.len();
@@ -843,7 +843,7 @@ impl IngestionPipeline {
                 .collect();
 
             // Execute service line rules
-            match self.rule_engine.execute_all(&line_ctx).await {
+            match self.rule_engine.execute_all(&mut line_ctx).await {
                 Ok(rule_results) => {
                     if !rule_results.is_empty() {
                         total_flags += rule_results.len();
@@ -1054,7 +1054,7 @@ impl IngestionPipeline {
             .collect();
 
         // Execute encounter-level rules
-        match self.rule_engine.execute_all(&encounter_ctx).await {
+        match self.rule_engine.execute_all(&mut encounter_ctx).await {
             Ok(rule_results) => {
                 if !rule_results.is_empty() {
                     total_flags += rule_results.len();
@@ -1109,7 +1109,7 @@ impl IngestionPipeline {
                 .collect();
 
             // Execute service line rules
-            match self.rule_engine.execute_all(&line_ctx).await {
+            match self.rule_engine.execute_all(&mut line_ctx).await {
                 Ok(rule_results) => {
                     if !rule_results.is_empty() {
                         total_flags += rule_results.len();
@@ -1317,7 +1317,7 @@ impl IngestionPipeline {
             .collect();
 
         // *** PHASE 5: Execute encounter-level rules with both caches ***
-        match self.rule_engine.execute_all_with_result_cache(&encounter_ctx, exec_cache, result_cache).await {
+        match self.rule_engine.execute_all_with_result_cache(&mut encounter_ctx, exec_cache, result_cache).await {
             Ok(rule_results) => {
                 if !rule_results.is_empty() {
                     total_flags += rule_results.len();
@@ -1373,7 +1373,7 @@ impl IngestionPipeline {
                 .collect();
 
             // *** PHASE 5: Execute service line rules with both caches ***
-            match self.rule_engine.execute_all_with_result_cache(&line_ctx, exec_cache, result_cache).await {
+            match self.rule_engine.execute_all_with_result_cache(&mut line_ctx, exec_cache, result_cache).await {
                 Ok(rule_results) => {
                     if !rule_results.is_empty() {
                         total_flags += rule_results.len();

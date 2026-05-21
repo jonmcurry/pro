@@ -200,7 +200,7 @@ impl ClaimProcessor {
             .collect();
 
         // Execute encounter-level rules
-        match self.rule_engine.execute_all(&encounter_ctx).await {
+        match self.rule_engine.execute_all(&mut encounter_ctx).await {
             Ok(rule_results) => {
                 if !rule_results.is_empty() {
                     total_flags += rule_results.len();
@@ -269,7 +269,7 @@ impl ClaimProcessor {
                 .map(|d| d.diagnosis_code.clone())
                 .collect();
 
-            match self.rule_engine.execute_all(&line_ctx).await {
+            match self.rule_engine.execute_all(&mut line_ctx).await {
                 Ok(rule_results) => {
                     if !rule_results.is_empty() {
                         total_flags += rule_results.len();
@@ -510,7 +510,7 @@ impl ClaimProcessor {
             .map(|d| d.diagnosis_code.clone())
             .collect();
 
-        match self.rule_engine.execute_all(&encounter_ctx).await {
+        match self.rule_engine.execute_all(&mut encounter_ctx).await {
             Ok(rule_results) => {
                 if !rule_results.is_empty() {
                     total_flags += rule_results.len();
@@ -581,7 +581,7 @@ impl ClaimProcessor {
                 .map(|d| d.diagnosis_code.clone())
                 .collect();
 
-            match self.rule_engine.execute_all(&line_ctx).await {
+            match self.rule_engine.execute_all(&mut line_ctx).await {
                 Ok(rule_results) => {
                     if !rule_results.is_empty() {
                         total_flags += rule_results.len();
@@ -830,7 +830,7 @@ impl ClaimProcessor {
 
         match self
             .rule_engine
-            .execute_all_with_result_cache(&encounter_ctx, exec_cache, result_cache)
+            .execute_all_with_result_cache(&mut encounter_ctx, exec_cache, result_cache)
             .await
         {
             Ok(rule_results) => {
@@ -906,7 +906,7 @@ impl ClaimProcessor {
 
             match self
                 .rule_engine
-                .execute_all_with_result_cache(&line_ctx, exec_cache, result_cache)
+                .execute_all_with_result_cache(&mut line_ctx, exec_cache, result_cache)
                 .await
             {
                 Ok(rule_results) => {

@@ -104,6 +104,13 @@ pub struct RuleExecutionContext {
     pub diagnosis_codes_upper: Vec<String>,
     pub place_of_service_upper: Option<String>,
     pub modifiers_upper: Vec<String>,
+
+    // PERFORMANCE: DxPattern regex result cache
+    // Maps regex pattern string -> whether ANY diagnosis code matched
+    // Shared across all rules evaluating the same encounter's diagnosis codes,
+    // deduplicating regex evaluation when 20+ rules share the same DxPattern
+    pub dx_pattern_cache: Option<FxHashMap<String, bool>>,
+    pub dx_pattern_exclude_cache: Option<FxHashMap<(String, String), bool>>,
 }
 
 impl RuleExecutionContext {
@@ -136,6 +143,8 @@ impl RuleExecutionContext {
             diagnosis_codes_upper: Vec::new(),
             place_of_service_upper: None,
             modifiers_upper: Vec::new(),
+            dx_pattern_cache: None,
+            dx_pattern_exclude_cache: None,
         }
     }
 
@@ -148,6 +157,8 @@ impl RuleExecutionContext {
         self.diagnosis_codes_upper = self.diagnosis_codes.iter().map(|s| s.to_uppercase()).collect();
         self.place_of_service_upper = self.place_of_service_code.as_ref().map(|s| s.to_uppercase());
         self.modifiers_upper = self.procedure_modifiers.iter().map(|s| s.to_uppercase()).collect();
+        self.dx_pattern_cache = Some(FxHashMap::default());
+        self.dx_pattern_exclude_cache = Some(FxHashMap::default());
     }
 
     /// PERFORMANCE: Finalize with pre-computed uppercase diagnosis codes
@@ -156,10 +167,11 @@ impl RuleExecutionContext {
     #[inline]
     pub fn finalize_with_shared_dx(&mut self, diagnosis_codes_upper: &[String]) {
         self.procedure_code_upper = self.procedure_code.as_ref().map(|s| s.to_uppercase());
-        // Use pre-computed uppercase diagnosis codes (shared across service lines)
         self.diagnosis_codes_upper = diagnosis_codes_upper.to_vec();
         self.place_of_service_upper = self.place_of_service_code.as_ref().map(|s| s.to_uppercase());
         self.modifiers_upper = self.procedure_modifiers.iter().map(|s| s.to_uppercase()).collect();
+        self.dx_pattern_cache = Some(FxHashMap::default());
+        self.dx_pattern_exclude_cache = Some(FxHashMap::default());
     }
 
     pub fn to_flag_context(&self) -> FlagContext {
@@ -425,17 +437,16 @@ pub trait Rule: Send + Sync {
     fn flag_type(&self) -> FlagIssueType;
 
     /// Execute the rule and return results if flag conditions are met
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>>;
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>>;
 
     /// Execute rule with cache (PHASE 3 OPTIMIZATION)
     /// Default implementation calls execute() - rules can override to use cache
     async fn execute_with_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         _cache: &RuleExecutionCache,
         pool: &PgPool,
     ) -> Result<Option<RuleResult>> {
-        // Default: ignore cache, call regular execute
         self.execute(ctx, pool).await
     }
 
@@ -463,8 +474,7 @@ pub trait Rule: Send + Sync {
 
     /// Synchronous execution for rules that don't need database access
     /// This avoids async overhead for CPU-only rules like COMPOSITE
-    fn execute_sync(&self, _ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
-        // Default: not implemented (rules should override if they support sync execution)
+    fn execute_sync(&self, _ctx: &mut RuleExecutionContext) -> Result<Option<RuleResult>> {
         Err(Error::Validation("Rule does not support synchronous execution".into()))
     }
 }
@@ -614,37 +624,29 @@ impl RuleEngine {
     /// Execute all rules against a context
     /// PERFORMANCE: Uses fully synchronous path when all rules are sync-capable
     /// Falls back to mixed sync/async for rules needing DB access
-    pub async fn execute_all(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
-        // PERFORMANCE: Use fully synchronous path when all rules are CPU-only
-        // This eliminates ALL async overhead (tokio task switching, state machines, etc.)
+    pub async fn execute_all(&self, ctx: &mut RuleExecutionContext) -> Result<Vec<RuleResult>> {
         if self.all_sync_capable {
             return self.execute_all_sync(ctx);
         }
 
-        // Fallback: mixed sync/async for rules that need DB access
         let mut results = Vec::new();
 
         for rule in &self.rules {
-            // Skip if rule is not enabled
             if !rule.is_enabled() {
                 continue;
             }
 
-            // Skip if not in enabled flag types list
             if let Some(ref enabled) = self.enabled_flag_types {
                 if !enabled.contains(&rule.flag_type()) {
                     continue;
                 }
             }
 
-            // Use synchronous execution if rule supports it (avoids async overhead)
-            // This is critical for COMPOSITE rules which are CPU-only
             if !rule.requires_db_access() {
                 match rule.execute_sync(ctx) {
                     Ok(Some(result)) => results.push(result),
-                    Ok(None) => {} // Rule didn't trigger
+                    Ok(None) => {}
                     Err(_) => {
-                        // Sync not supported, fall back to async
                         match rule.execute(ctx, &self.pool).await {
                             Ok(Some(result)) => results.push(result),
                             Ok(None) => {}
@@ -655,7 +657,6 @@ impl RuleEngine {
                     }
                 }
             } else {
-                // Rule needs database access, use async execution
                 match rule.execute(ctx, &self.pool).await {
                     Ok(Some(result)) => results.push(result),
                     Ok(None) => {}
@@ -670,26 +671,16 @@ impl RuleEngine {
     }
 
     /// PERFORMANCE-CRITICAL: Fully synchronous execution of ALL rules
-    /// - Zero async overhead (no tokio task switching, no state machines)
-    /// - Pre-allocated result vector
-    /// - Minimal branching in hot loop
-    /// - Used when all rules are CPU-only (like COMPOSITE rules)
     #[inline]
-    pub fn execute_all_sync(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
-        // Pre-allocate results (most rules won't trigger)
+    pub fn execute_all_sync(&self, ctx: &mut RuleExecutionContext) -> Result<Vec<RuleResult>> {
         let mut results = Vec::with_capacity(16);
-
-        // PERFORMANCE: Check enabled_flag_types once outside the loop
         let has_filter = self.enabled_flag_types.is_some();
 
-        // Execute ALL rules - TIGHT LOOP
         for rule in &self.rules {
-            // Skip if rule is not enabled (rare)
             if !rule.is_enabled() {
                 continue;
             }
 
-            // Skip if not in enabled flag types list (rare)
             if has_filter {
                 if let Some(ref enabled) = self.enabled_flag_types {
                     if !enabled.contains(&rule.flag_type()) {
@@ -698,12 +689,10 @@ impl RuleEngine {
                 }
             }
 
-            // Execute synchronously - all rules are sync-capable in this path
             match rule.execute_sync(ctx) {
                 Ok(Some(result)) => results.push(result),
-                Ok(None) => {} // Rule didn't trigger - most common path
+                Ok(None) => {}
                 Err(e) => {
-                    // Should not happen if all_sync_capable is true
                     eprintln!("Error executing rule {}: {}", rule.name(), e);
                 }
             }
@@ -714,63 +703,42 @@ impl RuleEngine {
 
     /// Execute rules using CPT index for fast filtering
     /// Only executes rules that apply to the given procedure code + universal rules
-    /// This can skip 95%+ of rules when many CPT-specific rules are loaded
-    ///
-    /// PERFORMANCE: For 600 rules where only 30 apply to a given CPT code,
-    /// this method executes ~30 rules instead of ~600 (20x speedup)
-    pub async fn execute_all_indexed(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
-        // PERFORMANCE: Try fully synchronous path first (avoids ALL async overhead)
-        // This is critical for high-throughput ingestion with 500+ rules
+    pub async fn execute_all_indexed(&self, ctx: &mut RuleExecutionContext) -> Result<Vec<RuleResult>> {
         if self.all_rules_sync_capable() {
             return self.execute_all_indexed_sync(ctx);
         }
 
-        // Fallback: mixed sync/async execution for rules needing DB access
         let mut results = Vec::new();
+        let procedure_code = ctx.procedure_code_upper.as_ref().cloned();
 
-        // PERFORMANCE: Use pre-computed uppercase from context (already computed in finalize())
-        let procedure_code = ctx.procedure_code_upper.as_ref();
-
-        // Collect rule indices to execute
         let mut rule_indices: Vec<usize> = Vec::new();
 
-        // Add rules for this specific CPT code
-        if let Some(cpt) = procedure_code {
+        if let Some(ref cpt) = procedure_code {
             if let Some(indices) = self.cpt_rule_index.get(cpt) {
                 rule_indices.extend(indices.iter().copied());
             }
         }
 
-        // Add universal rules (apply to all CPT codes)
         rule_indices.extend(self.universal_rules.iter().copied());
 
-        // Sort and dedup to avoid executing same rule twice
-        rule_indices.sort_unstable();
-        rule_indices.dedup();
-
-        // Execute only the applicable rules
         for idx in rule_indices {
             let rule = &self.rules[idx];
 
-            // Skip if rule is not enabled
             if !rule.is_enabled() {
                 continue;
             }
 
-            // Skip if not in enabled flag types list
             if let Some(ref enabled) = self.enabled_flag_types {
                 if !enabled.contains(&rule.flag_type()) {
                     continue;
                 }
             }
 
-            // Use synchronous execution if rule supports it (avoids async overhead)
             if !rule.requires_db_access() {
                 match rule.execute_sync(ctx) {
                     Ok(Some(result)) => results.push(result),
-                    Ok(None) => {} // Rule didn't trigger
+                    Ok(None) => {}
                     Err(_) => {
-                        // Sync not supported, fall back to async
                         match rule.execute(ctx, &self.pool).await {
                             Ok(Some(result)) => results.push(result),
                             Ok(None) => {}
@@ -781,7 +749,6 @@ impl RuleEngine {
                     }
                 }
             } else {
-                // Rule needs database access, use async execution
                 match rule.execute(ctx, &self.pool).await {
                     Ok(Some(result)) => results.push(result),
                     Ok(None) => {}
@@ -802,52 +769,38 @@ impl RuleEngine {
         self.all_sync_capable
     }
 
-    /// PERFORMANCE-CRITICAL: Fully synchronous rule execution
+    /// PERFORMANCE-CRITICAL: Fully synchronous rule execution with CPT indexing
     /// - Zero async overhead (no tokio task switching)
     /// - Pre-allocated result vector
     /// - Minimal branching in hot loop
-    /// - Direct iteration without index indirection when possible
+    /// - CPT index filters ~80% of rules before evaluation
+    /// - DxPattern cache deduplicates regex across rules sharing same patterns
     #[inline]
-    pub fn execute_all_indexed_sync(&self, ctx: &RuleExecutionContext) -> Result<Vec<RuleResult>> {
-        // Pre-allocate results (most rules won't trigger, but avoid reallocations)
+    pub fn execute_all_indexed_sync(&self, ctx: &mut RuleExecutionContext) -> Result<Vec<RuleResult>> {
         let mut results = Vec::with_capacity(16);
 
-        // PERFORMANCE: Use pre-computed uppercase from context (already computed in finalize())
-        // Avoids 30,000 allocations per 10K claim batch
-        let procedure_code = ctx.procedure_code_upper.as_ref();
+        let procedure_code = ctx.procedure_code_upper.as_ref().cloned();
 
-        // Collect rule indices to execute
-        // PERFORMANCE: Use SmallVec if available, otherwise pre-allocate
-        let estimated_rules = self.universal_rules.len() + 50; // Universal + ~50 CPT-specific
-        let mut rule_indices: Vec<usize> = Vec::with_capacity(estimated_rules);
+        // Collect rule indices: CPT-specific + universal (pre-deduplicated at build time)
+        let mut rule_indices: Vec<usize> = Vec::with_capacity(self.universal_rules.len() + 50);
 
-        // Add rules for this specific CPT code
-        if let Some(cpt) = procedure_code {
+        if let Some(ref cpt) = procedure_code {
             if let Some(indices) = self.cpt_rule_index.get(cpt) {
                 rule_indices.extend(indices.iter().copied());
             }
         }
 
-        // Add universal rules (apply to all CPT codes)
         rule_indices.extend(self.universal_rules.iter().copied());
 
-        // Sort and dedup to avoid executing same rule twice
-        rule_indices.sort_unstable();
-        rule_indices.dedup();
-
-        // PERFORMANCE: Check enabled_flag_types once outside the loop
         let has_filter = self.enabled_flag_types.is_some();
 
-        // Execute only the applicable rules - TIGHT LOOP
         for idx in rule_indices {
             let rule = &self.rules[idx];
 
-            // Skip if rule is not enabled (rare)
             if !rule.is_enabled() {
                 continue;
             }
 
-            // Skip if not in enabled flag types list (rare)
             if has_filter {
                 if let Some(ref enabled) = self.enabled_flag_types {
                     if !enabled.contains(&rule.flag_type()) {
@@ -856,11 +809,10 @@ impl RuleEngine {
                 }
             }
 
-            // Direct sync execution - no async fallback in this path
             match rule.execute_sync(ctx) {
                 Ok(Some(result)) => results.push(result),
-                Ok(None) => {} // Rule didn't trigger (common case)
-                Err(_) => {} // Sync not supported - skip (shouldn't happen if all_rules_sync_capable is true)
+                Ok(None) => {}
+                Err(_) => {}
             }
         }
 
@@ -871,7 +823,7 @@ impl RuleEngine {
     pub async fn execute_rule(
         &self,
         flag_type: FlagIssueType,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
     ) -> Result<Option<RuleResult>> {
         for rule in &self.rules {
             if rule.flag_type() == flag_type {
@@ -886,16 +838,13 @@ impl RuleEngine {
     }
 
     /// Execute all rules with pre-populated cache (PHASE 3 OPTIMIZATION)
-    /// PHASE 4: Pre-allocate results capacity
     pub async fn execute_all_with_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         cache: &RuleExecutionCache,
     ) -> Result<Vec<RuleResult>> {
-        // PHASE 4: Pre-allocate capacity (most rules won't trigger, but this avoids reallocation)
         let mut results = Vec::with_capacity(self.rules.len() / 4);
 
-        // PHASE 7: Use execution planner for optimal rule ordering if enabled
         let rules_to_execute: Vec<_> = if let Some(planner) = &self.execution_planner {
             planner.plan_execution()
         } else {
@@ -903,24 +852,20 @@ impl RuleEngine {
         };
 
         for rule in &rules_to_execute {
-            // Skip if rule is not enabled
             if !rule.is_enabled() {
                 continue;
             }
 
-            // Skip if not in enabled flag types list
             if let Some(ref enabled) = self.enabled_flag_types {
                 if !enabled.contains(&rule.flag_type()) {
                     continue;
                 }
             }
 
-            // Execute rule with cache
             match rule.execute_with_cache(ctx, cache, &self.pool).await {
                 Ok(Some(result)) => results.push(result),
-                Ok(None) => {} // Rule didn't trigger
+                Ok(None) => {}
                 Err(e) => {
-                    // Log error but continue with other rules
                     eprintln!("Error executing rule {}: {}", rule.name(), e);
                 }
             }
@@ -930,108 +875,30 @@ impl RuleEngine {
     }
 
     /// Execute all rules with both execution cache and result cache (PHASE 5 OPTIMIZATION)
-    /// Combines Phase 3 execution cache with Phase 5 result cache for maximum performance
-    /// PHASE 6: Automatically uses parallel execution when >= 5 rules are enabled (3-5x speedup)
     pub async fn execute_all_with_result_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         exec_cache: &RuleExecutionCache,
         result_cache: &crate::result_cache::RuleResultCache,
     ) -> Result<Vec<RuleResult>> {
-        // Try to get cached results first
         if let Some(cached_results) = result_cache.get(ctx) {
             return Ok(cached_results);
         }
 
-        // PHASE 6: Count enabled rules to decide serial vs parallel execution
-        let enabled_rule_count = self.rules.iter()
-            .filter(|rule| {
-                if !rule.is_enabled() {
-                    return false;
-                }
-                if let Some(ref enabled) = self.enabled_flag_types {
-                    enabled.contains(&rule.flag_type())
-                } else {
-                    true
-                }
-            })
-            .count();
+        let results = self.execute_all_with_cache(ctx, exec_cache).await?;
 
-        // PHASE 6: Use parallel execution for >= 5 rules (3-5x faster)
-        let results = if enabled_rule_count >= 5 {
-            self.execute_all_parallel(ctx, exec_cache).await?
-        } else {
-            // For fewer rules, serial execution has less overhead
-            self.execute_all_with_cache(ctx, exec_cache).await?
-        };
-
-        // Store results in cache for future use
         result_cache.insert(ctx, results.clone());
 
         Ok(results)
     }
 
-    /// Execute all rules in parallel with pre-populated cache (PHASE 3 OPTIMIZATION)
-    /// This provides maximum performance by running independent rules concurrently
-    /// PHASE 4: Optimized with pre-allocation
-    /// PHASE 6: Optimized to avoid cloning context and cache (40-60% memory reduction)
+    /// Execute all rules with pre-populated cache (delegates to serial with cache)
     pub async fn execute_all_parallel(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         cache: &RuleExecutionCache,
     ) -> Result<Vec<RuleResult>> {
-        use tokio::task::JoinSet;
-
-        let mut join_set = JoinSet::new();
-
-        // Share context and cache across tasks via Arc
-        // We clone once here, then Arc::clone just increments reference count
-        let ctx = Arc::new(ctx.clone());
-        let cache = Arc::new(cache.clone());
-
-        // Spawn parallel task for each enabled rule
-        for rule in &self.rules {
-            // Skip if rule is not enabled
-            if !rule.is_enabled() {
-                continue;
-            }
-
-            // Skip if not in enabled flag types list
-            if let Some(ref enabled) = self.enabled_flag_types {
-                if !enabled.contains(&rule.flag_type()) {
-                    continue;
-                }
-            }
-
-            // Clone Arc references for the task
-            let rule_arc = Arc::clone(rule);
-            let ctx_arc = Arc::clone(&ctx);
-            let cache_arc = Arc::clone(&cache);
-            let pool = self.pool.clone();
-
-            // Spawn task for this rule
-            join_set.spawn(async move {
-                rule_arc.execute_with_cache(&ctx_arc, &cache_arc, &pool).await
-            });
-        }
-
-        // Collect results as tasks complete
-        // PHASE 4: Pre-allocate based on typical flag rate (~10-20%)
-        let mut results = Vec::with_capacity(self.rules.len() / 5);
-        while let Some(join_result) = join_set.join_next().await {
-            match join_result {
-                Ok(Ok(Some(rule_result))) => results.push(rule_result),
-                Ok(Ok(None)) => {} // Rule didn't trigger
-                Ok(Err(e)) => {
-                    eprintln!("Rule execution error: {}", e);
-                }
-                Err(e) => {
-                    eprintln!("Task join error: {}", e);
-                }
-            }
-        }
-
-        Ok(results)
+        self.execute_all_with_cache(ctx, cache).await
     }
 
     /// Persist flag results to database

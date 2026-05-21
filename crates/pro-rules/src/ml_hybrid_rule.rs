@@ -28,22 +28,17 @@ pub trait MLHybridRule: Rule {
     /// the prediction score against the threshold before executing.
     async fn execute_with_ml_filter(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         pool: &PgPool,
     ) -> Result<Option<RuleResult>> {
-        // Check if we have an ML prediction for this encounter
         if let Some(encounter_id) = ctx.encounter_id {
             if let Some(ml_score) = self.get_ml_prediction_score(encounter_id, pool).await? {
-                // Skip rule if ML predicts low likelihood
                 if ml_score < self.ml_threshold() {
                     return Ok(None);
                 }
             }
         }
 
-        // Execute rule normally if:
-        // 1. No ML prediction available
-        // 2. ML score is above threshold
         self.execute(ctx, pool).await
     }
 
@@ -76,7 +71,7 @@ impl Rule for ExpensiveComplianceRule {
         FlagIssueType::CodUpcoding // Placeholder - use existing flag type
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Expensive compliance logic would go here
         // This is just a placeholder
         Ok(None)

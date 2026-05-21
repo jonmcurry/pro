@@ -99,7 +99,7 @@ impl Rule for CompositeRule {
         &self.name
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         let mut subrule_results = Vec::new();
 
         // Execute all sub-rules

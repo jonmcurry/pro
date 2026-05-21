@@ -16,7 +16,7 @@ impl Rule for DuplicateServiceRule {
         FlagIssueType::OthDuplicateService
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         // Check if we have required data
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
@@ -72,7 +72,7 @@ impl Rule for DuplicateServiceRule {
     // PHASE 3: Cache-optimized execution
     async fn execute_with_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         cache: &RuleExecutionCache,
         _pool: &PgPool,
     ) -> Result<Option<RuleResult>> {
@@ -142,7 +142,7 @@ impl Rule for UnitsExceedMaximumRule {
         FlagIssueType::QtyUnitsExceedMaximum
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(units) = ctx.service_unit_count else {
             return Ok(None);
         };
@@ -199,7 +199,7 @@ impl Rule for MissingRequiredModifierRule {
         FlagIssueType::ModMissingRequired
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -249,7 +249,7 @@ impl Rule for ConflictingModifiersRule {
         FlagIssueType::ModConflicting
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         if ctx.procedure_modifiers.is_empty() {
             return Ok(None);
         }
@@ -295,7 +295,7 @@ impl Rule for UnspecifiedDiagnosisRule {
         FlagIssueType::DxUnspecifiedWhenSpecificAvailable
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         for diagnosis_code in &ctx.diagnosis_codes {
             // Check if code ends with .9 (often unspecified)
             if diagnosis_code.ends_with(".9") || diagnosis_code.ends_with(".90") {
@@ -324,7 +324,7 @@ impl Rule for MissingDiagnosisSpecificityRule {
         FlagIssueType::DxMissingSpecificity
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         for diagnosis_code in &ctx.diagnosis_codes {
             // ICD-10 codes should be at least 3 characters (category level)
             // Full codes are typically 5-7 characters with the decimal
@@ -365,7 +365,7 @@ impl Rule for UnitsInconsistentRule {
         FlagIssueType::QtyUnitsInconsistent
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(units) = ctx.service_unit_count else {
             return Ok(None);
         };
@@ -446,7 +446,7 @@ impl Rule for PrimaryDiagnosisDoesNotSupportRule {
         FlagIssueType::DxPrimaryDoesNotSupport
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         if ctx.diagnosis_codes.is_empty() {
             let details = "No diagnosis codes present to support service".to_string();
             return Ok(Some(
@@ -520,7 +520,7 @@ impl Rule for DiagnosisSequencingErrorRule {
         FlagIssueType::DxSequencingError
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         if ctx.diagnosis_codes.len() < 2 {
             return Ok(None);
         }
@@ -603,7 +603,7 @@ impl Rule for IncorrectModifierRule {
         FlagIssueType::ModIncorrect
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         if ctx.procedure_modifiers.is_empty() {
             return Ok(None);
         }
@@ -677,7 +677,7 @@ impl Rule for TimeNotDocumentedRule {
         FlagIssueType::EMTTimeNotDocumented
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -747,7 +747,7 @@ impl Rule for WrongEMCategoryRule {
         FlagIssueType::EMIWrongCategory
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -834,7 +834,7 @@ impl Rule for WrongEMCategoryRule {
     // PHASE 3: Cache-optimized execution
     async fn execute_with_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         cache: &RuleExecutionCache,
         _pool: &PgPool,
     ) -> Result<Option<RuleResult>> {
@@ -913,7 +913,7 @@ impl Rule for UnbundlingRule {
         FlagIssueType::CodUnbundling
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -1008,7 +1008,7 @@ impl Rule for UpcodingRule {
         FlagIssueType::CodUpcoding
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -1084,7 +1084,7 @@ impl Rule for WrongProviderTypeRule {
         FlagIssueType::OthWrongProviderType
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
         };
@@ -1168,7 +1168,7 @@ impl Rule for WrongProviderTypeRule {
     // PHASE 3: Cache-optimized execution
     async fn execute_with_cache(
         &self,
-        ctx: &RuleExecutionContext,
+        ctx: &mut RuleExecutionContext,
         cache: &RuleExecutionCache,
         _pool: &PgPool,
     ) -> Result<Option<RuleResult>> {
@@ -1254,7 +1254,7 @@ impl Rule for EMOLevelHigherThanMDMRule {
         FlagIssueType::EMOLevelHigherThanMDM
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Requires MDM level data in custom_data for full implementation
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
@@ -1302,7 +1302,7 @@ impl Rule for EMOLevelHigherThanHistoryExamRule {
         FlagIssueType::EMOLevelHigherThanHistoryExam
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Requires history_level and exam_level in custom_data for full implementation
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
@@ -1326,7 +1326,7 @@ impl Rule for EMULevelLowerThanMDMRule {
         FlagIssueType::EMULevelLowerThanMDM
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Identifies undercoding opportunities
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
@@ -1372,7 +1372,7 @@ impl Rule for EMULevelLowerThanTimeRule {
         FlagIssueType::EMULevelLowerThanTime
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Check if time supports higher level billing
         let Some(ref procedure_code) = ctx.procedure_code else {
             return Ok(None);
@@ -1433,7 +1433,7 @@ impl Rule for IncorrectProcedureCodeRule {
         FlagIssueType::CodIncorrectProcedureCode
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would require procedure code validation database or service
         // This is a complex rule requiring comprehensive code verification
         Ok(None)
@@ -1449,7 +1449,7 @@ impl Rule for ProcedureNotSupportedByDiagnosisRule {
         FlagIssueType::CodProcedureNotSupportedByDiagnosis
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would require LCD/NCD policy database
         // This requires external medical necessity lookup
         Ok(None)
@@ -1465,7 +1465,7 @@ impl Rule for InsufficientDocumentationRule {
         FlagIssueType::DocInsufficientDocumentation
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would require clinical note parsing and analysis
         Ok(None)
     }
@@ -1480,7 +1480,7 @@ impl Rule for MissingRequiredElementsRule {
         FlagIssueType::DocMissingRequiredElements
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would check for required note elements
         Ok(None)
     }
@@ -1495,7 +1495,7 @@ impl Rule for MedicalNecessityNotEstablishedRule {
         FlagIssueType::OthMedicalNecessityNotEstablished
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would require medical necessity criteria evaluation
         Ok(None)
     }
@@ -1514,7 +1514,7 @@ impl Rule for SupervisionNotDocumentedRule {
         FlagIssueType::SupSupervisionNotDocumented
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         let Some(provider_id) = ctx.provider_id else {
             return Ok(None);
         };
@@ -1569,7 +1569,7 @@ impl Rule for InappropriateSupervisionLevelRule {
         FlagIssueType::SupInappropriateLevel
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would check supervision level against procedure complexity
         Ok(None)
     }
@@ -1584,7 +1584,7 @@ impl Rule for TeachingPhysicianNotMetRule {
         FlagIssueType::SupTeachingPhysicianNotMet
     }
 
-    async fn execute(&self, _ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, _ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         // Placeholder: Would verify teaching physician documentation requirements
         Ok(None)
     }

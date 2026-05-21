@@ -231,7 +231,7 @@ impl Rule for DuplicateRule {
         self.flag_issue_type
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, pool: &PgPool) -> Result<Option<RuleResult>> {
         // Check service line duplicates
         if self.table == "service_line" {
             let Some(service_line_id) = ctx.service_line_id else {

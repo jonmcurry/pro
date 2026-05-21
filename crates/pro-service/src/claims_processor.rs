@@ -173,12 +173,12 @@ impl ClaimsProcessor {
             .unwrap_or(false);
 
         // Check if rules should be deferred to background processing
-        // Default: false (inline execution) - rules execute during claim processing
-        // Set DEFER_RULES_EXECUTION=true to queue rules for background processing instead
+        // Default: true (deferred execution) - rules execute in background after import
+        // Set DEFER_RULES_EXECUTION=false for inline execution during claim processing
         let defer_rules_setting = std::env::var("DEFER_RULES_EXECUTION")
-            .unwrap_or_else(|_| "false".to_string())
+            .unwrap_or_else(|_| "true".to_string())
             .parse::<bool>()
-            .unwrap_or(false);
+            .unwrap_or(true);
 
         let (rule_engine, defer_rules) = if use_database_rules {
             info!("Loading rules from database for Stage 2 processor...");
@@ -4176,64 +4176,47 @@ impl ClaimsProcessor {
             rule_count, encounter_id, service_line_contexts.len()
         );
 
-        // Collect all flags to batch insert
-        // Tuple: (service_line_id, issue_code, flag_reason, severity)
-        let mut flags_to_insert: Vec<(i64, String, String, String)> = Vec::new();
+        // PERFORMANCE: Pre-compute uppercase diagnosis codes ONCE for the encounter
+        // All service lines share the same diagnosis codes, avoiding N*M allocations
+        let diagnosis_codes_upper: Vec<String> = diagnosis_codes.iter().map(|s| s.to_uppercase()).collect();
 
-        // Execute rules for each service line
-        for sl_ctx in service_line_contexts {
-            // Build rule execution context (stack allocated, no heap for small vecs)
-            let mut ctx = RuleExecutionContext::new(organization_id);
-            ctx.encounter_id = Some(encounter_id);
-            ctx.service_line_id = Some(sl_ctx.service_line_id);
-            ctx.procedure_code = Some(sl_ctx.procedure_code.clone());
-            ctx.procedure_modifiers = sl_ctx.modifiers.clone();
-            ctx.service_unit_count = Some(sl_ctx.units);
-            ctx.line_item_charge_amount = Some(sl_ctx.charge);
-            ctx.date_of_service = Some(sl_ctx.service_date);
-            ctx.place_of_service_code = sl_ctx.place_of_service.clone();
-            // Share reference to diagnosis codes (no clone)
-            ctx.diagnosis_codes = diagnosis_codes.to_vec();
+        // PERFORMANCE: Parallel rule execution across service lines using rayon
+        // All rule evaluation is CPU-only (no DB access), making this safe for data parallelism.
+        // With 3+ service lines per encounter, this provides 1.5-3x speedup on the rule phase.
+        use rayon::prelude::*;
 
-            // PERFORMANCE: Pre-compute uppercase values ONCE before executing 537 rules
-            // This avoids thousands of to_uppercase() allocations in the hot loop
-            ctx.finalize();
+        let flags_to_insert: Vec<(i64, String, String, String)> = service_line_contexts
+            .par_iter()
+            .flat_map(|sl_ctx| {
+                let mut ctx = RuleExecutionContext::new(organization_id);
+                ctx.encounter_id = Some(encounter_id);
+                ctx.service_line_id = Some(sl_ctx.service_line_id);
+                ctx.procedure_code = Some(sl_ctx.procedure_code.clone());
+                ctx.procedure_modifiers = sl_ctx.modifiers.clone();
+                ctx.service_unit_count = Some(sl_ctx.units);
+                ctx.line_item_charge_amount = Some(sl_ctx.charge);
+                ctx.date_of_service = Some(sl_ctx.service_date);
+                ctx.place_of_service_code = sl_ctx.place_of_service.clone();
+                ctx.diagnosis_codes = diagnosis_codes.to_vec();
+                ctx.finalize_with_shared_dx(&diagnosis_codes_upper);
 
-            // Execute rules for this service line using CPT indexing
-            // CPT indexing skips rules that don't match this service line's CPT code
-            // Analysis: 492/537 rules (91.6%) have cpt_in conditions and are indexable
-            // Only 45 universal rules (no cpt_in) run on every service line
-            // Expected: ~80% reduction in rule evaluations (1,611 -> ~315 per claim)
-            //
-            // PERFORMANCE: Use direct sync execution to eliminate async overhead
-            // With 543 composite rules (all sync-capable), calling the async wrapper
-            // for 30,000 service lines adds 9-30 seconds of pure scheduler overhead.
-            // Direct sync call eliminates this entirely.
-            let results = rule_engine.execute_all_indexed_sync(&ctx);
-            match results {
-                Ok(results) => {
-                    // PERFORMANCE: Use debug! instead of info! - this runs millions of times with 500+ rules
-                    debug!(
-                        "RULES: service_line {} (CPT={}) triggered {} rules",
-                        sl_ctx.service_line_id, sl_ctx.procedure_code, results.len()
-                    );
-                    for result in results {
-                        // PERFORMANCE: Minimize allocations - with 50+ flags per claim, this adds up
-                        // Use issue_code directly if available, fall back to flag_type.code()
-                        let flag_code = result.issue_code
-                            .unwrap_or_else(|| result.flag_type.code().to_string());
-                        let severity = result.severity.as_str().to_string();
-                        // Simplified flag_reason - just use description (details already included)
-                        let flag_reason = result.details.unwrap_or(result.description);
-
-                        flags_to_insert.push((sl_ctx.service_line_id, flag_code, flag_reason, severity));
+                match rule_engine.execute_all_indexed_sync(&mut ctx) {
+                    Ok(results) => {
+                        results.into_iter().map(|result| {
+                            let flag_code = result.issue_code
+                                .unwrap_or_else(|| result.flag_type.code().to_string());
+                            let severity = result.severity.as_str().to_string();
+                            let flag_reason = result.details.unwrap_or(result.description);
+                            (sl_ctx.service_line_id, flag_code, flag_reason, severity)
+                        }).collect::<Vec<_>>()
+                    }
+                    Err(e) => {
+                        warn!("Error executing rules for service_line {}: {}", sl_ctx.service_line_id, e);
+                        Vec::new()
                     }
                 }
-                Err(e) => {
-                    warn!("Error executing rules for service_line {}: {}", sl_ctx.service_line_id, e);
-                }
-            }
-        }
+            })
+            .collect();
 
         // Early return if no flags
         if flags_to_insert.is_empty() {

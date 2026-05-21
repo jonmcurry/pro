@@ -197,11 +197,11 @@ impl Rule for ThresholdRule {
     }
 
     /// Synchronous execution - avoids async overhead for CPU-only rules
-    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+    fn execute_sync(&self, ctx: &mut RuleExecutionContext) -> Result<Option<RuleResult>> {
         self.evaluate(ctx)
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         self.evaluate(ctx)
     }
 }

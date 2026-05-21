@@ -126,6 +126,14 @@ impl RuleTemplate for CompositeRuleTemplate {
         // since it was already verified during rule selection. This saves 1 condition eval per rule.
         compiled_conditions.sort_by_key(|c| c.evaluation_cost());
 
+        // If rule has applicable_cpts (selected via CPT index), find the CptIn condition
+        // so we can skip it during evaluation (the index already confirmed the match)
+        let cpt_verified_idx = if applicable_cpts.is_some() {
+            compiled_conditions.iter().position(|c| matches!(c, CompiledCondition::CptIn { .. }))
+        } else {
+            None
+        };
+
         Ok(Arc::new(CompositeRule {
             rule_code,
             rule_name,
@@ -134,6 +142,7 @@ impl RuleTemplate for CompositeRuleTemplate {
             operator: logic_operator,
             conditions: compiled_conditions,
             applicable_cpts,
+            cpt_verified_idx,
         }))
     }
 }
@@ -296,11 +305,11 @@ impl CompiledCondition {
     /// Evaluate condition against execution context
     /// PERFORMANCE: Uses pre-computed uppercase values from ctx (no allocations in hot loop)
     /// All code lookups use O(1) HashSet.contains()
+    /// DxPattern/DxPatternExclude use mutable cache to deduplicate regex across rules
     #[inline]
-    fn evaluate(&self, ctx: &RuleExecutionContext) -> bool {
+    fn evaluate(&self, ctx: &mut RuleExecutionContext) -> bool {
         match self {
             CompiledCondition::CptIn { codes } => {
-                // O(1) HashSet lookup using pre-computed uppercase
                 ctx.procedure_code_upper
                     .as_ref()
                     .map(|cpt| codes.contains(cpt))
@@ -313,19 +322,37 @@ impl CompiledCondition {
                     .unwrap_or(false)
             }
             CompiledCondition::DxIn { codes } => {
-                // O(N) over pre-computed uppercase diagnosis codes, O(1) HashSet lookup
                 ctx.diagnosis_codes_upper
                     .iter()
                     .any(|dx| codes.contains(dx))
             }
             CompiledCondition::DxPattern { regex } => {
-                ctx.diagnosis_codes.iter().any(|dx| regex.is_match(dx))
+                let pattern_str = regex.as_str();
+                if let Some(cache) = &ctx.dx_pattern_cache {
+                    if let Some(&cached) = cache.get(pattern_str) {
+                        return cached;
+                    }
+                }
+                let result = ctx.diagnosis_codes.iter().any(|dx| regex.is_match(dx));
+                if let Some(cache) = &mut ctx.dx_pattern_cache {
+                    cache.insert(pattern_str.to_string(), result);
+                }
+                result
             }
             CompiledCondition::DxPatternExclude { include_regex, exclude_regex } => {
-                // At least one DX matches include pattern AND none match exclude pattern
+                let key = (include_regex.as_str().to_string(), exclude_regex.as_str().to_string());
+                if let Some(cache) = &ctx.dx_pattern_exclude_cache {
+                    if let Some(&cached) = cache.get(&key) {
+                        return cached;
+                    }
+                }
                 let has_include = ctx.diagnosis_codes.iter().any(|dx| include_regex.is_match(dx));
                 let has_exclude = ctx.diagnosis_codes.iter().any(|dx| exclude_regex.is_match(dx));
-                has_include && !has_exclude
+                let result = has_include && !has_exclude;
+                if let Some(cache) = &mut ctx.dx_pattern_exclude_cache {
+                    cache.insert(key, result);
+                }
+                result
             }
             CompiledCondition::DateGte { min_date } => {
                 ctx.date_of_service
@@ -338,7 +365,6 @@ impl CompiledCondition {
                     .unwrap_or(false)
             }
             CompiledCondition::PosIn { codes } => {
-                // O(1) HashSet lookup using pre-computed uppercase
                 ctx.place_of_service_upper
                     .as_ref()
                     .map(|pos| codes.contains(pos))
@@ -351,13 +377,11 @@ impl CompiledCondition {
                     .unwrap_or(false)
             }
             CompiledCondition::ModifierIn { modifiers } => {
-                // O(N) over pre-computed uppercase modifiers, O(1) HashSet lookup
                 ctx.modifiers_upper
                     .iter()
                     .any(|m| modifiers.contains(m))
             }
             CompiledCondition::ModifierNotIn { modifiers } => {
-                // O(N) over pre-computed uppercase modifiers, O(1) HashSet lookup
                 !ctx.modifiers_upper
                     .iter()
                     .any(|m| modifiers.contains(m))
@@ -440,6 +464,9 @@ pub struct CompositeRule {
     pub conditions: Vec<CompiledCondition>,
     /// Cached CPT codes from the first CptIn condition (for index optimization)
     pub applicable_cpts: Option<Vec<String>>,
+    /// Index of CptIn condition that can be skipped when rule is selected via CPT index
+    /// (the index already verified the CPT match, so re-checking is redundant)
+    pub cpt_verified_idx: Option<usize>,
 }
 
 impl CompositeRule {
@@ -447,37 +474,32 @@ impl CompositeRule {
     /// PERFORMANCE: Uses short-circuit evaluation for AND/OR operators
     /// - AND: Stops on first false (avoids evaluating remaining conditions)
     /// - OR: Stops on first true (avoids evaluating remaining conditions)
-    /// OPTIMIZATION: Captures matched conditions during evaluation to avoid re-evaluation
-    fn evaluate(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
-        // PERFORMANCE: Evaluate once and capture which conditions matched
-        // This avoids the expensive double-evaluation we had before
-        let mut matched_indices: Vec<usize> = Vec::new();
-
+    fn evaluate(&self, ctx: &mut RuleExecutionContext) -> Result<Option<RuleResult>> {
         let triggered = match self.operator {
             LogicOperator::And => {
-                // AND: All conditions must match
-                // Short-circuit on first false, but track all that match
                 for (idx, condition) in self.conditions.iter().enumerate() {
-                    if condition.evaluate(ctx) {
-                        matched_indices.push(idx);
-                    } else {
-                        // Short-circuit: condition failed, rule doesn't trigger
+                    if self.cpt_verified_idx == Some(idx) {
+                        continue;
+                    }
+                    if !condition.evaluate(ctx) {
                         return Ok(None);
                     }
                 }
-                true // All conditions matched
+                true
             }
             LogicOperator::Or => {
-                // OR: Any condition must match
-                // Short-circuit on first true
+                let mut any_matched = false;
                 for (idx, condition) in self.conditions.iter().enumerate() {
+                    if self.cpt_verified_idx == Some(idx) {
+                        any_matched = true;
+                        break;
+                    }
                     if condition.evaluate(ctx) {
-                        matched_indices.push(idx);
-                        // Found a match, rule triggers (short-circuit)
+                        any_matched = true;
                         break;
                     }
                 }
-                !matched_indices.is_empty()
+                any_matched
             }
         };
 
@@ -521,12 +543,11 @@ impl Rule for CompositeRule {
     }
 
     /// Synchronous execution - avoids async overhead for CPU-only rules
-    fn execute_sync(&self, ctx: &RuleExecutionContext) -> Result<Option<RuleResult>> {
+    fn execute_sync(&self, ctx: &mut RuleExecutionContext) -> Result<Option<RuleResult>> {
         self.evaluate(ctx)
     }
 
-    async fn execute(&self, ctx: &RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
-        // Delegate to shared evaluation logic
+    async fn execute(&self, ctx: &mut RuleExecutionContext, _pool: &PgPool) -> Result<Option<RuleResult>> {
         self.evaluate(ctx)
     }
 }

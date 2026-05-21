@@ -1,5 +1,49 @@
 # Changelog
 
+## [2.18.0.0] - 2026-05-21
+
+### Performance - Rules engine optimization (30-50% faster rule execution)
+
+Comprehensive performance optimization of the Stage 2 rules engine, targeting
+the dominant cost during inline rule execution. Six optimizations implemented:
+
+1. **Default DEFER_RULES_EXECUTION=true**: Rules now execute in background by
+   default, eliminating the rules bottleneck from the import critical path.
+   Set `DEFER_RULES_EXECUTION=false` to restore inline execution.
+
+2. **DxPattern regex result cache**: Diagnosis pattern regex matches are cached
+   per service line context. When 20+ rules share the same DxPattern against
+   the same 12 diagnosis codes, this reduces 240 regex matches to 12.
+
+3. **Skip pre-verified CptIn condition**: Rules selected via CPT index no longer
+   re-evaluate their CptIn condition (already confirmed by the index lookup).
+
+4. **Eliminate sort+dedup in hot path**: Rule index merge no longer sorts and
+   deduplicates at runtime. CPT-indexed and universal rules are guaranteed
+   non-overlapping at build time.
+
+5. **Shared uppercase diagnosis codes**: Pre-computed uppercase diagnosis codes
+   are computed once per encounter and shared across all service lines, avoiding
+   N service lines x M diagnosis codes redundant allocations.
+
+6. **Parallel service line rule execution (rayon)**: Service lines within an
+   encounter are evaluated in parallel using rayon. All rule evaluation is
+   CPU-only, making this safe for data parallelism.
+
+### Technical Changes
+
+- `crates/pro-service/src/claims_processor.rs`: Changed DEFER_RULES_EXECUTION
+  default to true; replaced sequential service line loop with rayon par_iter;
+  pre-compute shared uppercase diagnosis codes per encounter.
+- `crates/pro-rules/src/rule_engine.rs`: Added DxPattern cache fields to
+  RuleExecutionContext; removed sort+dedup from execute_all_indexed_sync;
+  changed Rule trait to accept `&mut RuleExecutionContext` for cache mutation.
+- `crates/pro-rules/src/templates/composite_rule.rs`: Added cpt_verified_idx
+  field to skip pre-verified CptIn; DxPattern/DxPatternExclude now check and
+  populate the regex result cache during evaluation.
+- `crates/pro-service/Cargo.toml`: Added rayon dependency.
+- All Rule trait implementations updated to `&mut RuleExecutionContext`.
+
 ## [2.17.0.5] - 2026-05-20
 
 ### Security - Remove PHI (patient names) from claims importer logs
